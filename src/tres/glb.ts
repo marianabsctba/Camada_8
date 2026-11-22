@@ -7,6 +7,23 @@ const BASE = import.meta.env.BASE_URL;
 let loader: GLTFLoader | null = null;
 const cache = new Map<string, Promise<THREE.Object3D | null>>();
 
+/** Tudo o que ainda está chegando pela rede; a sala só aparece quando esvaziar. */
+export const pendentes = new Set<Promise<unknown>>();
+export function acompanhar<T>(p: Promise<T>): Promise<T> {
+  pendentes.add(p);
+  void p.finally(() => pendentes.delete(p));
+  return p;
+}
+export async function esperarCarga(): Promise<void> {
+  while (pendentes.size) await Promise.allSettled([...pendentes]);
+}
+
+/** Móveis que a sala usa, para baixar enquanto a pessoa ainda está na capa. */
+export const MOVEIS_DA_SALA = ['metal_office_desk', 'mounted_fluorescent_lights', 'industrial_storage_cart', 'metal_toolbox', 'steel_frame_shelves_01', 'cardboard_box_01', 'plastic_monobloc_chair_01', 'fire_alarm', 'security_camera_01', 'metal_trash_can', 'plastic_crate_01'];
+export function preCarregarMoveis() {
+  for (const m of MOVEIS_DA_SALA) void carregar(m);
+}
+
 function L(): GLTFLoader {
   if (loader) return loader;
   const draco = new DRACOLoader();
@@ -43,7 +60,7 @@ function carregar(arquivo: string): Promise<THREE.Object3D | null> {
  */
 export function movel(arquivo: string, o: { altura?: number; largura?: number; giro?: number } = {}): THREE.Group {
   const grupo = new THREE.Group();
-  void carregar(arquivo).then((cena) => {
+  void acompanhar(carregar(arquivo)).then((cena) => {
     if (!cena) return;
     const copia = cena.clone(true);
     const b = new THREE.Box3().setFromObject(copia);

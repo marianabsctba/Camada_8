@@ -821,3 +821,43 @@ details.caixa[open] summary {
     max-height: 30vh;
   }
 }
+
+/* ---------- Carregando a sala ---------- */
+.carregando {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 14px;
+  background: var(--fundo);
+  color: var(--apagado);
+  font-family: var(--mono);
+  font-size: 14px;
+  transition: opacity 0.5s;
+}
+.carregando.sumindo {
+  opacity: 0;
+  pointer-events: none;
+}
+.carregando-leds {
+  display: flex;
+  gap: 8px;
+}
+.carregando-leds i {
+  width: 10px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--led);
+  box-shadow: 0 0 8px var(--led);
+  animation: pisca 0.9s steps(2) infinite;
+}
+.carregando-leds i:nth-child(2n) {
+  animation-delay: 0.3s;
+  background: var(--ambar);
+  box-shadow: 0 0 8px var(--ambar);
+}
+.carregando-leds i:nth-child(3n) {
+  animation-delay: 0.6s;
+}

@@ -7,7 +7,9 @@ import { acoesDo, executarAcao, type TipoAlvo } from './motor/acoes';
 import { comandosCampo, Terminal } from './motor/cli';
 import { abrirMenu } from './ui/menu';
 import { iniciarControles, J, soltarMouse } from './tres/jogador';
+import { esperarCarga, preCarregarMoveis } from './tres/glb';
 import { iniciar3d, M, pausar3d } from './tres/motor3d';
+import { preCarregarTexturas } from './tres/pbr';
 import { alvoNaMira, atualizarEquipamentos, montarSala } from './tres/sala';
 
 const CHAVE = 'camada8.progresso';
@@ -325,10 +327,19 @@ function abrirDia(numero: number) {
     terminal.hidden = true;
     palco.append(el('div', { class: 'hud-topo' }, titulo, bPainel, bTerm), hudPasso, mira, rotuloAlvo, ajuda, lado, terminal);
     app.replaceChildren(palco);
+    const carregando = el('div', { class: 'carregando' }, el('div', { class: 'carregando-leds' }, ...Array.from({ length: 8 }, () => el('i'))), el('p', {}, 'Acendendo as luzes da sala técnica...'));
+    palco.append(carregando);
     const canvas = iniciar3d(palco);
+    canvas.style.opacity = '0';
     montarSala(term.mundo, [`Dia ${dia.numero}`, dia.titulo, 'Mire e aperte E']);
     iniciarControles(canvas, palco);
     J.livre = true;
+    void esperarCarga().then(() => {
+      canvas.style.transition = 'opacity 0.5s';
+      canvas.style.opacity = '1';
+      carregando.classList.add('sumindo');
+      setTimeout(() => carregando.remove(), 600);
+    });
     (window as unknown as { __c8: unknown }).__c8 = { J, rodar };
 
     const abrirTerminal = (sim: boolean) => {
@@ -421,4 +432,6 @@ function completar(input: HTMLInputElement, term: Terminal) {
   }
 }
 
+preCarregarMoveis();
+preCarregarTexturas();
 capa();
