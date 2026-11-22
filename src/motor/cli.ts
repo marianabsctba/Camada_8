@@ -5,6 +5,8 @@ import { avaliarE1, avaliarModem, BITS_POR_SIMBOLO, snrWifi, type UsoSlot } from
 import { avaliar, coaxDados, CORES, lerCor, ORBITAS, perdaElemento, radioDados, wiremap, type Cor } from './fisico';
 import { acharPorta, adicionar, caboNaPorta, lerPonta, ligar, TRANSCEPTORES, type Cabo, type ElementoCoax, type Equipamento, type Fibra, type Meio, type Mundo } from './mundo';
 import { ping, vazao } from './rede';
+import { simularArq, type ConfigArq, type Linha } from './arq';
+import { amostraDaLinha, hex, transmitir, type ConfigEnlace } from './enlace';
 import { fmt, ipTexto, lerCidr, lerIp, lerNumero } from './util';
 
 type Saida = string[];
@@ -804,6 +806,142 @@ const CONSOLE_CABLEMODEM: ConsoleFn = (t, e, cmd) => {
   ];
 };
 
+
+const CONSOLE_ENLACE: ConsoleFn = (t, e, cmd, args) => {
+  const m = t.mundo;
+  const cfg = e.s.cfg as ConfigEnlace | undefined;
+  const arq = e.s.arq as ConfigArq | undefined;
+  const ppp = e.s.ppp as { auth: string; mru: number; exige?: string; mruMax?: number } | undefined;
+  const opcao = <T extends string>(v: string | undefined, validos: readonly T[]): T | null => (v && (validos as readonly string[]).includes(v) ? (v as T) : null);
+  switch (cmd) {
+    case 'mostra': {
+      const l: string[] = [`${e.modelo}`];
+      if (cfg) l.push(`enquadramento: ${cfg.enquadramento}${cfg.enquadramento !== 'contagem' ? ` (${cfg.enquadramento === 'flags' ? 'escape de bytes' : 'enchimento de bits'}: ${cfg.enchimento ? 'ligado' : 'DESLIGADO'})` : ''}`, `detecção de erros: ${cfg.deteccao}`, `correção de erros: ${cfg.correcao}`);
+      if (arq) l.push(`retransmissão: ${arq.protocolo}, janela ${arq.protocolo === 'pare-e-espere' ? 1 : arq.janela}, número de sequência com ${arq.bitsSeq} bit${arq.bitsSeq === 1 ? '' : 's'}, timeout ${arq.timeoutMs} ms`);
+      if (m.flags.linhaArq) {
+        const li = m.flags.linhaArq as Linha;
+        l.push(`linha: ${li.taxaBps / 1000} kb/s, propagação ${li.propagacaoMs} ms, quadros de ${li.bytesQuadro} bytes`);
+      }
+      if (ppp) l.push(`PPP: autenticação ${ppp.auth}, MRU ${ppp.mru}`);
+      if (m.flags.simplex) l.push('ATENÇÃO: enlace de mão única. Não existe canal de volta para pedir retransmissão.');
+      return l;
+    }
+    case 'enquadramento': {
+      const v = opcao(args[0], ['contagem', 'flags', 'bits'] as const);
+      if (!cfg || !v) return ['enquadramento <contagem|flags|bits>'];
+      cfg.enquadramento = v;
+      return [`Enquadramento: ${v}.`];
+    }
+    case 'enchimento': {
+      if (!cfg || !['sim', 'nao'].includes(args[0] ?? '')) return ['enchimento <sim|nao>'];
+      cfg.enchimento = args[0] === 'sim';
+      return [`${cfg.enquadramento === 'bits' ? 'Enchimento de bits' : 'Escape de bytes'}: ${cfg.enchimento ? 'ligado' : 'desligado'}.`];
+    }
+    case 'deteccao': {
+      const v = opcao(args[0], ['nenhuma', 'paridade', 'checksum', 'crc32'] as const);
+      if (!cfg || !v) return ['deteccao <nenhuma|paridade|checksum|crc32>'];
+      cfg.deteccao = v;
+      return [`Detecção de erros: ${v}.`];
+    }
+    case 'correcao': {
+      const v = opcao(args[0], ['nenhuma', 'hamming'] as const);
+      if (!cfg || !v) return ['correcao <nenhuma|hamming>'];
+      cfg.correcao = v;
+      return [`Correção de erros: ${v}.`];
+    }
+    case 'transmitir': {
+      if (!cfg) return ['Este aparelho não transmite quadros de teste.'];
+      const r = transmitir(m.flags.cargas, cfg, m.flags.erros ?? []);
+      m.flags.ultimoEnlace = r;
+      m.flags.cfgDoUltimo = JSON.stringify(cfg);
+      const extra = ((r.bitsNaLinha / r.bitsDeCarga - 1) * 100).toFixed(0);
+      return [
+        `Transmitidos ${r.enviados} quadros pela linha (${r.bitsNaLinha} bits para ${r.bitsDeCarga} bits de dado: ${extra} % a mais).`,
+        `chegaram certos: ${r.corretos}`,
+        `entregues ERRADOS sem ninguém perceber: ${r.corrompidos}`,
+        `descartados (erro detectado): ${r.descartados}`,
+        `perdidos (o receptor nem achou): ${r.perdidos}`,
+        ...(cfg.correcao === 'hamming' ? [`bits corrigidos pelo Hamming: ${r.corrigidos}`] : []),
+        ...r.amostra.map((a) => '  ' + a),
+      ];
+    }
+    case 'quadro': {
+      if (!cfg) return ['Sem quadros para mostrar.'];
+      const p = (m.flags.cargas as number[][])[m.flags.quadroAmostra ?? 0]!;
+      return [`Dado original: ${hex(p.slice(0, 16))}${p.length > 16 ? ' ...' : ''}`, `Na linha: ${amostraDaLinha(p.slice(0, 16), { ...cfg, deteccao: 'nenhuma' })}`];
+    }
+    case 'arq': {
+      const v = opcao(args[0], ['pare-e-espere', 'go-back-n', 'seletiva'] as const);
+      if (!arq || !v) return ['arq <pare-e-espere|go-back-n|seletiva>'];
+      arq.protocolo = v;
+      return [`Retransmissão: ${v}.`];
+    }
+    case 'janela':
+    case 'bits-seq':
+    case 'timeout': {
+      const n = Number(args[0]);
+      if (!arq || !Number.isFinite(n) || n < 0) return [`${cmd} <número>`];
+      if (cmd === 'janela') arq.janela = Math.max(1, Math.round(n));
+      if (cmd === 'bits-seq') arq.bitsSeq = Math.min(16, Math.round(n));
+      if (cmd === 'timeout') arq.timeoutMs = n;
+      return [`${cmd}: ${n}.`];
+    }
+    case 'transferir': {
+      if (!arq) return ['Este aparelho não transfere arquivos.'];
+      const r = simularArq(arq, m.flags.linhaArq, m.flags.quadrosArq, m.rng);
+      m.flags.ultimoArq = r;
+      m.flags.arqDoUltimo = JSON.stringify(arq);
+      return [
+        `Transferência de ${r.quadros} quadros com ${arq.protocolo}:`,
+        ...r.linhas.slice(0, 8).map((x) => '  ' + x),
+        r.concluiu ? `concluída em ${fmt(r.tempoMs / 1000, 2)} s` : 'NÃO concluiu: o protocolo travou',
+        `aproveitamento da linha: ${fmt(r.utilizacao * 100, 1)} %`,
+        `transmissões: ${r.transmissoes} (retransmissões: ${r.retransmissoes}, à toa: ${r.desnecessarias})`,
+        `quadros entregues ERRADOS: ${r.entreguesErrados}`,
+      ];
+    }
+    case 'ppp': {
+      if (!ppp) return ['Este aparelho não fala PPP.'];
+      const [sub, val] = args;
+      if (sub === 'auth' && ['nenhuma', 'pap', 'chap'].includes(val ?? '')) {
+        ppp.auth = val!;
+        return [`Autenticação PPP: ${val}.`];
+      }
+      if (sub === 'mru' && Number(val) > 0) {
+        ppp.mru = Number(val);
+        return [`MRU: ${val} bytes.`];
+      }
+      if (sub === 'discar') return discarPpp(m, e);
+      return ['ppp auth <nenhuma|pap|chap> | ppp mru <bytes> | ppp discar'];
+    }
+  }
+  return null;
+};
+
+function discarPpp(m: Mundo, e: Equipamento): string[] {
+  if (e.s.ppp.exige) return ['O concentrador só atende. Quem disca é o roteador do cliente.'];
+  const cpe = e.s.ppp as { auth: string; mru: number };
+  const outro = [...m.equipamentos.values()].find((x) => x !== e && x.s.ppp);
+  if (!outro) return ['Ninguém atende do outro lado.'];
+  const conc = outro.s.ppp as { exige: string; mruMax: number };
+  const l = ['LCP: Configure-Request (MRU ' + cpe.mru + ', autenticação ' + cpe.auth + ')'];
+  let mru = cpe.mru;
+  if (cpe.mru > conc.mruMax) {
+    l.push(`LCP: Configure-Nak do concentrador: MRU no máximo ${conc.mruMax} (PPPoE gasta 8 bytes do quadro Ethernet)`);
+    mru = conc.mruMax;
+    l.push(`LCP: Configure-Request (MRU ${mru}) ... Configure-Ack`);
+  } else l.push('LCP: Configure-Ack');
+  if (cpe.auth !== conc.exige) {
+    l.push(`LCP: o concentrador exige ${conc.exige.toUpperCase()} e o roteador só oferece ${cpe.auth.toUpperCase()}.`, 'LCP: Terminate-Request. Enlace derrubado.');
+    m.flags.ppp = 'falhou';
+    return l;
+  }
+  l.push('LCP: aberto.', `${conc.exige.toUpperCase()}: desafio, resposta com o segredo misturado ao desafio... sucesso.`, 'IPCP: Configure-Request (IP 0.0.0.0) -> Configure-Nak (use 203.0.113.77) -> Configure-Ack', 'IPCP: aberto. Endereço 203.0.113.77. Internet ligada.');
+  m.flags.ppp = 'aberto';
+  m.flags.mruPpp = mru;
+  return l;
+}
+
 const CONSOLE_GENERICO: ConsoleFn = (t, e, cmd) => (cmd === 'mostra' ? mostraInterfaces(t, e) : null);
 
 const CONSOLES: Partial<Record<Equipamento['tipo'], { fn: ConsoleFn; ajuda: string[] }>> = {
@@ -816,6 +954,7 @@ const CONSOLES: Partial<Record<Equipamento['tipo'], { fn: ConsoleFn; ajuda: stri
   radio: { fn: CONSOLE_RADIO, ajuda: ['mostra'] },
   ap: { fn: CONSOLE_AP, ajuda: ['mostra', 'canal <1 a 13>'] },
   cablemodem: { fn: CONSOLE_CABLEMODEM, ajuda: ['MOSTRA'] },
+  enlace: { fn: CONSOLE_ENLACE, ajuda: ['mostra', 'enquadramento <contagem|flags|bits>', 'enchimento <sim|nao>', 'deteccao <nenhuma|paridade|checksum|crc32>', 'correcao <nenhuma|hamming>', 'transmitir', 'quadro', 'arq <pare-e-espere|go-back-n|seletiva>', 'janela <n>', 'bits-seq <n>', 'timeout <ms>', 'transferir', 'ppp auth|mru|discar'] },
 };
 
 /* ---------------- Terminal ---------------- */

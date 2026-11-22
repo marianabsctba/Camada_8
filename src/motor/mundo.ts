@@ -15,7 +15,8 @@ export type TipoEquip =
   | 'cablemodem'
   | 'cmts'
   | 'terminal-sat'
-  | 'gateway-sat';
+  | 'gateway-sat'
+  | 'enlace';
 
 /** Equipamentos que repassam quadros sem ser o destino. */
 export const REPASSAM: ReadonlySet<TipoEquip> = new Set<TipoEquip>([

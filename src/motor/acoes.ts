@@ -125,6 +125,35 @@ function acoesConsole(m: Mundo, e: Equipamento): Acao[] {
     case 'cablemodem':
       a.push({ id: 'status', rotulo: 'Ver nível e MER', ajuda: 'Nível de descida em dBmV e MER em dB. Ele responde gritando.', contexto: ctx, comandos: () => ['MOSTRA'] });
       break;
+    case 'enlace': {
+      a.push({ id: 'mostra', rotulo: 'Ver a configuração', ajuda: 'Como o controlador está montando, conferindo e retransmitindo os quadros.', contexto: ctx, comandos: () => ['mostra'] });
+      if (e.s.cfg) {
+        a.push(
+          { id: 'transmitir', rotulo: 'Transmitir quadros de teste', ajuda: 'Manda uma rajada de quadros pela linha, com os erros que a linha costuma causar, e conta o que chegou certo, errado, descartado ou perdido.', contexto: ctx, comandos: () => ['transmitir'] },
+          { id: 'quadro', rotulo: 'Ver um quadro na linha', ajuda: 'Analisador de quadros: mostra o dado original e como ele fica no fio, byte a byte (ou bit a bit).', contexto: ctx, comandos: () => ['quadro'] },
+          { id: 'enquadramento', rotulo: 'Escolher o enquadramento', ajuda: 'Como o receptor descobre onde cada quadro começa e termina.', contexto: ctx, campos: [escolha('v', 'Enquadramento', [op('contagem', 'contagem: o quadro começa dizendo o próprio tamanho'), op('flags', 'flags: um byte especial (7E) marca o começo e o fim'), op('bits', 'flags de bits: o padrão 01111110 marca o começo e o fim')], e.s.cfg.enquadramento)], comandos: (v) => [`enquadramento ${v.v}`] },
+          { id: 'enchimento', rotulo: 'Escape / enchimento', ajuda: 'Proteção para quando o próprio dado contém o padrão da flag.', contexto: ctx, campos: [escolha('v', 'Escape de bytes ou enchimento de bits', [op('sim', 'ligado'), op('nao', 'desligado')], e.s.cfg.enchimento ? 'sim' : 'nao')], comandos: (v) => [`enchimento ${v.v}`] },
+          { id: 'deteccao', rotulo: 'Escolher a detecção de erros', ajuda: 'O código que vai no fim do quadro para o receptor saber se algum bit mudou no caminho.', contexto: ctx, campos: [escolha('v', 'Detecção', [op('nenhuma', 'nenhuma'), op('paridade', 'bit de paridade'), op('checksum', 'soma de verificação de 16 bits'), op('crc32', 'CRC-32 (o do Ethernet)')], e.s.cfg.deteccao)], comandos: (v) => [`deteccao ${v.v}`] },
+          { id: 'correcao', rotulo: 'Escolher a correção de erros', ajuda: 'Com correção, o receptor conserta o erro sozinho, sem pedir de novo. Custa bits a mais em cada quadro.', contexto: ctx, campos: [escolha('v', 'Correção', [op('nenhuma', 'nenhuma'), op('hamming', 'Hamming (7,4)')], e.s.cfg.correcao)], comandos: (v) => [`correcao ${v.v}`] },
+        );
+      }
+      if (e.s.arq) {
+        a.push(
+          { id: 'transferir', rotulo: 'Transferir um arquivo', ajuda: 'Manda o arquivo quadro a quadro com o protocolo de retransmissão configurado e mede o tempo, o aproveitamento e os erros.', contexto: ctx, comandos: () => ['transferir'] },
+          { id: 'timeout', rotulo: 'Ajustar o timeout', ajuda: 'Quanto tempo o transmissor espera o ACK antes de mandar de novo.', contexto: ctx, campos: [num('ms', 'Timeout', 'ms')], comandos: (v) => [`timeout ${v.ms}`] },
+          { id: 'bits-seq', rotulo: 'Bits do número de sequência', ajuda: 'Com n bits, os quadros são numerados de 0 a 2^n - 1 e a numeração recomeça.', contexto: ctx, campos: [num('n', 'Bits', 'bits')], comandos: (v) => [`bits-seq ${v.n}`] },
+          { id: 'janela', rotulo: 'Ajustar a janela', ajuda: 'Quantos quadros podem estar a caminho ao mesmo tempo, sem ACK.', contexto: ctx, campos: [num('n', 'Janela', 'quadros')], comandos: (v) => [`janela ${v.n}`] },
+          { id: 'protocolo', rotulo: 'Escolher o protocolo de retransmissão', ajuda: 'Pare e espere manda um e espera. Go-back-N manda vários e, se um se perde, repete daquele em diante. Retransmissão seletiva repete só o que se perdeu.', contexto: ctx, campos: [escolha('p', 'Protocolo', [op('pare-e-espere'), op('go-back-n'), op('seletiva', 'retransmissão seletiva')], e.s.arq.protocolo), num('janela', 'Janela', 'quadros'), num('bits', 'Bits do número de sequência', 'bits')], comandos: (v) => [`arq ${v.p}`, `janela ${v.janela}`, `bits-seq ${v.bits}`] },
+        );
+      }
+      if (e.s.ppp && !e.s.ppp.exige) {
+        a.push(
+          { id: 'ppp-auth', rotulo: 'Autenticação PPP', ajuda: 'PAP manda a senha aberta. CHAP prova que sabe a senha sem mandá-la, respondendo a um desafio.', contexto: ctx, campos: [escolha('v', 'Autenticação', [op('nenhuma'), op('pap', 'PAP'), op('chap', 'CHAP')], e.s.ppp.auth)], comandos: (v) => [`ppp auth ${v.v}`] },
+          { id: 'ppp-discar', rotulo: 'Discar (subir o PPP)', ajuda: 'Negocia o enlace (LCP), autentica e negocia o IP (IPCP).', contexto: ctx, comandos: () => ['ppp discar'] },
+        );
+      }
+      break;
+    }
     case 'radio':
       a.push({ id: 'mostra', rotulo: 'Ver o enlace de rádio', ajuda: 'RSSI, rumo até o outro rádio e se a zona de Fresnel está livre.', contexto: ctx, comandos: () => ['mostra'] });
       break;

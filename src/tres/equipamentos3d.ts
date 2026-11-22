@@ -14,7 +14,7 @@ export const RACK = { x: 0.6, z: -2.55 }; // centro do rack, encostado na parede
 export const BANCADA = { x: -2.55, z0: -1.6, passo: 0.8 }; // aparelhos de mesa, na parede da esquerda
 export const MESA_Y = 0.76;
 
-const NO_RACK = new Set<Equipamento['tipo']>(['switch', 'hub', 'roteador', 'mux', 'cmts', 'gateway-sat', 'terminal-sat']);
+const NO_RACK = new Set<Equipamento['tipo']>(['switch', 'hub', 'roteador', 'mux', 'cmts', 'gateway-sat', 'terminal-sat', 'enlace']);
 
 export interface Alvo {
   tipo: 'equip' | 'cabo' | 'almox';
