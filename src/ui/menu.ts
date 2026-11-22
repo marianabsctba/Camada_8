@@ -118,8 +118,13 @@ export function abrirMenu(o: OpcoesMenu): () => void {
 
   const escolher = (id: string, resultado?: Feito[]) => {
     selecionada = id;
-    const acoes = mostrarLista();
-    const a = acoes.find((x) => x.id === id);
+    let acoes = mostrarLista();
+    let a = acoes.find((x) => x.id === id);
+    if (!a && acoes[0]) {
+      selecionada = acoes[0].id;
+      acoes = mostrarLista();
+      a = acoes[0];
+    }
     if (!a) {
       detalhe.replaceChildren(el('p', { class: 'menu-vazio' }, 'Escolha uma ação na lista.'));
       return;
@@ -164,7 +169,11 @@ export function abrirMenu(o: OpcoesMenu): () => void {
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       if (fazer.hasAttribute('disabled')) return;
-      escolher(a.id, o.executar(a, valores));
+      const antes = o.acoes().map((x) => x.id).join();
+      const resultado = o.executar(a, valores);
+      const depois = o.acoes();
+      // se o aparelho mudou de estado e o menu mudou, a próxima ação provável vem primeiro
+      escolher(depois.map((x) => x.id).join() !== antes && depois[0] ? depois[0].id : a.id, resultado);
     });
     fazer.setAttribute('type', 'submit');
     form.append(el('div', { class: 'linha-botoes' }, fazer), el('div', { class: 'rotulo-campo' }, 'No terminal, isso seria:'), previa);

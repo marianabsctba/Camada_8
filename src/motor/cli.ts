@@ -160,7 +160,7 @@ const CAMPO: Record<string, Comando> = {
     rodar: (t, [nome]) => {
       const e = t.mundo.equipamentos.get(nome ?? '');
       if (!e) return ['Religar o quê? Até o disjuntor tem nome.'];
-      t.logados.delete(e.nome);
+      e.s.logado = false;
       for (const p of e.portas) p.contadores = { tx: 0, rx: 0, crc: 0 };
       if (e.tipo === 'roteador') {
         e.s.estado = 'boot';
@@ -663,10 +663,13 @@ const CONSOLE_ROTEADOR: ConsoleFn = (t, e, cmd, args) => {
     }
     return ['Modo de resgate só entende: inicio <normal|ignorar-config> e boot.'];
   }
-  if (s.senhaRunning && !t.logados.has(e.nome)) {
+  if (cmd === 'interromper') {
+    return ['Não tem boot nenhum para interromper: o roteador já está ligado. Religue primeiro (tire da tomada) e interrompa logo em seguida.'];
+  }
+  if (s.senhaRunning && !s.logado) {
     if (cmd === 'login') {
       if (args[0] === s.senhaRunning) {
-        t.logados.add(e.nome);
+        s.logado = true;
         return ['Acesso liberado.'];
       }
       return ['Senha incorreta. Eu nem te conheço.'];
@@ -683,7 +686,7 @@ const CONSOLE_ROTEADOR: ConsoleFn = (t, e, cmd, args) => {
       if (args[0] === 'startup' && args[1] === 'running') {
         s.running = [...s.startup];
         s.senhaRunning = s.senha;
-        t.logados.add(e.nome);
+        s.logado = true;
         return ['Configuração de inicialização copiada para a memória. Veio junto a senha antiga; troque antes de salvar.'];
       }
       if (args[0] === 'running' && args[1] === 'startup') return CONSOLE_ROTEADOR(t, e, 'salvar', []);
@@ -819,7 +822,6 @@ const CONSOLES: Partial<Record<Equipamento['tipo'], { fn: ConsoleFn; ajuda: stri
 
 export class Terminal {
   contexto: string | null = null;
-  logados = new Set<string>();
   dicasVistas = 0;
   resolvido = false;
   historico: string[] = [];

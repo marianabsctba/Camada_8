@@ -128,3 +128,21 @@ describe('robô resolve os dias só pelos menus', () => {
     }
   });
 });
+
+describe('menus guiam pelo estado do aparelho', () => {
+  it('dia 1: roteador trancado oferece religar primeiro e não oferece interromper', () => {
+    const dia = DIAS[0]!;
+    const t = new Terminal(dia.montar(), dia);
+    const ids = acoesDo(t.mundo, 'equip', 'roteador').map((a) => a.id);
+    expect(ids[0]).toBe('religar');
+    expect(ids).not.toContain('interromper');
+    t.executar('religar roteador');
+    expect(acoesDo(t.mundo, 'equip', 'roteador')[0]!.id).toBe('interromper');
+  });
+  it('interromper fora do boot explica o que fazer', () => {
+    const dia = DIAS[0]!;
+    const t = new Terminal(dia.montar(), dia);
+    t.executar('console roteador');
+    expect(t.executar('interromper').join(' ')).toContain('Religue primeiro');
+  });
+});

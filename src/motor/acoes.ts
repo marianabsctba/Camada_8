@@ -74,7 +74,24 @@ function acoesConsole(m: Mundo, e: Equipamento): Acao[] {
       a.push(mostra);
       break;
     }
-    case 'roteador':
+    case 'roteador': {
+      const est = e.s.estado as string;
+      const travado = est === 'ligado' && !!e.s.senhaRunning && !e.s.logado;
+      if (est === 'boot') {
+        a.push({ id: 'interromper', rotulo: 'Interromper o boot (agora!)', ajuda: 'O roteador está carregando. Interrompa agora para entrar no modo de resgate, onde não se pede senha.', contexto: ctx, comandos: () => ['interromper'] });
+        break;
+      }
+      if (est === 'resgate') {
+        a.push(
+          { id: 'inicio', rotulo: 'Registro de inicialização', ajuda: 'Diz se o próximo boot lê a configuração gravada (normal) ou a ignora (ignorar-config). Para entrar sem senha, ignore.', contexto: ctx, campos: [escolha('modo', 'Próximo boot', [op('ignorar-config', 'ignorar a configuração gravada'), op('normal', 'normal')])], comandos: (v) => [`inicio ${v.modo}`] },
+          { id: 'boot', rotulo: 'Continuar o boot', ajuda: 'Sai do modo de resgate e carrega o sistema, respeitando o registro de inicialização.', contexto: ctx, comandos: () => ['boot'] },
+        );
+        break;
+      }
+      if (travado) {
+        a.push({ id: 'login', rotulo: 'Tentar entrar com senha', ajuda: 'Pede a senha que está na configuração. Você não sabe qual é. O caminho é religar e interromper o boot.', contexto: ctx, campos: [{ nome: 'senha', rotulo: 'Senha', tipo: 'texto' }], comandos: (v) => [`login ${v.senha}`] });
+        break;
+      }
       a.push(
         { id: 'interromper', rotulo: 'Interromper o boot', ajuda: 'Só funciona logo depois de religar: entra no modo de resgate, onde não se pede senha.', contexto: ctx, comandos: () => ['interromper'] },
         { id: 'inicio', rotulo: 'Registro de inicialização', ajuda: 'Diz se o próximo boot lê a configuração gravada (normal) ou a ignora (ignorar-config).', contexto: ctx, campos: [escolha('modo', 'Próximo boot', [op('ignorar-config', 'ignorar a configuração gravada'), op('normal', 'normal')])], comandos: (v) => [`inicio ${v.modo}`] },
@@ -86,6 +103,7 @@ function acoesConsole(m: Mundo, e: Equipamento): Acao[] {
         { id: 'mostra-config', rotulo: 'Ver configurações', ajuda: 'Mostra a configuração em execução e a gravada, lado a lado.', contexto: ctx, comandos: () => ['mostra', 'mostra startup'] },
       );
       break;
+    }
     case 'modem':
       a.push(
         { id: 'modem', rotulo: 'Configurar e treinar o modem', ajuda: 'Taxa de símbolos (baud) e modulação. Taxa em bits = baud × bits por símbolo. Respeite Nyquist, a SNR e Shannon.', contexto: ctx, campos: [num('baud', 'Taxa de símbolos', 'Bd', String(e.s.baud)), escolha('mod', 'Modulação', Object.entries(BITS_POR_SIMBOLO).map(([k, b]) => op(k, `${k.toUpperCase()} (${b} bit${b > 1 ? 's' : ''} por símbolo)`)), e.s.modulacao)], comandos: (v) => [`taxa-simbolos ${v.baud}`, `modulacao ${v.mod}`, 'treinar'] },
@@ -161,7 +179,12 @@ export function acoesEquip(m: Mundo, e: Equipamento): Acao[] {
     });
   }
   a.push({ id: 'console', rotulo: 'Abrir o console (digitar)', ajuda: 'Para quem quer digitar os comandos direto no aparelho.', contexto: e.nome, abreConsole: true, comandos: () => [] });
-  a.push({ id: 'religar', rotulo: 'Religar (tirar da tomada)', ajuda: 'Desliga e liga de novo. Zera os contadores. Às vezes resolve, quase sempre não.', comandos: () => [`religar ${e.nome}`] });
+  const religar: Acao = { id: 'religar', rotulo: 'Religar (tirar da tomada)', ajuda: 'Desliga e liga de novo. Zera os contadores. Às vezes resolve, quase sempre não.', comandos: () => [`religar ${e.nome}`] };
+  if (e.tipo === 'roteador' && e.s.estado === 'ligado' && e.s.senhaRunning && !e.s.logado) {
+    religar.rotulo = 'Religar (para interromper o boot)';
+    religar.ajuda = 'Sem senha, o caminho é o boot: tire da tomada, ligue de novo e interrompa o carregamento logo em seguida.';
+    a.unshift(religar);
+  } else a.push(religar);
   return a;
 }
 
