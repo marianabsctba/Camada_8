@@ -16,6 +16,48 @@ let equipamentos: Cena3d | null = null;
 let fixo: THREE.Group | null = null;
 let notasAtuais: string[] = [];
 let alvosFixos: THREE.Object3D[] = [];
+let destaque: { tipo: string; id: string } | null = null;
+let seta: THREE.Group | null = null;
+
+function criarSeta(): THREE.Group {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: '#ff7a1a', emissive: '#ff7a1a', emissiveIntensity: 1.6, roughness: 0.4 });
+  const ponta = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.16, 20), mat);
+  ponta.rotation.x = Math.PI;
+  const haste = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.16, 12), mat);
+  haste.position.y = 0.16;
+  const anel = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.012, 8, 40), new THREE.MeshBasicMaterial({ color: '#ff7a1a', transparent: true, opacity: 0.8 }));
+  anel.rotation.x = Math.PI / 2;
+  anel.name = 'anel';
+  g.add(ponta, haste, anel);
+  const luz = new THREE.PointLight('#ff7a1a', 1.2, 1.2, 2);
+  luz.position.y = -0.1;
+  g.add(luz);
+  return g;
+}
+
+/** Põe a seta laranja em cima do objeto do passo atual (ou tira, com null). */
+export function destacar(alvo: { tipo: string; id: string } | null) {
+  destaque = alvo;
+  posicionarSeta();
+}
+
+function posicionarSeta() {
+  if (seta) M.cena.remove(seta);
+  seta = null;
+  if (!destaque || !equipamentos) return;
+  const todos = [...equipamentos.alvos, ...alvosFixos];
+  const obj = todos.find((o) => o.userData.alvo?.tipo === destaque!.tipo && o.userData.alvo?.id === destaque!.id);
+  if (!obj) return;
+  const caixa = new THREE.Box3().setFromObject(obj);
+  if (caixa.isEmpty()) caixa.setFromCenterAndSize(obj.getWorldPosition(new THREE.Vector3()), new THREE.Vector3(0.6, 1.8, 0.6));
+  const centro = caixa.getCenter(new THREE.Vector3());
+  seta = criarSeta();
+  const topo = destaque.tipo === 'cabo' ? Math.max(0.6, centro.y + 0.4) : caixa.max.y + 0.25;
+  seta.position.set(centro.x, topo, centro.z);
+  seta.userData.base = topo;
+  M.cena.add(seta);
+}
 
 function casca(): THREE.Group {
   const g = new THREE.Group();
@@ -119,6 +161,8 @@ export function montarSala(m: Mundo, notas: string[]) {
   limparCena();
   notasAtuais = notas;
   alvosFixos = [];
+  destaque = null;
+  seta = null;
   M.cena.background = new THREE.Color('#0b1016');
   fixo = new THREE.Group();
   fixo.add(casca(), luzes(), mobilia(m));
@@ -133,6 +177,12 @@ export function montarSala(m: Mundo, notas: string[]) {
         l.intensity = Math.sin(t * 37) > 0.97 || Math.sin(t * 3.1) > 0.995 ? 0.6 : 5;
       }
     });
+    if (seta) {
+      seta.position.y = seta.userData.base + Math.sin(t * 3) * 0.06;
+      seta.rotation.y = t * 1.5;
+      const anel = seta.getObjectByName('anel');
+      if (anel) anel.scale.setScalar(1 + (Math.sin(t * 4) + 1) * 0.15);
+    }
     if (equipamentos) {
       const aceso = Math.sin(t * 9) > 0;
       for (const led of equipamentos.piscar) led.visible = aceso;
@@ -152,6 +202,7 @@ export function atualizarEquipamentos(m: Mundo) {
   equipamentos = montarEquipamentos(m, notasAtuais);
   M.cena.add(equipamentos.raiz);
   J.obstaculos = [...equipamentos.obstaculos, [2.2, 3, -2, -0.8], [1.9, 2.7, 0.8, 1.6]];
+  posicionarSeta();
 }
 
 const ray = new THREE.Raycaster();

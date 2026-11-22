@@ -14,6 +14,30 @@ export interface ItemObjetivo {
   detalhe?: string;
 }
 
+/**
+ * Um passo do modo guiado: uma frase do que fazer, o porquê, o objeto que brilha na sala,
+ * a ação que roda e, quando há escolha, a conferência que explica o erro.
+ */
+export interface Passo {
+  instrucao: string;
+  porque: string;
+  /** Objeto que brilha na sala. Passos de pergunta não têm alvo. */
+  alvo?: ['equip' | 'cabo' | 'almox', string];
+  /** Id da ação (src/motor/acoes.ts). */
+  acao?: string;
+  /** Id da pergunta do chamado, quando o passo é responder. */
+  pergunta?: string;
+  /** Campos que a pessoa escolhe; os outros vêm de "valores" ou do padrão da ação. */
+  pedir?: string[];
+  valores?: Record<string, string>;
+  /** Resposta certa, mostrada depois de duas tentativas erradas (e usada pelo robô). */
+  exemplo?: Record<string, string>;
+  /** true se deu certo; senão, a explicação do que aconteceu. */
+  conferir?: (m: Mundo) => true | string;
+  /** O que aprender com o que acabou de acontecer. */
+  feito: string;
+}
+
 export interface Dia {
   numero: number;
   ato: number;
@@ -29,6 +53,8 @@ export interface Dia {
   objetivo: (m: Mundo) => ItemObjetivo[];
   /** O que aconteceu de verdade, depois de resolver. */
   posMorte: string[];
+  /** Roteiro do modo guiado. */
+  passos?: Passo[];
 }
 
 export interface Ato {

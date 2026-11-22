@@ -8,7 +8,7 @@ Você está sozinha, ou sozinho, com um alicate, um rack e uma cidade inteira qu
 
 ## Estado
 
-Fase 2: a sala técnica em 3D, em primeira pessoa, com os equipamentos do dia no rack e na bancada; mire num aparelho e aperte E para abrir o console. O modo terminal continua disponível (e é o padrão no celular). Estão prontos os atos 0 (Sem Senha) e 1 (O Poste), com 18 dias e o motor de simulação da camada física. O documento de desenho está em [DESENHO.md](DESENHO.md).
+Modo guiado: cada dia é uma sequência de passos curtos. O jogo diz em uma frase o que fazer e por quê, uma seta laranja marca o objeto certo na sala em 3D, e o E faz o passo. Nas escolhas (cores do cabo, transceptor, canal), o erro vem explicado. Estão prontos os atos 0 (Sem Senha) e 1 (O Poste), com 18 dias e o motor de simulação da camada física. O documento de desenho está em [DESENHO.md](DESENHO.md).
 
 ## Rodar
 

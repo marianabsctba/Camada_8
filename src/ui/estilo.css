@@ -861,3 +861,160 @@ details.caixa[open] summary {
 .carregando-leds i:nth-child(3n) {
   animation-delay: 0.6s;
 }
+
+/* ---------- Modo guiado ---------- */
+.hud-guia {
+  position: absolute;
+  top: 54px;
+  left: 12px;
+  width: min(380px, calc(100vw - 24px));
+  background: rgba(7, 11, 15, 0.88);
+  border: 1px solid var(--linha);
+  border-left: 3px solid var(--laranja);
+  border-radius: 4px;
+  padding: 12px 14px;
+}
+.jogo3d:has(.gaveta-esq:not([hidden])) .hud-guia {
+  display: none;
+}
+.hud-guia h3,
+.guia h3 {
+  font-family: var(--titulo);
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--laranja);
+  margin: 0 0 6px;
+}
+.barra-passos {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.barra-passos i {
+  flex: 1;
+  height: 5px;
+  border-radius: 2px;
+  background: var(--linha);
+}
+.barra-passos i.feito {
+  background: var(--led);
+}
+.barra-passos i.atual {
+  background: var(--laranja);
+  box-shadow: 0 0 6px var(--laranja);
+}
+.passo-atual {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.35;
+  margin: 0 0 8px;
+}
+.onde {
+  font-size: 14px;
+  color: var(--ambar);
+  margin: 0 0 8px;
+}
+.porque-mini {
+  font-size: 14px;
+  color: var(--apagado);
+  margin-bottom: 10px;
+}
+.porque-mini summary {
+  cursor: pointer;
+  color: var(--azul);
+}
+.porque-mini p {
+  margin: 6px 0 0;
+}
+.hud-guia .botao,
+.guia .botao {
+  font-size: 14px;
+  padding: 7px 14px;
+}
+.hud-alvo.certo {
+  border-left-color: var(--led);
+  color: #fff;
+}
+.registro-titulo {
+  font-family: var(--titulo);
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--apagado);
+  padding: 12px 18px 0;
+}
+
+.janela-passo {
+  width: min(680px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  background: var(--painel);
+  border: 1px solid var(--linha);
+  border-top: 3px solid var(--laranja);
+  border-radius: 5px;
+  padding: 14px 20px 20px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+}
+.janela-passo header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.janela-passo h3 {
+  font-family: var(--titulo);
+  font-size: 26px;
+  line-height: 1.15;
+  margin: 6px 0 12px;
+}
+.janela-passo h4 {
+  font-family: var(--titulo);
+  font-size: 18px;
+  color: var(--led);
+  margin: 12px 0 6px;
+}
+.porque {
+  background: var(--painel2);
+  border-left: 3px solid var(--azul);
+  border-radius: 3px;
+  padding: 10px 12px;
+  margin: 0 0 14px;
+  line-height: 1.5;
+}
+.porque strong {
+  color: var(--azul);
+}
+.certo,
+.errado {
+  border-radius: 3px;
+  padding: 12px 14px;
+  margin: 10px 0 12px;
+  font-size: 17px;
+  line-height: 1.5;
+}
+.certo {
+  background: rgba(61, 220, 132, 0.1);
+  border-left: 3px solid var(--led);
+}
+.certo strong {
+  color: var(--led);
+}
+.errado {
+  background: rgba(255, 93, 93, 0.1);
+  border-left: 3px solid var(--erro);
+}
+.errado strong {
+  color: var(--erro);
+}
+.aviso-passo {
+  color: var(--ambar);
+}
+.janela-passo .menu-resultado {
+  margin: 6px 0 14px;
+}
+.janela-passo.fim {
+  border-top-color: var(--led);
+}
+.janela-passo.fim p {
+  line-height: 1.55;
+}

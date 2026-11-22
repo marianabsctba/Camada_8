@@ -31,6 +31,8 @@ export interface Acao {
   contexto?: string;
   /** Abre o console e deixa o terminal à mostra. */
   abreConsole?: boolean;
+  /** Ação que normalmente vem depois desta; o menu pula para ela. */
+  proxima?: string;
   comandos: (v: Record<string, string>) => string[];
 }
 
@@ -78,12 +80,12 @@ function acoesConsole(m: Mundo, e: Equipamento): Acao[] {
       const est = e.s.estado as string;
       const travado = est === 'ligado' && !!e.s.senhaRunning && !e.s.logado;
       if (est === 'boot') {
-        a.push({ id: 'interromper', rotulo: 'Interromper o boot (agora!)', ajuda: 'O roteador está carregando. Interrompa agora para entrar no modo de resgate, onde não se pede senha.', contexto: ctx, comandos: () => ['interromper'] });
+        a.push({ id: 'interromper', rotulo: 'Interromper o boot (agora!)', ajuda: 'O roteador está carregando. Interrompa agora para entrar no modo de resgate, onde não se pede senha.', contexto: ctx, comandos: () => ['interromper'], proxima: 'inicio' });
         break;
       }
       if (est === 'resgate') {
         a.push(
-          { id: 'inicio', rotulo: 'Registro de inicialização', ajuda: 'Diz se o próximo boot lê a configuração gravada (normal) ou a ignora (ignorar-config). Para entrar sem senha, ignore.', contexto: ctx, campos: [escolha('modo', 'Próximo boot', [op('ignorar-config', 'ignorar a configuração gravada'), op('normal', 'normal')])], comandos: (v) => [`inicio ${v.modo}`] },
+          { id: 'inicio', rotulo: 'Registro de inicialização', ajuda: 'Diz se o próximo boot lê a configuração gravada (normal) ou a ignora (ignorar-config). Para entrar sem senha, ignore.', contexto: ctx, campos: [escolha('modo', 'Próximo boot', [op('ignorar-config', 'ignorar a configuração gravada'), op('normal', 'normal')])], comandos: (v) => [`inicio ${v.modo}`], proxima: 'boot' },
           { id: 'boot', rotulo: 'Continuar o boot', ajuda: 'Sai do modo de resgate e carrega o sistema, respeitando o registro de inicialização.', contexto: ctx, comandos: () => ['boot'] },
         );
         break;
@@ -93,12 +95,9 @@ function acoesConsole(m: Mundo, e: Equipamento): Acao[] {
         break;
       }
       a.push(
-        { id: 'interromper', rotulo: 'Interromper o boot', ajuda: 'Só funciona logo depois de religar: entra no modo de resgate, onde não se pede senha.', contexto: ctx, comandos: () => ['interromper'] },
-        { id: 'inicio', rotulo: 'Registro de inicialização', ajuda: 'Diz se o próximo boot lê a configuração gravada (normal) ou a ignora (ignorar-config).', contexto: ctx, campos: [escolha('modo', 'Próximo boot', [op('ignorar-config', 'ignorar a configuração gravada'), op('normal', 'normal')])], comandos: (v) => [`inicio ${v.modo}`] },
-        { id: 'boot', rotulo: 'Continuar o boot', ajuda: 'Sai do modo de resgate e carrega o sistema, respeitando o registro de inicialização.', contexto: ctx, comandos: () => ['boot'] },
-        { id: 'login', rotulo: 'Entrar com senha', ajuda: 'Pede a senha que está na configuração em execução.', contexto: ctx, campos: [{ nome: 'senha', rotulo: 'Senha', tipo: 'texto' }], comandos: (v) => [`login ${v.senha}`] },
-        { id: 'copiar', rotulo: 'Copiar configuração gravada para a memória', ajuda: 'Traz a configuração de inicialização para a memória, onde ela passa a valer. Vem junto a senha antiga.', contexto: ctx, comandos: () => ['copiar startup running'] },
-        { id: 'senha', rotulo: 'Trocar a senha', ajuda: 'Troca a senha na memória. Só vira permanente depois de salvar.', contexto: ctx, campos: [{ nome: 'senha', rotulo: 'Senha nova (8 ou mais caracteres)', tipo: 'texto', padrao: 'Fim!Linha2026' }], comandos: (v) => [`senha ${v.senha}`] },
+        { id: 'copiar', rotulo: 'Copiar configuração gravada para a memória', ajuda: 'Traz a configuração gravada (a da cidade) para a memória, onde ela passa a valer. Vem junto a senha antiga, que você troca no passo seguinte.', contexto: ctx, comandos: () => ['copiar startup running'], proxima: 'senha' },
+        { id: 'senha', rotulo: 'Trocar a senha', ajuda: 'Troca a senha na memória. Só vira permanente depois de salvar.', contexto: ctx, campos: [{ nome: 'senha', rotulo: 'Senha nova (8 ou mais caracteres)', tipo: 'texto', padrao: 'Fim!Linha2026' }], comandos: (v) => [`senha ${v.senha}`], proxima: 'inicio' },
+        { id: 'inicio', rotulo: 'Registro de inicialização', ajuda: 'Diz se o próximo boot lê a configuração gravada (normal) ou a ignora. Volte para normal, senão o roteador esquece tudo no próximo boot.', contexto: ctx, campos: [escolha('modo', 'Próximo boot', [op('normal', 'normal'), op('ignorar-config', 'ignorar a configuração gravada')], 'normal')], comandos: (v) => [`inicio ${v.modo}`], proxima: 'salvar' },
         { id: 'salvar', rotulo: 'Salvar', ajuda: 'Grava a configuração em execução por cima da de inicialização. Não tem desfazer.', contexto: ctx, comandos: () => ['salvar'] },
         { id: 'mostra-config', rotulo: 'Ver configurações', ajuda: 'Mostra a configuração em execução e a gravada, lado a lado.', contexto: ctx, comandos: () => ['mostra', 'mostra startup'] },
       );
@@ -226,7 +225,7 @@ export function acoesCabo(m: Mundo, c: Cabo): Acao[] {
     }
     if (c.ruptura !== undefined || m.flags.clivagens) {
       a.push(
-        { id: 'clivar', rotulo: 'Clivar a fibra', ajuda: 'Corta a ponta na clivadora e mede o ângulo. Acima de 1° a emenda sai ruim: clive de novo.', comandos: () => ['clivar'] },
+        { id: 'clivar', rotulo: 'Clivar a fibra', ajuda: 'Corta a ponta na clivadora e mede o ângulo. Acima de 1° a emenda sai ruim: clive de novo.', comandos: () => ['clivar'], proxima: 'fundir' },
         { id: 'fundir', rotulo: 'Fundir no ponto rompido', ajuda: 'Emenda por fusão no ponto que o OTDR mostrou, usando a última clivagem.', campos: [num('metros', 'Distância do rompimento', 'm')], comandos: (v) => [`fundir ${c.id} ${v.metros}`] },
       );
     }

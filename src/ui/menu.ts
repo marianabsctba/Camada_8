@@ -36,7 +36,7 @@ function amostra(cor: string): HTMLElement {
   return s;
 }
 
-function campoCores(c: Campo, valores: Record<string, string>, mudou: () => void): HTMLElement {
+export function campoCores(c: Campo, valores: Record<string, string>, mudou: () => void): HTMLElement {
   const escolhidas: string[] = valores[c.nome] ? valores[c.nome]!.split(' ') : [];
   const slots = el('div', { class: 'pinos' });
   const paleta = el('div', { class: 'paleta' });
@@ -172,8 +172,9 @@ export function abrirMenu(o: OpcoesMenu): () => void {
       const antes = o.acoes().map((x) => x.id).join();
       const resultado = o.executar(a, valores);
       const depois = o.acoes();
-      // se o aparelho mudou de estado e o menu mudou, a próxima ação provável vem primeiro
-      escolher(depois.map((x) => x.id).join() !== antes && depois[0] ? depois[0].id : a.id, resultado);
+      // a próxima ação provável: a sugerida pela própria ação, ou a primeira se o menu mudou
+      const sugerida = a.proxima && depois.some((x) => x.id === a.proxima) ? a.proxima : depois.map((x) => x.id).join() !== antes && depois[0] ? depois[0].id : a.id;
+      escolher(sugerida, resultado);
     });
     fazer.setAttribute('type', 'submit');
     form.append(el('div', { class: 'linha-botoes' }, fazer), el('div', { class: 'rotulo-campo' }, 'No terminal, isso seria:'), previa);
