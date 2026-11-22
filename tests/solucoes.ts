@@ -1,0 +1,22 @@
+// Como o robô resolve cada dia, só digitando no terminal.
+
+export const SOLUCOES: Record<number, string[]> = {
+  1: ['religar roteador', 'console roteador', 'interromper', 'inicio ignorar-config', 'boot', 'copiar startup running', 'senha Fim!Linha2026', 'inicio normal', 'salvar', 'sair'],
+  2: ['console casa1', 'ip 192.0.2.10/24', 'sair', 'console casa2', 'ip 192.0.2.20/24', 'ping 192.0.2.10', 'sair', 'console casa1', 'ping 192.0.2.20', 'sair'],
+  3: ['console casa', 'vazao', 'sair', 'responder 1 12,5', 'responder 2 11,87', 'responder 3 343,6'],
+  4: ['console pc1', 'ping 192.0.2.20', 'capturar', 'sair', 'responder 1 0x0800', 'responder 2 1', 'responder 3 128', 'responder 4 2', 'responder 5 hub'],
+  5: ['testar c1', 'crimpar c1 a bl l bv az baz v bm m', 'certificar c1'],
+  6: ['crimpar c3 b bv v bl az baz l bm m', 'console pc-secretaria', 'ping 192.0.2.20', 'sair'],
+  7: ['desligar c2', 'instalar switch-din sw-meio', 'ligar sw-escritorio:p2 sw-meio:p1 cat6 65', 'ligar sw-meio:p2 pc-galpao cat6 65', 'console pc-escritorio', 'ping 192.0.2.31 100', 'sair'],
+  8: ['trocar c1 cat6a'],
+  9: ['afastar c1', 'console portaria', 'ping 192.0.2.2 1000', 'sair'],
+  10: ['luz c1', 'luz c2', 'sfp sw-centro:sfp1 ER-40', 'sfp sw-distrito:sfp1 ER-40', 'atenuador sw-centro:sfp2 10', 'atenuador sw-escola:sfp1 10', 'responder 1 8,84'],
+  11: ['otdr c1', 'clivar', 'clivar', 'fundir c1 1340'],
+  12: ['segmento c1', 'segmento c1 1 om3'],
+  13: ['console modem', 'taxa-simbolos 4800', 'modulacao qam64', 'treinar', 'sair', 'responder 1 30,9'],
+  14: ['console mux', 'slot 1-10 voz', 'slot 16 sinalizacao', 'mostra', 'sair', 'responder 1 64'],
+  15: ['antena radio-morro azimute 47', 'antena radio-morro altura 25', 'responder 1 10,2'],
+  16: ['espectro', 'console ap', 'canal 6', 'mostra', 'sair', 'responder 1 1, 6 e 11'],
+  17: ['coax c1', 'coax c1 remover 2', 'coax c1 trocar 2 conector', 'console modem', 'MOSTRA', 'sair'],
+  18: ['responder 1 238,7', 'orbita c2 leo', 'console casa', 'ping 192.0.2.60 10', 'sair'],
+};

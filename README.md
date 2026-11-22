@@ -8,7 +8,17 @@ Você está sozinha, ou sozinho, com um alicate, um rack e uma cidade inteira qu
 
 ## Estado
 
-Em desenho. O documento de desenho está em [DESENHO.md](DESENHO.md).
+Fase 1: o jogo roda inteiro num terminal no navegador, ainda sem o 3D. Estão prontos os atos 0 (Sem Senha) e 1 (O Poste), com 18 dias e o motor de simulação da camada física. O documento de desenho está em [DESENHO.md](DESENHO.md).
+
+## Rodar
+
+```
+npm install
+npm run dev
+npm test
+```
+
+Os testes trazem um robô que resolve cada dia digitando no terminal, e um conjunto de armadilhas que precisam falhar do jeito que o manual explica.
 
 ## Tecnologia
 
