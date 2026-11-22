@@ -15,6 +15,7 @@ const ALT = 2.8;
 let equipamentos: Cena3d | null = null;
 let fixo: THREE.Group | null = null;
 let notasAtuais: string[] = [];
+let alvosFixos: THREE.Object3D[] = [];
 
 function casca(): THREE.Group {
   const g = new THREE.Group();
@@ -98,6 +99,10 @@ function mobilia(m: Mundo): THREE.Group {
   for (const [arq, x, z, giro, altura] of itens) {
     const o = movel(arq, { giro, altura });
     o.position.set(x, arq === 'metal_toolbox' ? 0.9 : 0, z);
+    if (arq === 'steel_frame_shelves_01' && Object.keys(m.catalogo).length) {
+      o.userData.alvo = { tipo: 'almox', id: 'almox', rotulo: 'estante do almoxarifado' } satisfies Alvo;
+      alvosFixos.push(o);
+    }
     g.add(o);
   }
   const alarme = movel('fire_alarm', { altura: 0.12 });
@@ -113,6 +118,7 @@ function mobilia(m: Mundo): THREE.Group {
 export function montarSala(m: Mundo, notas: string[]) {
   limparCena();
   notasAtuais = notas;
+  alvosFixos = [];
   M.cena.background = new THREE.Color('#0b1016');
   fixo = new THREE.Group();
   fixo.add(casca(), luzes(), mobilia(m));
@@ -156,7 +162,7 @@ const centro = new THREE.Vector2(0, 0);
 export function alvoNaMira(): Alvo | null {
   if (!equipamentos) return null;
   ray.setFromCamera(centro, M.camera);
-  const hits = ray.intersectObjects(equipamentos.alvos, true);
+  const hits = ray.intersectObjects([...equipamentos.alvos, ...alvosFixos], true);
   for (const h of hits) {
     let o: THREE.Object3D | null = h.object;
     while (o && !o.userData.alvo) o = o.parent;

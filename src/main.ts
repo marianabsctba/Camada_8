@@ -3,7 +3,9 @@
 import './ui/estilo.css';
 import { DIAS } from './conteudo/dias';
 import { ATOS } from './conteudo/tipos';
+import { acoesDo, executarAcao, type TipoAlvo } from './motor/acoes';
 import { comandosCampo, Terminal } from './motor/cli';
+import { abrirMenu } from './ui/menu';
 import { iniciarControles, J, soltarMouse } from './tres/jogador';
 import { iniciar3d, M, pausar3d } from './tres/motor3d';
 import { alvoNaMira, atualizarEquipamentos, montarSala } from './tres/sala';
@@ -142,6 +144,11 @@ function abrirDia(numero: number) {
   const proximo = el('button', { class: 'botao', hidden: '' }, 'Próximo dia');
   proximo.addEventListener('click', () => abrirDia(Math.min(DIAS.length, numero + 1)));
 
+  const passoPainel = el('div', { class: 'caixa passo', style: '--c: var(--laranja)' });
+  const local = el('div', { class: 'local' });
+  const perguntas = el('div', { class: 'perguntas' });
+  const caixaPerguntas = el('div', { class: 'caixa', style: '--c: var(--azul)' }, el('h3', {}, 'Perguntas do chamado'), perguntas);
+  if (!dia.perguntas?.length) caixaPerguntas.hidden = true;
   const lado = el(
     'aside',
     { class: 'lado' },
@@ -149,6 +156,9 @@ function abrirDia(numero: number) {
     el('div', { class: 'etiqueta' }, `Ato ${ato.numero} · ${ato.nome} · ${ato.tema}`),
     el('h2', {}, `Dia ${dia.numero}: ${dia.titulo}`),
     el('div', { class: 'caixa chamado' }, ...dia.chamado.map((t) => el('p', {}, t))),
+    passoPainel,
+    el('div', { class: 'caixa', style: '--c: var(--verde)' }, el('h3', {}, 'No local'), el('p', { class: 'nota' }, 'Clique num aparelho ou num cabo para ver o que dá para fazer.'), local),
+    caixaPerguntas,
     manual,
     el('div', { class: 'caixa', style: '--c: var(--ambar)' }, el('h3', {}, 'Objetivo'), lista),
     posMorte,
@@ -177,8 +187,55 @@ function abrirDia(numero: number) {
     saida.scrollTop = saida.scrollHeight;
   };
 
+  let dicasMostradas = 0;
+  const hudPasso = el('div', { class: 'hud-passo' });
+  const desenharPasso = (alvo: HTMLElement, itens: ReturnType<typeof dia.objetivo>) => {
+    const pendente = itens.find((i) => !i.ok);
+    const feitos = itens.filter((i) => i.ok).length;
+    const bDica = el('button', { class: 'botao fantasma mini' }, dicasMostradas < dia.dicas.length ? 'Me dá uma dica' : 'Sem mais dicas');
+    bDica.addEventListener('click', () => {
+      if (dicasMostradas < dia.dicas.length) dicasMostradas++;
+      atualizar();
+    });
+    const dicas = dia.dicas.slice(0, dicasMostradas).map((d, i) => el('p', { class: 'dica' }, `Dica ${i + 1}: ${d}`));
+    const texto = pendente ? pendente.texto + (pendente.texto.startsWith('pergunta') ? ' (responda no painel, em Perguntas do chamado)' : '') : 'Tudo feito. Leia o pós-morte no painel.';
+    alvo.replaceChildren(el('h3', {}, `Próximo passo · ${feitos} de ${itens.length}`), el('p', { class: 'passo-atual' }, texto), ...(pendente?.detalhe ? [el('small', {}, pendente.detalhe)] : []), ...dicas, ...(pendente ? [bDica] : []));
+  };
+  const desenharLocal = () => {
+    const m = term.mundo;
+    const botao = (tipo: TipoAlvo, id: string, txt: string, sub: string) => {
+      const b = el('button', { class: 'item-local' }, el('strong', {}, txt), el('small', {}, sub));
+      b.addEventListener('click', () => abrirAcoes(tipo, id));
+      return b;
+    };
+    local.replaceChildren(
+      ...[...m.equipamentos.values()].map((e) => botao('equip', e.nome, e.nome, e.modelo)),
+      ...[...m.cabos.values()].map((c) => botao('cabo', c.id, `cabo ${c.id}`, `${c.a.equip} ⇄ ${c.b.equip} · ${c.meio.toUpperCase()}`)),
+      ...(Object.keys(m.catalogo).length ? [botao('almox', 'almox', 'almoxarifado', 'equipamentos para instalar')] : []),
+    );
+  };
+  const desenharPerguntas = () => {
+    perguntas.replaceChildren(
+      ...(dia.perguntas ?? []).map((p) => {
+        const resp = term.mundo.respostas[p.id];
+        const certa = resp !== undefined && p.confere(resp, term.mundo);
+        const entrada = el('input', { value: resp ?? '', placeholder: 'sua resposta', autocomplete: 'off', spellcheck: 'false' });
+        const form = el('form', { class: 'pergunta' + (certa ? ' certa' : resp !== undefined ? ' errada' : '') }, el('p', {}, `${p.id}) ${p.texto}`), el('div', { class: 'linha-botoes' }, entrada, el('button', { class: 'botao mini', type: 'submit' }, 'Responder')), el('small', {}, certa ? 'Certa.' : resp !== undefined ? 'Ainda não. Confira a conta no manual.' : ''));
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          if (entrada.value.trim()) rodar(`responder ${p.id} ${entrada.value.trim()}`);
+        });
+        return form;
+      }),
+    );
+  };
+
   const atualizar = () => {
     const itens = dia.objetivo(term.mundo);
+    desenharPasso(passoPainel, itens);
+    desenharPasso(hudPasso, itens);
+    desenharLocal();
+    desenharPerguntas();
     lista.replaceChildren(...itens.map((i) => el('li', i.ok ? { class: 'ok' } : {}, el('span', {}, i.texto, ...(i.detalhe ? [el('small', {}, i.detalhe)] : [])))));
     if (itens.every((i) => i.ok)) {
       term.resolvido = true;
@@ -202,6 +259,49 @@ function abrirDia(numero: number) {
     if (modo === '3d') atualizarEquipamentos(term.mundo);
   };
 
+  let abrirTerminalFn = (sim: boolean) => {
+    if (sim) input.focus();
+  };
+  let menuAberto = false;
+  function abrirAcoes(tipo: TipoAlvo, id: string) {
+    if (menuAberto) return;
+    menuAberto = true;
+    J.livre = false;
+    soltarMouse();
+    const titulo = tipo === 'almox' ? 'Almoxarifado' : tipo === 'cabo' ? `Cabo ${id}` : id;
+    const e = term.mundo.equipamentos.get(id);
+    const c = term.mundo.cabos.get(id);
+    const sub = e ? e.modelo : c ? `${c.a.equip}:${c.a.porta} ⇄ ${c.b.equip}:${c.b.porta} · ${c.meio.toUpperCase()} · ${c.metros} m` : 'o que tem na estante';
+    abrirMenu({
+      titulo,
+      subtitulo: sub,
+      acoes: () => acoesDo(term.mundo, tipo, id),
+      classe,
+      executar: (a, v) => {
+        const feito = executarAcao(term, a, v);
+        for (const f of feito) {
+          escrever([`${f.prompt} ${f.comando}`], 'cmd');
+          escrever(f.saida);
+        }
+        posHist = term.historico.length;
+        atualizar();
+        if (modo === '3d') atualizarEquipamentos(term.mundo);
+        return feito;
+      },
+      abrirConsole: (nome) => {
+        abrirTerminalFn(true);
+        if (term.contexto !== nome) {
+          if (term.contexto) rodar('sair');
+          rodar(`console ${nome}`);
+        }
+      },
+      aoFechar: () => {
+        menuAberto = false;
+        J.livre = modo === '3d' && terminal.hidden;
+      },
+    });
+  }
+
   if (modo === 'terminal') {
     teclas3d = null;
     pausar3d();
@@ -218,27 +318,28 @@ function abrirDia(numero: number) {
     const bPainel = el('button', { class: 'hud-botao' }, 'Painel (P)');
     const bTerm = el('button', { class: 'hud-botao' }, 'Terminal (T)');
     const titulo = el('div', { class: 'hud-titulo' }, `Dia ${dia.numero}: ${dia.titulo}`);
-    const ajuda = el('div', { class: 'hud-dicas' }, 'Clique na cena para olhar · WASD anda · E usa o que está na mira · T terminal · P painel · Esc solta o mouse');
+    const ajuda = el('div', { class: 'hud-dicas' }, 'Clique na cena para olhar · WASD anda · E mostra o que dá para fazer com o que está na mira · P painel · T terminal · Esc solta o mouse');
     lado.classList.add('gaveta-esq');
     terminal.classList.add('gaveta-dir');
     lado.hidden = true;
     terminal.hidden = true;
-    palco.append(el('div', { class: 'hud-topo' }, titulo, bPainel, bTerm), mira, rotuloAlvo, ajuda, lado, terminal);
+    palco.append(el('div', { class: 'hud-topo' }, titulo, bPainel, bTerm), hudPasso, mira, rotuloAlvo, ajuda, lado, terminal);
     app.replaceChildren(palco);
     const canvas = iniciar3d(palco);
-    montarSala(term.mundo, [`Dia ${dia.numero}`, dia.titulo, 'E: console no aparelho']);
+    montarSala(term.mundo, [`Dia ${dia.numero}`, dia.titulo, 'Mire e aperte E']);
     iniciarControles(canvas, palco);
     J.livre = true;
     (window as unknown as { __c8: unknown }).__c8 = { J, rodar };
 
     const abrirTerminal = (sim: boolean) => {
       terminal.hidden = !sim;
-      J.livre = !sim;
+      J.livre = !sim && !menuAberto;
       if (sim) {
         soltarMouse();
         input.focus();
       }
     };
+    abrirTerminalFn = abrirTerminal;
     bPainel.addEventListener('click', () => (lado.hidden = !lado.hidden));
     bTerm.addEventListener('click', () => abrirTerminal(terminal.hidden));
 
@@ -248,7 +349,7 @@ function abrirDia(numero: number) {
       if (a?.id !== alvoAtual?.id || a?.tipo !== alvoAtual?.tipo) {
         alvoAtual = a;
         rotuloAlvo.hidden = !a;
-        if (a) rotuloAlvo.textContent = `${a.rotulo}  ·  E ${a.tipo === 'equip' ? 'abre o console' : 'mostra o enlace'}`;
+        if (a) rotuloAlvo.textContent = `${a.rotulo}  ·  E: o que fazer`;
         mira.classList.toggle('ativa', !!a);
       }
     });
@@ -269,20 +370,15 @@ function abrirDia(numero: number) {
         abrirTerminal(terminal.hidden);
       } else if (e.code === 'KeyP') {
         lado.hidden = !lado.hidden;
-      } else if (e.code === 'KeyE' && alvoAtual) {
+      } else if (e.code === 'KeyE' && alvoAtual && !menuAberto) {
         e.preventDefault();
-        const a = alvoAtual;
-        abrirTerminal(true);
-        if (a.tipo === 'equip') {
-          if (term.contexto && term.contexto !== a.id) rodar('sair');
-          if (term.contexto !== a.id) rodar(`console ${a.id}`);
-        } else rodar(`cabo ${a.id}`);
+        abrirAcoes(alvoAtual.tipo, alvoAtual.id);
       }
     };
   }
 
   escrever(dia.chamado);
-  escrever(['', 'Digite "ajuda" para ver os comandos. Tab completa, setas recuperam o histórico.', '']);
+  escrever(['', 'Tudo dá para fazer pelos menus. Quem quiser digitar: "ajuda" lista os comandos, Tab completa, setas recuperam o histórico.', '']);
   atualizar();
 
   input.addEventListener('keydown', (ev) => {

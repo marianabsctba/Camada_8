@@ -17,7 +17,7 @@ export const MESA_Y = 0.76;
 const NO_RACK = new Set<Equipamento['tipo']>(['switch', 'hub', 'roteador', 'mux', 'cmts', 'gateway-sat', 'terminal-sat']);
 
 export interface Alvo {
-  tipo: 'equip' | 'cabo';
+  tipo: 'equip' | 'cabo' | 'almox';
   id: string;
   rotulo: string;
 }

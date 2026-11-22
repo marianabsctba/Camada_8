@@ -25,7 +25,7 @@ const dia1: Dia = {
     'Você herdou o provedor Fibra Fim de Linha. A pessoa anterior foi embora e levou a senha do roteador de borda.',
     'Deixou só um post-it no rack: "a senha tá na cabeça". Não tinha cabeça nenhuma no rack.',
     'Objetivo: entrar no roteador, trocar a senha e NÃO perder a configuração que mantém a cidade no ar.',
-    'Comece com "ajuda" e "manual". O roteador se chama "roteador".',
+    'Mire no roteador e aperte E (ou clique nele em "No local", no painel) para ver o que dá para fazer. O manual explica o caminho.',
   ],
   manual: {
     titulo: 'Console, memória e o boot',
@@ -133,7 +133,7 @@ const dia3: Dia = {
   chamado: [
     'CHAMADO #0003  cliente furioso (em caixa alta, no texto do chamado)',
     '"CONTRATEI 100 MEGA E O DOWNLOAD MOSTRA 11 MEGA. QUERO MEU DINHEIRO DE VOLTA. E OS OUTROS 89 MEGA."',
-    'Objetivo: medir a vazão de verdade e responder as três perguntas do chamado ("perguntas").',
+    'Objetivo: medir a vazão de verdade e responder as três perguntas do chamado, no painel.',
   ],
   manual: {
     titulo: 'Unidades: bit, byte e os prefixos que mentem',
@@ -184,7 +184,7 @@ const dia4: Dia = {
   chamado: [
     'CHAMADO #0004  auditoria interna (você auditando você, já que não sobrou mais ninguém)',
     'Antes de mexer em mais nada, entenda o que passa no fio. Capture um ping entre pc1 e pc2 e disseque o quadro camada por camada.',
-    'Objetivo: responder as cinco "perguntas" com base na captura.',
+    'Objetivo: responder as cinco perguntas do chamado, no painel, com base na captura.',
   ],
   manual: {
     titulo: 'Camadas e encapsulamento',
