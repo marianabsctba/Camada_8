@@ -1,6 +1,6 @@
 // O robô segue o modo guiado de todos os dias, escolhendo a resposta certa de cada passo.
 import { describe, expect, it } from 'vitest';
-import { DIAS } from '../src/conteudo/dias';
+import { DIAS, porRef } from '../src/conteudo/dias';
 import { camposDoPasso, executarPasso } from '../src/conteudo/guia';
 import { Terminal } from '../src/motor/cli';
 
@@ -37,7 +37,7 @@ describe('modo guiado', () => {
       [18, 2, { orbita: 'meo' }, /100 ms/],
     ];
     for (const [n, idx, escolha, re] of casos) {
-      const dia = DIAS[n - 1]!;
+      const dia = porRef(n);
       const t = new Terminal(dia.montar(), dia);
       for (let i = 0; i < idx; i++) executarPasso(t, dia, dia.passos![i]!, dia.passos![i]!.exemplo ?? {});
       const r = executarPasso(t, dia, dia.passos![idx]!, escolha);

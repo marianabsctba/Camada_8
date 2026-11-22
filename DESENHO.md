@@ -56,7 +56,7 @@ No fim, a tela de **fechamento** mostra o que se aprendeu, a seção do currícu
 
 ## 5. Mapa de cobertura
 
-Cada linha é uma seção (ou um grupo de subseções pequenas) e o dia em que ela é ensinada. **122 dias** no total.
+Cada linha é uma seção (ou um grupo de subseções pequenas) e o dia em que ela é ensinada. A ordem oficial, já com os dias escritos encaixados, está em `src/conteudo/curriculo.ts`: **125 dias**, porque algumas seções ganharam mais de um dia (o par trançado tem cinco, a fibra tem três). A tabela abaixo é o plano original, por seção.
 
 ### Ato 0: Fim de Linha (introdução), dias 1 a 14
 

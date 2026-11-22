@@ -7,8 +7,7 @@ const TRAVESSAO = /[—–]/;
 
 describe('robô joga os dias pelo terminal', () => {
   it('tem solução para todo dia, em sequência', () => {
-    expect(DIAS.map((d) => d.numero)).toEqual(DIAS.map((_, i) => i + 1));
-    for (const d of DIAS) expect(SOLUCOES[d.numero], `dia ${d.numero}`).toBeDefined();
+    for (const d of DIAS) expect(SOLUCOES[d.ref!], `dia ${d.numero}`).toBeDefined();
   });
 
   for (const dia of DIAS) {
@@ -16,7 +15,7 @@ describe('robô joga os dias pelo terminal', () => {
       const t = new Terminal(dia.montar(), dia);
       expect(dia.objetivo(t.mundo).every((i) => i.ok), 'já começa resolvido').toBe(false);
       const saidas: string[] = [];
-      for (const linha of SOLUCOES[dia.numero]!) saidas.push(`> ${linha}`, ...t.executar(linha));
+      for (const linha of SOLUCOES[dia.ref!]!) saidas.push(`> ${linha}`, ...t.executar(linha));
       const itens = dia.objetivo(t.mundo);
       const falhas = itens.filter((i) => !i.ok).map((i) => `${i.texto} (${i.detalhe ?? ''})`);
       expect(falhas, saidas.join('\n')).toEqual([]);

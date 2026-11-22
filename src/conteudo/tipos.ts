@@ -55,21 +55,111 @@ export interface Dia {
   posMorte: string[];
   /** Roteiro do modo guiado. */
   passos?: Passo[];
+  /** Número original do dia escrito (antes da renumeração do currículo). */
+  ref?: number;
+  /** Seção do currículo coberta. */
+  secao?: string;
+  /** O que acende no mapa da cidade. */
+  luz?: string[];
+  aula?: Aula;
+  desafio?: Desafio;
+}
+
+/* ---------- aula ---------- */
+
+export type Visual =
+  | { tipo: 'conector'; padrao: 'T568A' | 'T568B' | 'ambos' }
+  | { tipo: 'camadas'; camadas: string[]; rotulo?: string }
+  | { tipo: 'bits'; antes: string; depois: string; legenda?: string }
+  | { tipo: 'janela'; total: number; janela: number; perdido?: number }
+  | { tipo: 'calculadora'; formula: 'shannon' | 'nyquist' | 'fspl' | 'fresnel' | 'orcamento' | 'transmissao' | 'unidades' | 'janela' | 'atenuacao' }
+  | { tipo: 'tabela'; cabecalho: string[]; linhas: string[][] }
+  | { tipo: 'diagrama'; nos: { id: string; rotulo: string; x: number; y: number }[]; ligacoes: [string, string, string?][] }
+  | { tipo: 'espectro'; canais: { canal: number; dbm: number; rotulo: string }[] }
+  | { tipo: 'sinal'; harmonicos: number };
+
+export interface Cartao {
+  titulo: string;
+  texto: string[];
+  visual?: Visual;
+}
+
+export interface Checagem {
+  pergunta: string;
+  opcoes: string[];
+  certa: number;
+  explicacao: string;
+}
+
+export interface Aula {
+  cartoes: Cartao[];
+  checagem: Checagem;
+}
+
+/* ---------- desafio ---------- */
+
+export interface Desafio {
+  /** A carta do desafio: o mesmo conceito, outro problema. */
+  carta: string[];
+  montar: () => Mundo;
+  objetivo: (m: Mundo) => ItemObjetivo[];
+  dicas: string[];
+  perguntas?: Pergunta[];
+  /** Como o robô resolve só clicando: [tipo do alvo, id, ação, valores]. */
+  solucao: ['equip' | 'cabo' | 'almox', string, string, Record<string, string>?][];
+  /** Respostas das perguntas, para o robô. */
+  respostas?: Record<string, string>;
 }
 
 export interface Ato {
   numero: number;
   nome: string;
   tema: string;
+  lugar: string;
+  /** Texto de abertura do ato, contando onde a história está. */
+  abertura: string[];
+  /** O que acende no mapa ao fechar o ato. */
+  marco: string;
 }
 
 export const ATOS: Ato[] = [
-  { numero: 0, nome: 'Sem Senha', tema: 'Introdução' },
-  { numero: 1, nome: 'O Poste', tema: 'Camada física' },
-  { numero: 2, nome: 'O Quadro', tema: 'Camada de enlace' },
-  { numero: 3, nome: 'O Barramento', tema: 'Subcamada MAC' },
-  { numero: 4, nome: 'A Cidade', tema: 'Camada de rede' },
-  { numero: 5, nome: 'A Conversa', tema: 'Camada de transporte' },
-  { numero: 6, nome: 'O Show', tema: 'Camada de aplicação' },
-  { numero: 7, nome: 'O Cerco', tema: 'Segurança' },
+  {
+    numero: 0,
+    nome: 'Fim de Linha',
+    tema: 'Introdução',
+    lugar: 'o galpão do provedor',
+    abertura: [
+      'Fim de Linha é a última cidade da estrada. Tem escola, hospital, cooperativa, uma represa e nenhuma internet.',
+      'A prefeitura cedeu um galpão, um rack vazio e uma caixa de ferramentas para quem topasse ligar a cidade ao mundo. Você topou. Não sabe nada de redes. Ainda.',
+      'Neste ato você aprende o que é uma rede, como ela se organiza em camadas e por que tudo isso importa para quem mora aqui.',
+    ],
+    marco: 'O galpão acende: a Fibra Fim de Linha existe.',
+  },
+  {
+    numero: 1,
+    nome: 'A Rua',
+    tema: 'Camada física',
+    lugar: 'a rua, o poste e a torre',
+    abertura: [
+      'O galpão está montado. Agora é preciso levar o sinal até as casas: por cobre, por fibra, pelo ar, por satélite.',
+      'Neste ato você aprende como um bit vira sinal elétrico, luz ou onda de rádio, e tudo o que atrapalha no caminho.',
+    ],
+    marco: 'A Rua das Acácias acende: 12 casas online.',
+  },
+  {
+    numero: 2,
+    nome: 'A Linha',
+    tema: 'Camada de enlace',
+    lugar: 'a central telefônica antiga',
+    abertura: [
+      'Os sinais chegam. Mas chegam com erros, misturados, sem começo nem fim. A prefeitura liberou a central telefônica antiga para virar o coração dos enlaces.',
+      'Neste ato você aprende a cortar o fluxo de bits em quadros, a perceber e corrigir erros e a retransmitir o que se perdeu.',
+    ],
+    marco: 'O enlace até a cidade vizinha liga: Fim de Linha conversa com o mundo pela primeira vez.',
+  },
+  { numero: 3, nome: 'O Bairro', tema: 'Subcamada MAC', lugar: 'o prédio, a escola e a praça', abertura: ['Muita gente quer usar o mesmo meio ao mesmo tempo.'], marco: 'O bairro inteiro acende, com Wi-Fi na praça.' },
+  { numero: 4, nome: 'A Cidade', tema: 'Camada de rede', lugar: 'o data center municipal', abertura: ['Os bairros precisam se enxergar, e a cidade precisa de rota para fora.'], marco: 'Todos os bairros se enxergam, e a cidade tem rota para o mundo.' },
+  { numero: 5, nome: 'A Conversa', tema: 'Camada de transporte', lugar: 'a sala dos servidores', abertura: ['As conexões precisam ser rápidas, justas e confiáveis.'], marco: 'Videochamada estável no hospital.' },
+  { numero: 6, nome: 'O Show', tema: 'Camada de aplicação', lugar: 'o estádio no dia da final', abertura: ['A cidade inteira vai assistir à final ao vivo.'], marco: 'Fim de Linha inteira assiste ao jogo ao vivo.' },
+  { numero: 7, nome: 'O Cerco', tema: 'Segurança', lugar: 'o centro de operações, à noite', abertura: ['Agora que a cidade importa, alguém quer derrubá-la.'], marco: 'Fim de Linha vira ponto de troca de tráfego.' },
 ];

@@ -1,11 +1,11 @@
 // As armadilhas didáticas precisam falhar do jeito que o manual promete.
 import { describe, expect, it } from 'vitest';
-import { DIAS } from '../src/conteudo/dias';
+import { porRef } from '../src/conteudo/dias';
 import { Terminal } from '../src/motor/cli';
 import { avaliar } from '../src/motor/fisico';
 
 function jogar(n: number, linhas: string[]) {
-  const dia = DIAS[n - 1]!;
+  const dia = porRef(n);
   const t = new Terminal(dia.montar(), dia);
   const saida = linhas.flatMap((l) => t.executar(l));
   return { t, dia, saida, ok: dia.objetivo(t.mundo).every((i) => i.ok) };

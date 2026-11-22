@@ -5,34 +5,43 @@ import { DIAS } from './conteudo/dias';
 import { ATOS } from './conteudo/tipos';
 import { camposDoPasso, executarPasso } from './conteudo/guia';
 import { Terminal } from './motor/cli';
-import { abrirFimDoDia, abrirPasso } from './ui/passo';
+import { abrirPasso } from './ui/passo';
+import { abrirAula } from './ui/aula';
+import { abrirMenu } from './ui/menu';
+import { contarConectados, desenharMapa, lugarDaLuz, nomeDoLugar } from './ui/mapa';
+import { CURRICULO, type EntradaCurriculo } from './conteudo/curriculo';
+import type { Dia } from './conteudo/tipos';
+import { acoesDo, executarAcao, type TipoAlvo } from './motor/acoes';
 import { iniciarControles, J, soltarMouse } from './tres/jogador';
 import { esperarCarga, preCarregarMoveis } from './tres/glb';
 import { iniciar3d, M, pausar3d } from './tres/motor3d';
 import { preCarregarTexturas } from './tres/pbr';
 import { alvoNaMira, atualizarEquipamentos, destacar, montarSala } from './tres/sala';
 
-const CHAVE = 'camada8.progresso';
+const CHAVE = 'camada8.v2';
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
-function lerProgresso(): number[] {
+function lerEstado(): { feitos: number[]; atos: number[] } {
   try {
-    const v = JSON.parse(localStorage.getItem(CHAVE) ?? '[]');
-    return Array.isArray(v) ? v.filter((n) => typeof n === 'number') : [];
+    const v = JSON.parse(localStorage.getItem(CHAVE) ?? '{}');
+    const nums = (x: unknown) => (Array.isArray(x) ? x.filter((n) => typeof n === 'number') : []);
+    return { feitos: nums(v.feitos), atos: nums(v.atos) };
   } catch {
-    return [];
+    return { feitos: [], atos: [] };
   }
 }
 
-function gravarProgresso(lista: number[]) {
+function gravarEstado() {
   try {
-    localStorage.setItem(CHAVE, JSON.stringify([...new Set(lista)]));
+    localStorage.setItem(CHAVE, JSON.stringify({ feitos: [...new Set(resolvidos)], atos: [...new Set(atosAbertos)] }));
   } catch {
     /* sem armazenamento: o progresso vale só nesta aba */
   }
 }
 
-let resolvidos = lerProgresso();
+const estado = lerEstado();
+let resolvidos = estado.feitos;
+let atosAbertos = estado.atos;
 
 const CHAVE_MODO = 'camada8.modo';
 function lerModo(): '3d' | 'terminal' {
@@ -81,7 +90,7 @@ function capa() {
     patch.append(p);
   }
   const jogar = el('button', { class: 'botao' }, resolvidos.length ? 'Continuar' : 'Começar o plantão');
-  jogar.addEventListener('click', () => abrirDia(proximoDia()));
+  jogar.addEventListener('click', () => mapaTela());
   const titulo = el('h1');
   titulo.innerHTML = 'CAMADA <span>8</span>';
   app.replaceChildren(
@@ -101,10 +110,6 @@ function capa() {
   );
 }
 
-function proximoDia(): number {
-  const n = DIAS.find((d) => !resolvidos.includes(d.numero));
-  return n ? n.numero : DIAS[DIAS.length - 1]!.numero;
-}
 
 
 /* ---------- Dia (modo guiado) ---------- */
@@ -131,7 +136,7 @@ function abrirDia(numero: number) {
     if (!dias.length) continue;
     const grupo = el('optgroup', { label: `Ato ${ato.numero}: ${ato.nome}` });
     for (const d of dias) {
-      const liberado = d.numero <= proximoDia() || resolvidos.includes(d.numero);
+      const liberado = resolvidos.includes(d.numero) || proximaEntrada()?.numero === d.numero;
       const o = el('option', { value: String(d.numero) }, `${resolvidos.includes(d.numero) ? '● ' : ''}Dia ${d.numero}: ${d.titulo}`);
       if (!liberado) o.setAttribute('disabled', '');
       if (d.numero === numero) o.setAttribute('selected', '');
@@ -139,16 +144,11 @@ function abrirDia(numero: number) {
     }
     seletor.append(grupo);
   }
-  seletor.addEventListener('change', () => abrirDia(Number(seletor.value)));
+  seletor.addEventListener('change', () => iniciarDia(DIAS.find((d) => d.numero === Number(seletor.value))!));
 
   const marca = el('button', { class: 'marca', title: 'Voltar à capa' });
   marca.innerHTML = 'CAMADA <span>8</span>';
-  marca.addEventListener('click', () => {
-    teclas3d = null;
-    pausar3d();
-    soltarMouse();
-    capa();
-  });
+  marca.addEventListener('click', () => mapaTela());
 
   const ato = ATOS[dia.ato]!;
   const lista = el('ul', { class: 'objetivos' });
@@ -210,21 +210,8 @@ function abrirDia(numero: number) {
 
   const terminarDia = () => {
     term.resolvido = true;
-    if (!resolvidos.includes(dia.numero)) {
-      resolvidos = [...resolvidos, dia.numero];
-      gravarProgresso(resolvidos);
-    }
-    escrever(['', 'CHAMADO FECHADO.']);
-    janelaAberta = true;
-    abrirFimDoDia(
-      `Dia ${dia.numero}: ${dia.titulo}`,
-      dia.posMorte,
-      numero < DIAS.length ? () => abrirDia(numero + 1) : null,
-      () => {
-        janelaAberta = false;
-        liberarFn();
-      },
-    );
+    escrever(['', 'PRÁTICA CONCLUÍDA.']);
+    depoisDaPratica(dia);
   };
 
   function fazerPasso() {
@@ -353,6 +340,275 @@ function abrirDia(numero: number) {
   escrever(dia.chamado);
   escrever(['']);
   atualizar();
+}
+
+/* ---------- Fluxo da história: mapa, abertura do ato, carta, aula, prática, desafio, fechamento ---------- */
+
+function sairDo3d() {
+  teclas3d = null;
+  pausar3d();
+  soltarMouse();
+}
+
+/** Próximo dia jogável ainda não feito, na ordem do currículo. */
+function proximaEntrada(): EntradaCurriculo | undefined {
+  return CURRICULO.find((e) => e.ref !== undefined && !resolvidos.includes(e.numero));
+}
+
+function diaDaEntrada(e: EntradaCurriculo): Dia | undefined {
+  return DIAS.find((d) => d.numero === e.numero);
+}
+
+function mapaTela(recente?: number) {
+  sairDo3d();
+  const prox = proximaEntrada();
+  const { lugares, casas } = contarConectados(resolvidos);
+  const atoAtual = prox?.ato ?? 7;
+  const ato = ATOS[atoAtual]!;
+  const marca = el('button', { class: 'marca', title: 'Voltar à capa' });
+  marca.innerHTML = 'CAMADA <span>8</span>';
+  marca.addEventListener('click', capa);
+  const abrir = (e: EntradaCurriculo) => {
+    const d = diaDaEntrada(e);
+    if (!d) return;
+    if (!atosAbertos.includes(e.ato)) aberturaAto(e.ato, () => iniciarDia(d));
+    else iniciarDia(d);
+  };
+  const svg = desenharMapa({ feitos: resolvidos, recente, proximo: prox, aoEscolher: abrir });
+  const lista = el('ol', { class: 'lista-dias' });
+  for (const e of CURRICULO.filter((x) => x.ato === atoAtual)) {
+    const feito = resolvidos.includes(e.numero);
+    const pronto = e.ref !== undefined;
+    const ehProx = prox?.numero === e.numero;
+    const li = el('li', { class: feito ? 'feito' : ehProx ? 'proximo' : pronto ? 'pronto' : 'construcao' }, el('span', { class: 'num' }, String(e.numero)), el('span', {}, e.titulo, el('small', {}, `seção ${e.secao}${pronto ? '' : ' · em construção'}`)));
+    if (pronto && (feito || ehProx)) {
+      li.setAttribute('tabindex', '0');
+      li.addEventListener('click', () => abrir(e));
+    }
+    lista.append(li);
+  }
+  const botao = el('button', { class: 'botao' }, prox ? `Ir para o dia ${prox.numero}` : 'Tudo pronto até aqui');
+  if (prox) botao.addEventListener('click', () => abrir(prox));
+  else botao.setAttribute('disabled', '');
+  const lado = el(
+    'aside',
+    { class: 'mapa-lado' },
+    el('div', { class: 'topo' }, marca),
+    el('div', { class: 'etiqueta' }, `Ato ${ato.numero} · ${ato.tema}`),
+    el('h2', {}, ato.nome),
+    el('p', { class: 'nota' }, `${resolvidos.length} de ${CURRICULO.length} dias · ${lugares} lugares e ${casas} casas conectados`),
+    botao,
+    lista,
+  );
+  app.replaceChildren(el('main', { class: 'mapa-tela' }, el('div', { class: 'mapa-area' }, svg), lado));
+  queueMicrotask(() => botao.focus());
+}
+
+function aberturaAto(n: number, depois: () => void) {
+  const ato = ATOS[n]!;
+  const seguir = el('button', { class: 'botao' }, 'Começar o ato');
+  seguir.addEventListener('click', () => {
+    if (!atosAbertos.includes(n)) atosAbertos = [...atosAbertos, n];
+    gravarEstado();
+    depois();
+  });
+  const fundo = el('div', { class: 'abertura-mapa' }, desenharMapa({ feitos: resolvidos, aoEscolher: () => {} }));
+  app.replaceChildren(el('main', { class: 'abertura' }, fundo, el('div', { class: 'abertura-texto' }, el('div', { class: 'etiqueta' }, `Ato ${ato.numero} · ${ato.tema}`), el('h1', {}, ato.nome), el('p', { class: 'onde-ato' }, `Onde: ${ato.lugar}`), ...ato.abertura.map((p) => el('p', {}, p)), seguir)));
+  queueMicrotask(() => seguir.focus());
+}
+
+function iniciarDia(dia: Dia) {
+  sairDo3d();
+  const temAula = !!dia.aula;
+  const seguir = el('button', { class: 'botao' }, temAula ? 'Assistir à aula' : 'Ir para a prática');
+  const pular = el('button', { class: 'botao fantasma' }, 'Pular para a prática');
+  const irPratica = () => abrirDia(dia.numero);
+  seguir.addEventListener('click', () => {
+    if (!temAula) return irPratica();
+    const raiz = el('main', { class: 'tela-aula' });
+    app.replaceChildren(raiz);
+    abrirAula(raiz, `Dia ${dia.numero}: ${dia.titulo}`, dia.aula!, irPratica);
+  });
+  pular.addEventListener('click', irPratica);
+  const voltar = el('button', { class: 'botao fantasma' }, 'Voltar ao mapa');
+  voltar.addEventListener('click', () => mapaTela());
+  const ato = ATOS[dia.ato]!;
+  app.replaceChildren(
+    el(
+      'main',
+      { class: 'carta-tela' },
+      el(
+        'div',
+        { class: 'carta' },
+        el('div', { class: 'etiqueta' }, `Ato ${ato.numero} · ${ato.nome} · seção ${dia.secao ?? ''}`),
+        el('h1', {}, `Dia ${dia.numero}: ${dia.titulo}`),
+        el('div', { class: 'carta-papel' }, ...dia.chamado.map((t) => el('p', {}, t))),
+        el('p', { class: 'nota' }, temAula ? 'Primeiro a aula, depois a prática guiada, depois um desafio sem ajuda.' : 'Prática guiada, depois um desafio sem ajuda.'),
+        el('div', { class: 'linha-botoes' }, seguir, ...(temAula ? [pular] : []), voltar),
+      ),
+    ),
+  );
+  queueMicrotask(() => seguir.focus());
+}
+
+function depoisDaPratica(dia: Dia) {
+  if (dia.desafio) abrirDesafio(dia);
+  else fechamento(dia);
+}
+
+function fechamento(dia: Dia) {
+  sairDo3d();
+  if (!resolvidos.includes(dia.numero)) resolvidos = [...resolvidos, dia.numero];
+  gravarEstado();
+  const doAto = CURRICULO.filter((e) => e.ato === dia.ato && e.ref !== undefined);
+  const fechouAto = doAto.every((e) => resolvidos.includes(e.numero));
+  const acendeu = [...new Set((dia.luz ?? []).map((l) => nomeDoLugar(lugarDaLuz(l))))];
+  const mapa = el('button', { class: 'botao' }, 'Ver o mapa da cidade');
+  mapa.addEventListener('click', () => mapaTela(dia.numero));
+  app.replaceChildren(
+    el(
+      'main',
+      { class: 'carta-tela' },
+      el(
+        'div',
+        { class: 'carta fim' },
+        el('div', { class: 'etiqueta' }, `Dia ${dia.numero} concluído · seção ${dia.secao ?? ''}`),
+        el('h1', {}, dia.titulo),
+        el('div', { class: 'acendeu' }, el('strong', {}, 'Acendeu no mapa: '), acendeu.join(', ')),
+        ...(fechouAto ? [el('div', { class: 'marco' }, el('strong', {}, `Fim do ato ${dia.ato}. `), ATOS[dia.ato]!.marco)] : []),
+        el('h3', {}, 'O que você aprendeu'),
+        ...dia.posMorte.map((p) => el('p', {}, p)),
+        el('div', { class: 'linha-botoes' }, mapa),
+      ),
+    ),
+  );
+  queueMicrotask(() => mapa.focus());
+}
+
+function abrirDesafio(dia: Dia) {
+  const des = dia.desafio!;
+  const diaD: Dia = { ...dia, chamado: des.carta, perguntas: des.perguntas ?? [], objetivo: des.objetivo, dicas: des.dicas, passos: [] };
+  const term = new Terminal(des.montar(), diaD);
+  let dicas = 0;
+  let menuAberto = false;
+  let terminou = false;
+  const painel = el('div', { class: 'hud-guia desafio' });
+  const local = el('div', { class: 'local' });
+
+  const abrirAcoesDesafio = (tipo: TipoAlvo, id: string) => {
+    if (menuAberto) return;
+    menuAberto = true;
+    J.livre = false;
+    soltarMouse();
+    const e = term.mundo.equipamentos.get(id);
+    const c = term.mundo.cabos.get(id);
+    abrirMenu({
+      titulo: tipo === 'almox' ? 'Almoxarifado' : tipo === 'cabo' ? `Cabo ${id}` : id,
+      subtitulo: e ? e.modelo : c ? `${c.a.equip}:${c.a.porta} ⇄ ${c.b.equip}:${c.b.porta} · ${c.meio.toUpperCase()} · ${c.metros} m` : 'o que tem na estante',
+      acoes: () => acoesDo(term.mundo, tipo, id).filter((a) => !a.abreConsole),
+      classe,
+      executar: (a, v) => {
+        const f = executarAcao(term, a, v);
+        if (modo === '3d') atualizarEquipamentos(term.mundo);
+        desenhar();
+        return f;
+      },
+      abrirConsole: () => {},
+      aoFechar: () => {
+        menuAberto = false;
+        J.livre = modo === '3d';
+        desenhar();
+      },
+    });
+  };
+
+  function desenhar() {
+    const itens = des.objetivo(term.mundo);
+    const bDica = el('button', { class: 'botao fantasma mini' }, dicas < des.dicas.length ? 'Me dá uma dica' : 'Sem mais dicas');
+    bDica.addEventListener('click', () => {
+      if (dicas < des.dicas.length) dicas++;
+      desenhar();
+    });
+    const perguntas = (des.perguntas ?? []).map((p) => {
+      const resp = term.mundo.respostas[p.id];
+      const certa = resp !== undefined && p.confere(resp, term.mundo);
+      const entrada = el('input', { value: resp ?? '', placeholder: 'sua resposta', autocomplete: 'off', spellcheck: 'false' });
+      const f = el('form', { class: 'pergunta' + (certa ? ' certa' : resp !== undefined ? ' errada' : '') }, el('p', {}, p.texto), el('div', { class: 'linha-botoes' }, entrada, el('button', { class: 'botao mini', type: 'submit' }, 'Responder')));
+      f.addEventListener('submit', (ev) => {
+        ev.preventDefault();
+        if (entrada.value.trim()) term.executar(`responder ${p.id} ${entrada.value.trim()}`);
+        desenhar();
+      });
+      return f;
+    });
+    painel.replaceChildren(
+      el('h3', {}, 'Desafio · sem seta, sem passo a passo'),
+      ...des.carta.map((t) => el('p', { class: 'carta-desafio' }, t)),
+      el('ul', { class: 'objetivos' }, ...itens.map((i) => el('li', i.ok ? { class: 'ok' } : {}, el('span', {}, i.texto, ...(i.detalhe ? [el('small', {}, i.detalhe)] : []))))),
+      ...perguntas,
+      ...des.dicas.slice(0, dicas).map((d, i) => el('p', { class: 'dica' }, `Dica ${i + 1}: ${d}`)),
+      el('p', { class: 'onde' }, modo === '3d' ? 'Mire em qualquer aparelho, cabo ou na estante e aperte E.' : 'Escolha um aparelho ou cabo abaixo.'),
+      ...(modo === '3d' ? [] : [local]),
+      el('div', { class: 'linha-botoes' }, bDica),
+    );
+    const m = term.mundo;
+    const botao = (tipo: TipoAlvo, id: string, txt: string, sub: string) => {
+      const b = el('button', { class: 'item-local' }, el('strong', {}, txt), el('small', {}, sub));
+      b.addEventListener('click', () => abrirAcoesDesafio(tipo, id));
+      return b;
+    };
+    local.replaceChildren(
+      ...[...m.equipamentos.values()].map((e) => botao('equip', e.nome, e.nome, e.modelo)),
+      ...[...m.cabos.values()].map((c) => botao('cabo', c.id, `cabo ${c.id}`, `${c.a.equip} ⇄ ${c.b.equip}`)),
+      ...(Object.keys(m.catalogo).length ? [botao('almox', 'almox', 'almoxarifado', 'equipamentos para instalar')] : []),
+    );
+    if (!terminou && itens.every((i) => i.ok)) {
+      terminou = true;
+      setTimeout(() => fechamento(dia), 900);
+    }
+  }
+
+  if (modo === 'terminal') {
+    sairDo3d();
+    app.replaceChildren(el('main', { class: 'jogo desafio-plano' }, el('aside', { class: 'lado' }, el('div', { class: 'etiqueta' }, `Dia ${dia.numero} · desafio`), el('h2', {}, dia.titulo), painel)));
+    desenhar();
+    return;
+  }
+  const palco = el('main', { class: 'jogo3d' });
+  const mira = el('div', { class: 'mira', 'aria-hidden': 'true' });
+  const rotuloAlvo = el('div', { class: 'hud-alvo', hidden: '' });
+  const carregando = el('div', { class: 'carregando' }, el('div', { class: 'carregando-leds' }, ...Array.from({ length: 8 }, () => el('i'))), el('p', {}, 'Preparando o desafio...'));
+  palco.append(el('div', { class: 'hud-topo' }, el('div', { class: 'hud-titulo' }, `Desafio do dia ${dia.numero}: ${dia.titulo}`)), painel, mira, rotuloAlvo, el('div', { class: 'hud-dicas' }, 'Clique na cena para olhar · WASD anda · E mostra o que dá para fazer · Esc solta o mouse'), carregando);
+  app.replaceChildren(palco);
+  const canvas = iniciar3d(palco);
+  canvas.style.opacity = '0';
+  montarSala(term.mundo, ['Desafio', dia.titulo, 'Sem seta hoje']);
+  destacar(null);
+  iniciarControles(canvas, palco);
+  J.livre = true;
+  void esperarCarga().then(() => {
+    canvas.style.transition = 'opacity 0.5s';
+    canvas.style.opacity = '1';
+    carregando.classList.add('sumindo');
+    setTimeout(() => carregando.remove(), 600);
+  });
+  let alvoAtual: ReturnType<typeof alvoNaMira> = null;
+  M.atualizar.add(() => {
+    const a = J.livre ? alvoNaMira() : null;
+    alvoAtual = a;
+    rotuloAlvo.hidden = !a;
+    mira.classList.toggle('ativa', !!a);
+    if (a) rotuloAlvo.textContent = `${a.rotulo}  ·  E: o que fazer`;
+  });
+  teclas3d = (e) => {
+    const alvo = e.target as HTMLElement;
+    if (alvo?.tagName === 'INPUT' || menuAberto) return;
+    if (e.code === 'KeyE' && alvoAtual) {
+      e.preventDefault();
+      abrirAcoesDesafio(alvoAtual.tipo, alvoAtual.id);
+    }
+  };
+  desenhar();
 }
 
 preCarregarMoveis();

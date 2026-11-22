@@ -1,6 +1,6 @@
 // O robô resolve todos os dias só clicando: escolhe o alvo, a ação e preenche o formulário.
 import { describe, expect, it } from 'vitest';
-import { DIAS } from '../src/conteudo/dias';
+import { DIAS, porRef } from '../src/conteudo/dias';
 import { acoesDo, executarAcao, padroes, type TipoAlvo } from '../src/motor/acoes';
 import { Terminal } from '../src/motor/cli';
 
@@ -98,17 +98,17 @@ const ROTEIROS: Record<number, Passo[]> = {
 };
 
 describe('robô resolve os dias só pelos menus', () => {
-  for (const dia of DIAS.filter((d) => ROTEIROS[d.numero])) {
+  for (const dia of DIAS.filter((d) => ROTEIROS[d.ref!])) {
     it(`dia ${dia.numero}: ${dia.titulo}`, () => {
       const t = new Terminal(dia.montar(), dia);
       const log: string[] = [];
-      for (const [tipo, id, acaoId, valores] of ROTEIROS[dia.numero] ?? []) {
+      for (const [tipo, id, acaoId, valores] of ROTEIROS[dia.ref!] ?? []) {
         const acoes = acoesDo(t.mundo, tipo, id);
         const acao = acoes.find((a) => a.id === acaoId);
         expect(acao, `dia ${dia.numero}: ação ${acaoId} em ${id}; tem ${acoes.map((a) => a.id).join(', ')}`).toBeDefined();
         for (const f of executarAcao(t, acao!, { ...padroes(acao!), ...(valores ?? {}) })) log.push(`${f.prompt} ${f.comando}`, ...f.saida);
       }
-      for (const [id, v] of Object.entries(RESPOSTAS[dia.numero] ?? {})) t.executar(`responder ${id} ${v}`);
+      for (const [id, v] of Object.entries(RESPOSTAS[dia.ref!] ?? {})) t.executar(`responder ${id} ${v}`);
       const falhas = dia.objetivo(t.mundo).filter((i) => !i.ok).map((i) => `${i.texto} (${i.detalhe ?? ''})`);
       expect(falhas, log.join('\n')).toEqual([]);
     });
@@ -131,7 +131,7 @@ describe('robô resolve os dias só pelos menus', () => {
 
 describe('menus guiam pelo estado do aparelho', () => {
   it('dia 1: roteador trancado oferece religar primeiro e não oferece interromper', () => {
-    const dia = DIAS[0]!;
+    const dia = porRef(1);
     const t = new Terminal(dia.montar(), dia);
     const ids = acoesDo(t.mundo, 'equip', 'roteador').map((a) => a.id);
     expect(ids[0]).toBe('religar');
@@ -140,7 +140,7 @@ describe('menus guiam pelo estado do aparelho', () => {
     expect(acoesDo(t.mundo, 'equip', 'roteador')[0]!.id).toBe('interromper');
   });
   it('interromper fora do boot explica o que fazer', () => {
-    const dia = DIAS[0]!;
+    const dia = porRef(1);
     const t = new Terminal(dia.montar(), dia);
     t.executar('console roteador');
     expect(t.executar('interromper').join(' ')).toContain('Religue primeiro');
