@@ -26,7 +26,7 @@ const ATO0: Linha[] = [
   ['1.6.3 a 1.6.5', 'Os modelos e as críticas', ['biblioteca']],
   ['1.7', 'Quem manda nos padrões', ['prefeitura']],
   ['1.8.1 e 1.8.2', 'Neutralidade da rede', ['camara']],
-  ['1.8.3 a 1.8.5', 'Sem senha', ['roteador-galpao'], 1],
+  ['1.8.3 a 1.8.5', 'Segurança, privacidade e desinformação', ['camara']],
   ['1.9', 'Bit não é byte', ['casa-5'], 3],
 ];
 
@@ -42,7 +42,7 @@ const ATO1: Linha[] = [
   ['2.1.5', 'Amarelo com aqua', ['prefeitura-andar'], 12],
   ['2.1.5', 'Orçamento de potência', ['distrito', 'escola-distrito'], 10],
   ['2.1.5', 'Retroescavadeira', ['avenida'], 11],
-  ['2.2.1', 'Canal lotado', ['padaria'], 16],
+  ['2.2.1', 'O espectro eletromagnético', ['torre-celular']],
   ['2.2.2 a 2.2.4', 'Espalhar para não brigar', ['praca']],
   ['2.3.1 e 2.3.2', 'Rádio no morro', ['morro'], 15],
   ['2.3.3 e 2.3.4', 'Luz pelo ar', ['predio-vizinho']],
@@ -75,7 +75,8 @@ const ATO2: Linha[] = [
   ['3.4', 'Encher o cano', ['fazenda-3'], 27],
   ['3.4', 'Janela de oito', ['hospital'], 28],
   ['3.4', 'Só o que se perdeu', ['serra'], 29],
-  ['3.5', 'PPP no último quilômetro', ['cidade-vizinha'], 30],
+  ['3.5.1', 'PPP no último quilômetro', ['cidade-vizinha'], 30],
+  ['3.5.2 e 3.5.3', 'O enlace do ADSL e do cabo', ['central-dsl']],
 ];
 
 const ATO3: Linha[] = [
@@ -88,7 +89,7 @@ const ATO3: Linha[] = [
   ['4.3.3', 'Desempenho da Ethernet', ['escola-lab-2']],
   ['4.3.4', 'Hub ou switch', ['condominio']],
   ['4.3.5 a 4.3.9', 'De 100 mega a 100 giga', ['condominio-2']],
-  ['4.4.1 e 4.4.2', 'Wi-Fi por dentro', ['biblioteca-wifi']],
+  ['4.4.1 e 4.4.2', 'Canal lotado', ['padaria'], 16],
   ['4.4.3', 'Pedir a vez no ar', ['praca-3']],
   ['4.4.4 e 4.4.5', 'Associar e autenticar', ['cafe']],
   ['4.5', 'Bluetooth', ['academia']],
@@ -162,13 +163,19 @@ const ATO7: Linha[] = [
   ['8.13', 'O ponto de troca', ['ix']],
 ];
 
+/**
+ * O prólogo não é uma seção do currículo: é a chegada ao galpão, com o roteador trancado.
+ * Fica com o número 0 para não deslocar a numeração dos dias.
+ */
+const PROLOGO: EntradaCurriculo = { numero: 0, ato: 0, secao: 'prólogo', titulo: 'Sem senha', luz: ['roteador-galpao'], ref: 1 };
+
 function montar(): EntradaCurriculo[] {
   const atos = [ATO0, ATO1, ATO2, ATO3, ATO4, ATO5, ATO6, ATO7];
   const out: EntradaCurriculo[] = [];
   atos.forEach((linhas, ato) => {
     for (const [secao, titulo, luz, ref] of linhas) out.push({ numero: out.length + 1, ato, secao, titulo, luz, ref });
   });
-  return out;
+  return [PROLOGO, ...out];
 }
 
 export const CURRICULO: EntradaCurriculo[] = montar();

@@ -70,6 +70,7 @@ const APELIDOS: Record<string, string> = {
   'escola-distrito': 'distrito',
   'central-sala': 'central',
   'central-modem': 'central',
+  'central-dsl': 'central',
   correio: 'central',
   'escola-lab': 'escola',
   'escola-v6': 'escola',

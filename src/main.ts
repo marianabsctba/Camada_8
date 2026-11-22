@@ -396,7 +396,7 @@ function mapaTela(recente?: number) {
     el('div', { class: 'topo' }, marca),
     el('div', { class: 'etiqueta' }, `Ato ${ato.numero} · ${ato.tema}`),
     el('h2', {}, ato.nome),
-    el('p', { class: 'nota' }, `${resolvidos.length} de ${CURRICULO.length} dias · ${lugares} lugares e ${casas} casas conectados`),
+    el('p', { class: 'nota' }, `${resolvidos.filter((n) => n > 0).length} de ${CURRICULO.length - 1} dias · ${lugares} lugares e ${casas} casas conectados`),
     botao,
     lista,
   );

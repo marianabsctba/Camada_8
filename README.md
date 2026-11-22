@@ -8,7 +8,7 @@ Você está sozinha, ou sozinho, com um alicate, um rack e uma cidade inteira qu
 
 ## Estado
 
-Modo guiado: cada dia é uma sequência de passos curtos. O jogo diz em uma frase o que fazer e por quê, uma seta laranja marca o objeto certo na sala em 3D, e o E faz o passo. Nas escolhas (cores do cabo, transceptor, canal), o erro vem explicado. Estão prontos os atos 0 (Sem Senha), 1 (O Poste) e 2 (O Quadro), com 30 dias e o motor de simulação das camadas física e de enlace. O documento de desenho está em [DESENHO.md](DESENHO.md).
+Modo guiado: cada dia é uma sequência de passos curtos. O jogo diz em uma frase o que fazer e por quê, uma seta laranja marca o objeto certo na sala em 3D, e o E faz o passo. Nas escolhas (cores do cabo, transceptor, canal), o erro vem explicado. Estão prontos os atos 0 (Sem Senha), 1 (O Poste) e 2 (O Quadro), com 30 dias e o motor de simulação das camadas física e de enlace. O documento de desenho está em [DESENHO.md](DESENHO.md), e a auditoria de cobertura, subseção por subseção, em [AUDITORIA.md](AUDITORIA.md).
 
 ## Rodar
 
