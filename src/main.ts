@@ -4,6 +4,9 @@ import './ui/estilo.css';
 import { DIAS } from './conteudo/dias';
 import { ATOS } from './conteudo/tipos';
 import { comandosCampo, Terminal } from './motor/cli';
+import { iniciarControles, J, soltarMouse } from './tres/jogador';
+import { iniciar3d, M, pausar3d } from './tres/motor3d';
+import { alvoNaMira, atualizarEquipamentos, montarSala } from './tres/sala';
 
 const CHAVE = 'camada8.progresso';
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -26,6 +29,31 @@ function gravarProgresso(lista: number[]) {
 }
 
 let resolvidos = lerProgresso();
+
+const CHAVE_MODO = 'camada8.modo';
+function lerModo(): '3d' | 'terminal' {
+  try {
+    const v = localStorage.getItem(CHAVE_MODO);
+    if (v === '3d' || v === 'terminal') return v;
+  } catch {
+    /* segue o padrão */
+  }
+  return matchMedia('(pointer: coarse)').matches ? 'terminal' : '3d';
+}
+let modo = lerModo();
+function trocarModo(novo: '3d' | 'terminal', dia: number) {
+  modo = novo;
+  try {
+    localStorage.setItem(CHAVE_MODO, novo);
+  } catch {
+    /* só nesta aba */
+  }
+  abrirDia(dia);
+}
+
+/** Teclas do modo 3D: um ouvinte só, que chama o dia aberto no momento. */
+let teclas3d: ((e: KeyboardEvent) => void) | null = null;
+addEventListener('keydown', (e) => teclas3d?.(e));
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, string> = {}, ...filhos: (Node | string)[]) {
   const e = document.createElement(tag);
@@ -98,7 +126,12 @@ function abrirDia(numero: number) {
 
   const marca = el('button', { class: 'marca', title: 'Voltar à capa' });
   marca.innerHTML = 'CAMADA <span>8</span>';
-  marca.addEventListener('click', capa);
+  marca.addEventListener('click', () => {
+    teclas3d = null;
+    pausar3d();
+    soltarMouse();
+    capa();
+  });
 
   const ato = ATOS[dia.ato]!;
   const lista = el('ul', { class: 'objetivos' });
@@ -127,7 +160,9 @@ function abrirDia(numero: number) {
   const input = el('input', { id: 'linha', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'off', 'aria-label': 'Comando' });
   const terminal = el('section', { class: 'terminal' }, saida, el('div', { class: 'entrada' }, rotulo, input));
 
-  app.replaceChildren(el('main', { class: 'jogo' }, lado, terminal));
+  const botaoModo = el('button', { class: 'botao fantasma' }, modo === '3d' ? 'Modo terminal' : 'Ver em 3D');
+  botaoModo.addEventListener('click', () => trocarModo(modo === '3d' ? 'terminal' : '3d', numero));
+  lado.querySelector('.acoes')!.append(botaoModo);
 
   const classe = (l: string) => {
     if (l.startsWith('CHAMADO FECHADO')) return 'fechado';
@@ -158,19 +193,103 @@ function abrirDia(numero: number) {
     rotulo.textContent = term.prompt();
   };
 
+  let posHist = 0;
+  const rodar = (linha: string) => {
+    escrever([`${term.prompt()} ${linha}`], 'cmd');
+    escrever(term.executar(linha));
+    posHist = term.historico.length;
+    atualizar();
+    if (modo === '3d') atualizarEquipamentos(term.mundo);
+  };
+
+  if (modo === 'terminal') {
+    teclas3d = null;
+    pausar3d();
+    soltarMouse();
+    app.replaceChildren(el('main', { class: 'jogo' }, lado, terminal));
+  } else {
+    montar3d();
+  }
+
+  function montar3d() {
+    const palco = el('main', { class: 'jogo3d' });
+    const mira = el('div', { class: 'mira', 'aria-hidden': 'true' });
+    const rotuloAlvo = el('div', { class: 'hud-alvo', hidden: '' });
+    const bPainel = el('button', { class: 'hud-botao' }, 'Painel (P)');
+    const bTerm = el('button', { class: 'hud-botao' }, 'Terminal (T)');
+    const titulo = el('div', { class: 'hud-titulo' }, `Dia ${dia.numero}: ${dia.titulo}`);
+    const ajuda = el('div', { class: 'hud-dicas' }, 'Clique na cena para olhar · WASD anda · E usa o que está na mira · T terminal · P painel · Esc solta o mouse');
+    lado.classList.add('gaveta-esq');
+    terminal.classList.add('gaveta-dir');
+    lado.hidden = true;
+    terminal.hidden = true;
+    palco.append(el('div', { class: 'hud-topo' }, titulo, bPainel, bTerm), mira, rotuloAlvo, ajuda, lado, terminal);
+    app.replaceChildren(palco);
+    const canvas = iniciar3d(palco);
+    montarSala(term.mundo, [`Dia ${dia.numero}`, dia.titulo, 'E: console no aparelho']);
+    iniciarControles(canvas, palco);
+    J.livre = true;
+    (window as unknown as { __c8: unknown }).__c8 = { J, rodar };
+
+    const abrirTerminal = (sim: boolean) => {
+      terminal.hidden = !sim;
+      J.livre = !sim;
+      if (sim) {
+        soltarMouse();
+        input.focus();
+      }
+    };
+    bPainel.addEventListener('click', () => (lado.hidden = !lado.hidden));
+    bTerm.addEventListener('click', () => abrirTerminal(terminal.hidden));
+
+    let alvoAtual: ReturnType<typeof alvoNaMira> = null;
+    M.atualizar.add(() => {
+      const a = J.livre ? alvoNaMira() : null;
+      if (a?.id !== alvoAtual?.id || a?.tipo !== alvoAtual?.tipo) {
+        alvoAtual = a;
+        rotuloAlvo.hidden = !a;
+        if (a) rotuloAlvo.textContent = `${a.rotulo}  ·  E ${a.tipo === 'equip' ? 'abre o console' : 'mostra o enlace'}`;
+        mira.classList.toggle('ativa', !!a);
+      }
+    });
+
+    teclas3d = (e) => {
+      const alvo = e.target as HTMLElement;
+      if (e.key === 'Escape') {
+        if (!terminal.hidden || !lado.hidden) {
+          abrirTerminal(false);
+          lado.hidden = true;
+          input.blur();
+        }
+        return;
+      }
+      if (alvo?.tagName === 'INPUT' || alvo?.tagName === 'SELECT') return;
+      if (e.code === 'KeyT') {
+        e.preventDefault();
+        abrirTerminal(terminal.hidden);
+      } else if (e.code === 'KeyP') {
+        lado.hidden = !lado.hidden;
+      } else if (e.code === 'KeyE' && alvoAtual) {
+        e.preventDefault();
+        const a = alvoAtual;
+        abrirTerminal(true);
+        if (a.tipo === 'equip') {
+          if (term.contexto && term.contexto !== a.id) rodar('sair');
+          if (term.contexto !== a.id) rodar(`console ${a.id}`);
+        } else rodar(`cabo ${a.id}`);
+      }
+    };
+  }
+
   escrever(dia.chamado);
   escrever(['', 'Digite "ajuda" para ver os comandos. Tab completa, setas recuperam o histórico.', '']);
   atualizar();
 
-  let posHist = 0;
   input.addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter') {
       const linha = input.value;
       input.value = '';
-      escrever([`${term.prompt()} ${linha}`], 'cmd');
-      escrever(term.executar(linha));
-      posHist = term.historico.length;
-      atualizar();
+      rodar(linha);
     } else if (ev.key === 'ArrowUp' || ev.key === 'ArrowDown') {
       ev.preventDefault();
       posHist = Math.max(0, Math.min(term.historico.length, posHist + (ev.key === 'ArrowUp' ? -1 : 1)));
@@ -180,7 +299,7 @@ function abrirDia(numero: number) {
       completar(input, term);
     }
   });
-  input.focus();
+  if (modo === 'terminal') input.focus();
   terminal.addEventListener('click', () => {
     if (!window.getSelection()?.toString()) input.focus();
   });

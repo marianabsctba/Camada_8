@@ -8,7 +8,7 @@ Você está sozinha, ou sozinho, com um alicate, um rack e uma cidade inteira qu
 
 ## Estado
 
-Fase 1: o jogo roda inteiro num terminal no navegador, ainda sem o 3D. Estão prontos os atos 0 (Sem Senha) e 1 (O Poste), com 18 dias e o motor de simulação da camada física. O documento de desenho está em [DESENHO.md](DESENHO.md).
+Fase 2: a sala técnica em 3D, em primeira pessoa, com os equipamentos do dia no rack e na bancada; mire num aparelho e aperte E para abrir o console. O modo terminal continua disponível (e é o padrão no celular). Estão prontos os atos 0 (Sem Senha) e 1 (O Poste), com 18 dias e o motor de simulação da camada física. O documento de desenho está em [DESENHO.md](DESENHO.md).
 
 ## Rodar
 
