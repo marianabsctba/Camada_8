@@ -16,7 +16,8 @@ export type TipoEquip =
   | 'cmts'
   | 'terminal-sat'
   | 'gateway-sat'
-  | 'enlace';
+  | 'enlace'
+  | 'canal';
 
 /** Equipamentos que repassam quadros sem ser o destino. */
 export const REPASSAM: ReadonlySet<TipoEquip> = new Set<TipoEquip>([
@@ -59,6 +60,10 @@ export interface Porta {
   sfp?: Transceptor;
   atenuadorDb?: number;
   contadores: { tx: number; rx: number; crc: number };
+  /** VLAN de acesso da porta de switch (padrão 1). */
+  vlan?: number;
+  /** Se definido, a porta é tronco 802.1Q e carrega estas VLANs (a 1 vai sem etiqueta, como nativa). */
+  tronco?: number[];
 }
 
 export interface Antena {

@@ -4,6 +4,7 @@
 import { BITS_POR_SIMBOLO } from './aparelhos';
 import type { Terminal } from './cli';
 import { perdaElemento } from './fisico';
+import { PROTOCOLOS_MAC } from './mac';
 import { caboNaPorta, TRANSCEPTORES, type Cabo, type Equipamento, type Mundo } from './mundo';
 import { ipTexto } from './util';
 
@@ -152,6 +153,35 @@ function acoesConsole(m: Mundo, e: Equipamento): Acao[] {
           { id: 'ppp-discar', rotulo: 'Discar (subir o PPP)', ajuda: 'Negocia o enlace (LCP), autentica e negocia o IP (IPCP).', contexto: ctx, comandos: () => ['ppp discar'] },
         );
       }
+      break;
+    }
+    case 'switch': {
+      const portas = e.portas.map((p) => op(p.nome, `${p.nome}${p.tronco ? ` (tronco ${p.tronco.join(',')})` : ` (VLAN ${p.vlan ?? 1})`}`));
+      a.push(
+        mostra,
+        { id: 'mac-tabela', rotulo: 'Ver a tabela de endereços MAC', ajuda: 'Cada MAC de origem que passou por aqui e a porta onde ele foi visto. Destino que não está na tabela é inundado para todas as portas.', contexto: ctx, comandos: () => ['mostra mac'] },
+        { id: 'mac-limpar', rotulo: 'Esvaziar a tabela MAC', ajuda: 'Faz na hora o que o envelhecimento faz sozinho depois de 300 s de silêncio. O switch reaprende com os próximos quadros, inundando enquanto isso.', contexto: ctx, comandos: () => ['limpa mac', 'mostra mac'] },
+        { id: 'stp-ver', rotulo: 'Ver o spanning tree', ajuda: 'Quem é a raiz, quanto custa chegar até ela e o papel de cada porta: raiz, designada ou bloqueada.', contexto: ctx, comandos: () => ['mostra stp'] },
+        { id: 'stp', rotulo: 'Ligar ou desligar o STP', ajuda: 'O spanning tree desliga portas que fecham laço, para o broadcast não girar para sempre. Sem ele, um laço vira tempestade.', contexto: ctx, campos: [escolha('v', 'STP', [op('on', 'ligado'), op('off', 'desligado')], e.s.stp === false ? 'off' : 'on')], comandos: (v) => [`stp ${v.v}`, 'mostra stp'] },
+        { id: 'stp-prioridade', rotulo: 'Prioridade da ponte', ajuda: 'A raiz é o switch com menor prioridade; no empate, o menor MAC. Use múltiplos de 4096. Padrão: 32768.', contexto: ctx, campos: [escolha('n', 'Prioridade', Array.from({ length: 16 }, (_, i) => op(String(i * 4096), i * 4096 === 32768 ? '32768 (padrão)' : String(i * 4096))), String(e.s.prioridade ?? 32768))], comandos: (v) => [`prioridade ${v.n}`, 'mostra stp'] },
+        { id: 'vlan-ver', rotulo: 'Ver as VLANs', ajuda: 'Cada porta: de acesso (uma VLAN, sem etiqueta) ou tronco (várias VLANs, com etiqueta 802.1Q).', contexto: ctx, comandos: () => ['mostra vlan'] },
+        { id: 'vlan', rotulo: 'Pôr uma porta numa VLAN', ajuda: 'Porta de acesso: o que está ligado nela entra nessa VLAN. Hosts em VLANs diferentes não se falam sem roteador.', contexto: ctx, campos: [escolha('porta', 'Porta', portas), num('id', 'VLAN', undefined, '10')], comandos: (v) => [`vlan ${v.porta} ${v.id}`, 'mostra vlan'] },
+        { id: 'tronco', rotulo: 'Fazer uma porta de tronco', ajuda: 'Tronco leva várias VLANs no mesmo cabo, cada quadro com sua etiqueta. Liste as VLANs permitidas (ex.: 1,10,20). "nao" volta a porta para acesso.', contexto: ctx, campos: [escolha('porta', 'Porta', portas), { nome: 'lista', rotulo: 'VLANs permitidas', tipo: 'texto', padrao: '1,10,20' }], comandos: (v) => [`tronco ${v.porta} ${v.lista}`, 'mostra vlan'] },
+      );
+      break;
+    }
+    case 'hub':
+      a.push(mostra, { id: 'mac-tabela', rotulo: 'Ver a tabela de endereços MAC', ajuda: 'Hub não tem: repete cada bit para todas as portas. Por isso todo mundo ouve tudo e as colisões são de todos.', contexto: ctx, comandos: () => ['mostra mac'] });
+      break;
+    case 'canal': {
+      const s = e.s.mac;
+      a.push(
+        { id: 'canal-ver', rotulo: 'Ver o canal', ajuda: 'Protocolo de acesso, número de estações, carga oferecida e se as estações se escutam.', contexto: ctx, comandos: () => ['mostra'] },
+        { id: 'canal-protocolo', rotulo: 'Escolher o protocolo de acesso', ajuda: 'Quem fala quando. ALOHA fala quando quer; CSMA escuta antes; CD aborta ao colidir; CA espera um recuo; mapa de bits e bastão nem colidem.', contexto: ctx, campos: [escolha('p', 'Protocolo', Object.entries(PROTOCOLOS_MAC).map(([k, v]) => op(k, v)), s.protocolo)], comandos: (v) => [`protocolo ${v.p}`, 'simular'] },
+        { id: 'canal-carga', rotulo: 'Carga e estações', ajuda: 'G é quantos quadros as estações tentam mandar por tempo de quadro, somando todas. G = 1 é tentar ocupar o canal inteiro.', contexto: ctx, campos: [num('g', 'Carga oferecida G', 'quadros por tempo de quadro', String(s.carga)), num('n', 'Estações', undefined, String(s.estacoes))], comandos: (v) => [`carga ${v.g}`, `estacoes ${v.n}`, 'simular'] },
+        { id: 'canal-rts', rotulo: 'RTS/CTS e terminal oculto', ajuda: 'Duas estações que não se escutam colidem no ponto de acesso. Com RTS/CTS, o ponto de acesso autoriza em voz alta e todas escutam a autorização.', contexto: ctx, campos: [escolha('ocultas', 'As estações se escutam?', [op('nao', 'sim, se escutam'), op('sim', 'não, são ocultas uma da outra')], s.ocultas ? 'sim' : 'nao'), escolha('rts', 'RTS/CTS', [op('nao', 'desligado'), op('sim', 'ligado')], s.rtsCts ? 'sim' : 'nao')], comandos: (v) => [`ocultas ${v.ocultas}`, `rts-cts ${v.rts}`, 'simular'] },
+        { id: 'canal-simular', rotulo: 'Simular o canal', ajuda: 'Calcula a vazão S (quanto do canal vira quadro entregue) e as colisões, mostrando a fórmula usada.', contexto: ctx, comandos: () => ['simular'] },
+      );
       break;
     }
     case 'radio':

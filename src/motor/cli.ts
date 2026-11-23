@@ -4,10 +4,11 @@ import type { Dia } from '../conteudo/tipos';
 import { avaliarE1, avaliarModem, BITS_POR_SIMBOLO, snrWifi, type UsoSlot } from './aparelhos';
 import { avaliar, coaxDados, CORES, lerCor, ORBITAS, perdaElemento, radioDados, wiremap, type Cor } from './fisico';
 import { acharPorta, adicionar, caboNaPorta, lerPonta, ligar, TRANSCEPTORES, type Cabo, type ElementoCoax, type Equipamento, type Fibra, type Meio, type Mundo } from './mundo';
-import { ping, vazao } from './rede';
+import { calcularStp, ehTronco, emTempestade, idPonte, limparTabelas, ping, prioridade, stpLigado, tabelaMac, vazao, type PapelPorta } from './rede';
+import { PROTOCOLOS_MAC, simularCanal, type EstadoMac, type ProtocoloMac } from './mac';
 import { simularArq, type ConfigArq, type Linha } from './arq';
 import { amostraDaLinha, hex, transmitir, type ConfigEnlace } from './enlace';
-import { fmt, ipTexto, lerCidr, lerIp, lerNumero } from './util';
+import { fmt, ipTexto, lerCidr, lerIp, lerNumero, rngSemente } from './util';
 
 type Saida = string[];
 
@@ -632,7 +633,193 @@ const CONSOLE_PC: ConsoleFn = (t, e, cmd, args) => {
   return null;
 };
 
-const CONSOLE_SWITCH: ConsoleFn = (t, e, cmd) => (cmd === 'mostra' ? [`${e.modelo}`, ...mostraInterfaces(t, e)] : null);
+/** Lista de VLANs como "1,10-20,30". Devolve null se algo estiver fora de 1 a 4094. */
+export function lerListaVlan(txt: string): number[] | null {
+  const out = new Set<number>();
+  for (const parte of txt.split(',')) {
+    const [a, b] = parte.split('-').map((x) => Number(x.trim()));
+    if (a === undefined || !Number.isInteger(a)) return null;
+    const fim = b === undefined ? a : b;
+    if (!Number.isInteger(fim) || fim < a || a < 1 || fim > 4094) return null;
+    for (let i = a; i <= fim; i++) out.add(i);
+  }
+  return [...out].sort((x, y) => x - y);
+}
+
+function textoLista(v: number[]): string {
+  const partes: string[] = [];
+  for (let i = 0; i < v.length; i++) {
+    let j = i;
+    while (j + 1 < v.length && v[j + 1] === v[j]! + 1) j++;
+    partes.push(j > i ? `${v[i]}-${v[j]}` : String(v[i]));
+    i = j;
+  }
+  return partes.join(',');
+}
+
+const PAPEL_TEXTO: Record<PapelPorta, string> = {
+  raiz: 'encaminhando (o melhor caminho até a raiz)',
+  designada: 'encaminhando',
+  bloqueada: 'BLOQUEANDO (corta o laço; só escuta BPDU)',
+  desligada: 'sem enlace',
+};
+
+function mostraMac(e: Equipamento): Saida {
+  const t = tabelaMac(e);
+  const itens = Object.entries(t).sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]));
+  if (!itens.length) return ['Tabela de endereços MAC vazia. O próximo quadro com destino desconhecido vai ser inundado para todas as portas.'];
+  return ['ENDEREÇO MAC         PORTA', ...itens.map(([mac, p]) => `${mac.padEnd(20)} ${p}`), `${itens.length} endereço${itens.length > 1 ? 's' : ''} aprendido${itens.length > 1 ? 's' : ''}. Destino fora da tabela é inundado.`];
+}
+
+function mostraStp(t: Terminal, e: Equipamento): Saida {
+  if (!stpLigado(e)) return ['STP desligado neste switch. Ele não manda nem escuta BPDU: se houver laço passando por aqui, ninguém corta.'];
+  const est = calcularStp(t.mundo).get(e.nome);
+  if (!est) return ['STP ligado, mas sem informação.'];
+  const raiz = t.mundo.equipamentos.get(est.raiz)!;
+  const l = [
+    `STP ligado. Prioridade ${prioridade(e)}, MAC ${e.mac} (identificador ${idPonte(e)})`,
+    `raiz: ${raiz.nome} (${idPonte(raiz)})${raiz === e ? '. Esta ponte é a raiz.' : ''}`,
+    `custo até a raiz: ${est.custo}${est.portaRaiz ? ` pela porta raiz ${est.portaRaiz}` : ''}`,
+    'PORTA     PAPEL       ESTADO',
+  ];
+  for (const p of e.portas) l.push(`${p.nome.padEnd(9)} ${est.portas[p.nome]!.padEnd(11)} ${PAPEL_TEXTO[est.portas[p.nome]!]}`);
+  l.push('Custo por enlace: 10 Mb/s = 100, 100 Mb/s = 19, 1 Gb/s = 4, 10 Gb/s = 2.');
+  return l;
+}
+
+function mostraVlan(e: Equipamento): Saida {
+  const l = ['PORTA     MODO      VLAN'];
+  const porVlan = new Map<number, string[]>();
+  for (const p of e.portas) {
+    if (ehTronco(p)) {
+      l.push(`${p.nome.padEnd(9)} tronco    ${p.tronco!.length ? textoLista(p.tronco!) : '(nenhuma)'}${p.tronco!.includes(1) ? ' (1 é a nativa, sem etiqueta)' : ''}`);
+    } else {
+      const v = p.vlan ?? 1;
+      l.push(`${p.nome.padEnd(9)} acesso    ${v}`);
+      porVlan.set(v, [...(porVlan.get(v) ?? []), p.nome]);
+    }
+  }
+  for (const [v, ps] of [...porVlan].sort((a, b) => a[0] - b[0])) l.push(`VLAN ${v}: ${ps.join(', ')}`);
+  return l;
+}
+
+const CONSOLE_SWITCH: ConsoleFn = (t, e, cmd, args) => {
+  const m = t.mundo;
+  const acharP = (nome: string | undefined) => e.portas.find((p) => p.nome === nome);
+  switch (cmd) {
+    case 'mostra': {
+      if (args[0] === 'mac') return mostraMac(e);
+      if (args[0] === 'stp') return mostraStp(t, e);
+      if (args[0] === 'vlan') return mostraVlan(e);
+      const linhas = [`${e.modelo}`];
+      if (emTempestade(m, e.nome)) linhas.push('CPU: 100 %. Tempestade de broadcast: os mesmos quadros girando no laço, cada volta duplicando. Os contadores não param de subir.');
+      return [...linhas, ...mostraInterfaces(t, e)];
+    }
+    case 'limpa':
+    case 'limpar': {
+      if (args[0] !== 'mac') return ['limpa mac'];
+      const n = limparTabelas(m, e.nome);
+      return [`Tabela MAC esvaziada (${n} endereço${n === 1 ? '' : 's'}). É o que o envelhecimento faz sozinho depois de 300 s sem ouvir um endereço.`];
+    }
+    case 'stp': {
+      if (args[0] !== 'on' && args[0] !== 'off') return ['stp <on|off>'];
+      e.s.stp = args[0] === 'on';
+      limparTabelas(m);
+      return [e.s.stp ? 'STP ligado. A árvore é recalculada e as portas que fecham laço passam a bloquear.' : 'STP desligado. Se houver laço passando por este switch, prepare o extintor.', 'Mudou a topologia: as tabelas MAC foram esvaziadas.'];
+    }
+    case 'prioridade': {
+      const n = Number(args[0]);
+      if (!Number.isInteger(n) || n < 0 || n > 61440 || n % 4096 !== 0) return ['prioridade <n>, de 0 a 61440, em múltiplos de 4096 (0, 4096, 8192, ..., 32768 é o padrão). Menor ganha a eleição da raiz.'];
+      e.s.prioridade = n;
+      limparTabelas(m);
+      return [`Prioridade ${n}. Identificador de ponte agora é ${idPonte(e)}.`, 'Mudou a topologia: as tabelas MAC foram esvaziadas.'];
+    }
+    case 'vlan': {
+      const p = acharP(args[0]);
+      const v = Number(args[1]);
+      if (!p || !Number.isInteger(v) || v < 1 || v > 4094) return [`vlan <porta> <1 a 4094>. Portas: ${e.portas.map((x) => x.nome).join(', ')}.`];
+      p.vlan = v;
+      delete p.tronco;
+      const tab = tabelaMac(e);
+      for (const k of Object.keys(tab)) if (tab[k] === p.nome) delete tab[k];
+      return [`${p.nome} agora é porta de acesso da VLAN ${v}. Quadro entra e sai sem etiqueta.`];
+    }
+    case 'tronco': {
+      const p = acharP(args[0]);
+      if (!p) return [`tronco <porta> <lista de VLANs | nao>. Portas: ${e.portas.map((x) => x.nome).join(', ')}.`];
+      if (args[1] === 'nao') {
+        delete p.tronco;
+        return [`${p.nome} voltou a ser porta de acesso, VLAN ${p.vlan ?? 1}.`];
+      }
+      const lista = lerListaVlan(args[1] ?? '');
+      if (!lista) return ['Lista de VLANs como 1,10,20 ou 10-20. Cada uma de 1 a 4094.'];
+      p.tronco = lista;
+      return [`${p.nome} agora é tronco 802.1Q com as VLANs ${textoLista(lista)}. Cada quadro leva uma etiqueta de 4 bytes dizendo de que VLAN é${lista.includes(1) ? ', menos a 1, que é a nativa e vai sem etiqueta' : ''}.`];
+    }
+  }
+  return null;
+};
+
+const CONSOLE_HUB: ConsoleFn = (t, e, cmd, args) => {
+  if (cmd !== 'mostra') return null;
+  if (args[0] === 'mac') return ['Hub não tem tabela de endereços. Ele não lê quadro: repete cada bit que chega para todas as outras portas.'];
+  const linhas = [`${e.modelo}`];
+  if (emTempestade(t.mundo, e.nome)) linhas.push('Todos os LEDs acesos sem piscar. Tempestade de broadcast: os mesmos quadros girando no laço.');
+  return [...linhas, ...mostraInterfaces(t, e)];
+};
+
+const CONSOLE_CANAL: ConsoleFn = (t, e, cmd, args) => {
+  const s = e.s.mac as EstadoMac;
+  const sn = (v: string | undefined) => (v === 'sim' ? true : v === 'nao' ? false : null);
+  switch (cmd) {
+    case 'mostra':
+      return [
+        `${e.modelo}`,
+        `protocolo: ${s.protocolo} (${PROTOCOLOS_MAC[s.protocolo]})`,
+        `estações: ${s.estacoes} | carga oferecida G: ${fmt(s.carga, 2)} quadros por tempo de quadro | a: ${fmt(s.a, 3)}`,
+        `estações se escutam: ${s.ocultas ? 'NÃO (terminal oculto)' : 'sim'} | RTS/CTS: ${s.rtsCts ? 'ligado' : 'desligado'}`,
+      ];
+    case 'protocolo': {
+      const p = args[0] as ProtocoloMac;
+      if (!p || !(p in PROTOCOLOS_MAC)) return ['protocolo <x>', ...Object.entries(PROTOCOLOS_MAC).map(([k, v]) => `  ${k}: ${v}`)];
+      s.protocolo = p;
+      return [`Protocolo: ${PROTOCOLOS_MAC[p]}.`];
+    }
+    case 'carga': {
+      const g = lerNumero(args[0] ?? '');
+      if (g === null || g < 0 || g > 100) return ['carga <G>, quadros oferecidos por tempo de quadro, somando todas as estações. Ex.: carga 0,5'];
+      s.carga = g;
+      return [`Carga oferecida: G = ${fmt(g, 2)}.`];
+    }
+    case 'estacoes': {
+      const n = Number(args[0]);
+      if (!Number.isInteger(n) || n < 1 || n > 1000) return ['estacoes <1 a 1000>'];
+      s.estacoes = n;
+      return [`Estações no canal: ${n}.`];
+    }
+    case 'atraso': {
+      const a = lerNumero(args[0] ?? '');
+      if (a === null || a < 0 || a > 10) return ['atraso <a>, tempo de propagação dividido pelo tempo de quadro. Ex.: atraso 0,01'];
+      s.a = a;
+      return [`Atraso normalizado: a = ${fmt(a, 3)}.`];
+    }
+    case 'rts-cts':
+    case 'ocultas': {
+      const v = sn(args[0]);
+      if (v === null) return [`${cmd} <sim|nao>`];
+      if (cmd === 'rts-cts') s.rtsCts = v;
+      else s.ocultas = v;
+      return [cmd === 'rts-cts' ? `RTS/CTS ${v ? 'ligado: antes do dado, um pedido curto (RTS) e a autorização do ponto de acesso (CTS), que todas escutam.' : 'desligado.'}` : `Estações ${v ? 'ocultas: uma não escuta a outra, só o ponto de acesso escuta todas.' : 'se escutam.'}`];
+    }
+    case 'simular': {
+      const r = simularCanal(s, rngSemente(1234));
+      t.mundo.flags.ultimoMac = r;
+      t.mundo.flags.macDoUltimo = JSON.stringify(s);
+      return ['SIMULAÇÃO DO CANAL', ...r.linhas.map((x) => '  ' + x)];
+    }
+  }
+  return null;
+};
 
 const CONSOLE_ROTEADOR: ConsoleFn = (t, e, cmd, args) => {
   const s = e.s;
@@ -946,8 +1133,9 @@ const CONSOLE_GENERICO: ConsoleFn = (t, e, cmd) => (cmd === 'mostra' ? mostraInt
 
 const CONSOLES: Partial<Record<Equipamento['tipo'], { fn: ConsoleFn; ajuda: string[] }>> = {
   pc: { fn: CONSOLE_PC, ajuda: ['ip [endereço/prefixo]', 'mostra', 'ping <ip> [quantidade]', 'capturar', 'vazao [equipamento]'] },
-  switch: { fn: CONSOLE_SWITCH, ajuda: ['mostra'] },
-  hub: { fn: CONSOLE_SWITCH, ajuda: ['mostra'] },
+  switch: { fn: CONSOLE_SWITCH, ajuda: ['mostra', 'mostra mac', 'mostra stp', 'mostra vlan', 'limpa mac', 'stp <on|off>', 'prioridade <n>', 'vlan <porta> <id>', 'tronco <porta> <lista|nao>'] },
+  hub: { fn: CONSOLE_HUB, ajuda: ['mostra'] },
+  canal: { fn: CONSOLE_CANAL, ajuda: ['mostra', 'protocolo <aloha|aloha-slotted|csma-np|csma-1p|csma-cd|csma-ca|bitmap|token>', 'carga <G>', 'estacoes <n>', 'atraso <a>', 'rts-cts <sim|nao>', 'ocultas <sim|nao>', 'simular'] },
   roteador: { fn: CONSOLE_ROTEADOR, ajuda: ['login <senha>', 'mostra [startup]', 'copiar startup running', 'senha <nova>', 'salvar', 'inicio <normal|ignorar-config>', 'interromper (só durante o boot)'] },
   modem: { fn: CONSOLE_MODEM, ajuda: ['mostra', 'taxa-simbolos <baud>', 'modulacao <bpsk|qpsk|qam16|qam64|qam256>', 'treinar'] },
   mux: { fn: CONSOLE_MUX, ajuda: ['mostra', 'slot <lista> <enquadramento|sinalizacao|voz|dados|livre>'] },
