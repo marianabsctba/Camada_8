@@ -64,6 +64,8 @@ export interface Porta {
   vlan?: number;
   /** Se definido, a porta é tronco 802.1Q e carrega estas VLANs (a 1 vai sem etiqueta, como nativa). */
   tronco?: number[];
+  /** Maior pacote IP (cabeçalho incluído) que sai por esta porta. Padrão: 1500, o do Ethernet. */
+  mtu?: number;
 }
 
 export interface Antena {
@@ -126,12 +128,25 @@ export interface Cabo {
   sat?: { orbita: 'geo' | 'meo' | 'leo' };
   coax?: { tapDbmv: number; elementos: ElementoCoax[] };
   nota?: string;
+  /** MTU do enlace (um túnel ou um enlace antigo pode ter menos que 1500). */
+  mtu?: number;
 }
 
 export interface Captura {
   eth: { origem: string; destino: string; etherType: number };
   ip: { origem: number; destino: number; ttl: number; protocolo: number; tamanho: number };
   icmp: { tipo: number; codigo: number; id: number; seq: number };
+  /** Só na camada de rede (com roteador no caminho): o resto do cabeçalho IPv4 e o que aconteceu no caminho. */
+  detalhe?: {
+    identificacao: number;
+    df: boolean;
+    checksum: number;
+    confere: boolean;
+    ttlSaida: number;
+    roteadores: string[];
+    fragmentos: { deslocamento: number; dados: number; mf: boolean }[];
+    dados: number;
+  };
 }
 
 export interface Mundo {
@@ -179,7 +194,7 @@ export function adicionar(m: Mundo, e: Equipamento): Equipamento {
   return e;
 }
 
-export function pc(nome: string, o: { ip?: Cidr; ttl?: number; modelo?: string; velocidades?: number[]; mdix?: boolean } = {}): Equipamento {
+export function pc(nome: string, o: { ip?: Cidr; ttl?: number; modelo?: string; velocidades?: number[]; mdix?: boolean; gateway?: string } = {}): Equipamento {
   return {
     nome,
     tipo: 'pc',
@@ -188,8 +203,38 @@ export function pc(nome: string, o: { ip?: Cidr; ttl?: number; modelo?: string; 
     ip: o.ip,
     ttl: o.ttl ?? 64,
     portas: [porta('eth0', { mdi: 'mdi', mdix: o.mdix ?? false, velocidades: o.velocidades ?? [10, 100, 1000] })],
-    s: {},
+    s: o.gateway ? { gateway: o.gateway } : {},
   };
+}
+
+/**
+ * Roteador da camada de rede (ato 4): portas com endereço IP, rotas estáticas e, se quiser, NAT e DHCP.
+ * Já vem ligado e sem senha. interfaces: { porta: '192.0.2.1/24' }; rotas: [{ destino: '10.0.0.0/8', via: '192.0.2.2' }].
+ */
+export function roteador(
+  nome: string,
+  o: {
+    modelo?: string;
+    portas?: string[];
+    interfaces?: Record<string, string>;
+    rotas?: { destino: string; via: string }[];
+    ttl?: number;
+  } = {},
+): Equipamento {
+  const nomes = o.portas ?? Object.keys(o.interfaces ?? {});
+  const e = aparelho(nome, 'roteador', o.modelo ?? 'Roteador genérico', (nomes.length ? nomes : ['p1', 'p2']).map((n) => ({ nome: n })), {
+    estado: 'ligado',
+    senha: null,
+    senhaRunning: null,
+    logado: false,
+    inicio: 'normal',
+    startup: [],
+    running: [],
+    interfaces: { ...(o.interfaces ?? {}) },
+    rotas: [...(o.rotas ?? [])],
+  });
+  e.ttl = o.ttl ?? 255;
+  return e;
 }
 
 export function comutador(

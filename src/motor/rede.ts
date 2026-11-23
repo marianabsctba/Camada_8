@@ -1,11 +1,12 @@
 // Enlace e rede: caminho entre hosts, ping, captura e vazão, mais o que o switch faz no ato 3:
 // aprende endereços MAC, monta a árvore do spanning tree e separa VLANs.
-// Ainda não há roteador repassando pacote: só a mesma rede, atravessando switch, hub e rádio.
+// O roteador que repassa pacotes (ato 4) mora em roteamento.ts; aqui fica a mesma rede, atravessando switch, hub e rádio.
 
 import { Simulador } from './eventos';
 import { avaliar, type EstadoEnlace } from './fisico';
 import { acharPorta, caboNaPorta, REPASSAM, type Cabo, type Equipamento, type Mundo, type Ponta, type Porta } from './mundo';
 import { ipTexto, mesmaRede } from './util';
+import { pingRoteado, usaRoteamento, type OpcoesPing } from './roteamento';
 
 export interface Salto {
   cabo: Cabo;
@@ -217,7 +218,7 @@ export function emTempestade(m: Mundo, nome: string): boolean {
   return tempestade(m, nome) !== null;
 }
 
-function textoTempestade(lista: string[]): string {
+export function textoTempestade(lista: string[]): string {
   return `Tempestade de broadcast no laço entre ${lista.join(', ')}: o pedido de ARP sai por todas as portas, volta pelo outro lado, sai de novo e se multiplica sem fim. Ethernet não tem TTL. A CPU dos switches foi a 100 % e nada mais passa. Ligue o STP em todos os switches do laço ou tire um cabo.`;
 }
 
@@ -266,7 +267,7 @@ function entrarNoSwitch(p: Porta, etiqueta: number | null): number | undefined {
  * Respeita a árvore do STP (porta bloqueada não repassa) e as VLANs: o estado da busca é o aparelho
  * mais a VLAN (dentro do switch) ou a etiqueta 802.1Q (no fio). Host só aceita quadro sem etiqueta.
  */
-export function caminho(m: Mundo, origem: string, destino: string, o: { ignorarVlan?: boolean } = {}): Salto[] | null {
+export function caminho(m: Mundo, origem: string, destino: string, o: { ignorarVlan?: boolean; portaOrigem?: string; portaDestino?: string } = {}): Salto[] | null {
   const enlaces = enlacesAtivos(m);
   const stp = calcularStp(m, enlaces);
   const chave = (n: string, x: number | null) => `${n}#${x ?? '-'}`;
@@ -285,6 +286,8 @@ export function caminho(m: Mundo, origem: string, destino: string, o: { ignorarV
     for (const { cabo: c, estado } of enlaces) {
       const [meu, outra] = c.a.equip === atual ? [c.a, c.b] : c.b.equip === atual ? [c.b, c.a] : [null, null];
       if (!meu || !outra) continue;
+      if (atual === origem && o.portaOrigem && meu.porta !== o.portaOrigem) continue;
+      if (outra.equip === destino && o.portaDestino && outra.porta !== o.portaDestino) continue;
       if (bloqueada(stp, meu) || bloqueada(stp, outra)) continue;
       const viz = m.equipamentos.get(outra.equip)!;
       let etiqueta: number | null | undefined = x;
@@ -334,7 +337,7 @@ export function aprenderNoCaminho(m: Mundo, saltos: Salto[], macOrigem: string, 
   return inundou;
 }
 
-function aprenderNoSalto(m: Mundo, s: Salto, macOrigem: string, macDestino: string, inundou: string[] = []) {
+export function aprenderNoSalto(m: Mundo, s: Salto, macOrigem: string, macDestino: string, inundou: string[] = []) {
   const e = m.equipamentos.get(s.para);
   if (e?.tipo !== 'switch') return;
   const entrada = s.cabo.a.equip === s.para ? s.cabo.a.porta : s.cabo.b.porta;
@@ -369,7 +372,7 @@ export function limparTabelas(m: Mundo, nome?: string): number {
 }
 
 /** Atraso de encaminhamento de cada tipo de aparelho, em segundos. */
-const ENCAMINHAR: Partial<Record<Equipamento['tipo'], number>> = {
+export const ENCAMINHAR: Partial<Record<Equipamento['tipo'], number>> = {
   switch: 5e-6,
   hub: 5e-7,
   radio: 4e-4,
@@ -395,12 +398,17 @@ export interface ResultadoPing {
   ttl?: number;
   erro?: string;
   linhas: string[];
+  /** Camada de rede: roteadores atravessados na ida e o último erro ICMP recebido. */
+  roteadores?: string[];
+  icmp?: { tipo: number; codigo: number; de: number };
 }
 
 const BYTES_PING = 98 + 4 + 20; // quadro de 98 bytes + FCS + preâmbulo e intervalo
 
-export function ping(m: Mundo, deNome: string, ipDestino: number, n = 4): ResultadoPing {
+export function ping(m: Mundo, deNome: string, ipDestino: number, n = 4, opcoes: OpcoesPing = {}): ResultadoPing {
   const de = m.equipamentos.get(deNome)!;
+  // Com roteador configurado, gateway ou tamanho escolhido, quem cuida é a camada de rede (roteamento.ts).
+  if (usaRoteamento(m, de, opcoes)) return pingRoteado(m, deNome, ipDestino, n, opcoes);
   const r: ResultadoPing = { enviados: n, recebidos: 0, rtts: [], linhas: [] };
   const falha = (erro: string): ResultadoPing => ({ ...r, recebidos: 0, erro, linhas: [erro] });
   if (!de.ip) return falha('Sem endereço IP. Eu sou só uma placa de rede com sonhos.');

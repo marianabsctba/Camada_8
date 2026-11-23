@@ -3,12 +3,14 @@
 import type { Dia } from '../conteudo/tipos';
 import { avaliarE1, avaliarModem, BITS_POR_SIMBOLO, snrWifi, type UsoSlot } from './aparelhos';
 import { avaliar, coaxDados, CORES, lerCor, ORBITAS, perdaElemento, radioDados, wiremap, type Cor } from './fisico';
-import { acharPorta, adicionar, caboNaPorta, lerPonta, ligar, TRANSCEPTORES, type Cabo, type ElementoCoax, type Equipamento, type Fibra, type Meio, type Mundo } from './mundo';
+import { acharPorta, adicionar, caboNaPorta, lerPonta, ligar, TRANSCEPTORES, type Cabo, type Captura, type ElementoCoax, type Equipamento, type Fibra, type Meio, type Mundo } from './mundo';
 import { calcularStp, ehTronco, emTempestade, idPonte, limparTabelas, ping, prioridade, stpLigado, tabelaMac, vazao, type PapelPorta } from './rede';
 import { PROTOCOLOS_MAC, simularCanal, type EstadoMac, type ProtocoloMac } from './mac';
 import { simularArq, type ConfigArq, type Linha } from './arq';
 import { amostraDaLinha, hex, transmitir, type ConfigEnlace } from './enlace';
-import { fmt, ipTexto, lerCidr, lerIp, lerNumero, rngSemente } from './util';
+import { fmt, ipTexto, lerCidr, lerIp, lerNumero, rngSemente, type Cidr } from './util';
+import { abreviarIpv6, agregar, dividir, ehDocumentacao, ehEnlaceLocal, ehPrivado, enderecoBroadcast, enderecoEui64, enderecoRede, enlaceLocal, eui64, expandirIpv6, infoSubrede, pertence, prefixoIpv6, quantidadeHosts, superrede, textoCidr } from './ip';
+import { configurarDhcp, configurarNat, interfacesL3, ipv6De, MTU_PADRAO, nat, pedirDhcp, ping6, rotasDe, temCamadaRede, textoTempo, traceroute, type OpcoesPing, type Rota, type ServidorDhcp } from './roteamento';
 
 type Saida = string[];
 
@@ -584,6 +586,184 @@ function mostraInterfaces(t: Terminal, e: Equipamento): Saida {
   return linhas;
 }
 
+/* ---------- Camada de rede: comandos que PC e roteador dividem ---------- */
+
+function rodarPing(t: Terminal, e: Equipamento, args: string[]): Saida {
+  const ip = lerIp(args[0] ?? '');
+  if (ip === null) return [temCamadaRede(t.mundo) ? 'ping <ip> [quantidade] [tamanho] [df]' : 'ping <ip> [quantidade]'];
+  const n = Math.min(1000, Math.max(1, Number(args[1] ?? 4) || 4));
+  const opcoes: OpcoesPing = {};
+  if (args[2] !== undefined && args[2] !== 'df') {
+    const tam = Number(args[2]);
+    if (!Number.isInteger(tam) || tam < 0) return ['Tamanho em bytes de dados do ICMP, por exemplo: ping 203.0.113.10 4 1472 df'];
+    opcoes.tamanho = tam;
+  }
+  if (args.slice(1).includes('df')) opcoes.df = true;
+  const r = ping(t.mundo, e.nome, ip, n, opcoes);
+  const mediaPing = r.rtts.length ? r.rtts.reduce((a, b) => a + b, 0) / r.rtts.length : Infinity;
+  t.mundo.flags.pings = { ...(t.mundo.flags.pings ?? {}), [`${e.nome}>${ipTexto(ip)}`]: { n, recebidos: r.recebidos, media: mediaPing } };
+  const mostrar = r.linhas.length > 12 ? [...r.linhas.slice(0, 5), `  ... (${r.linhas.length - 10} linhas omitidas) ...`, ...r.linhas.slice(-5)] : r.linhas;
+  const media = r.rtts.length ? r.rtts.reduce((a, b) => a + b, 0) / r.rtts.length : 0;
+  const extra = opcoes.tamanho !== undefined || opcoes.df ? ` com ${opcoes.tamanho ?? 56} bytes de dados (${(opcoes.tamanho ?? 56) + 28} no pacote IP)${opcoes.df ? ', DF ligado' : ''}` : '';
+  return [
+    `PING ${ipTexto(ip)}: ${n} pedidos de eco ICMP${extra}`,
+    ...mostrar,
+    `--- ${r.recebidos} de ${n} respondidos, ${fmt(((n - r.recebidos) / n) * 100, 1)} % de perda${r.rtts.length ? `, média ${media < 1 ? media.toFixed(3) : media.toFixed(1)} ms` : ''} ---`,
+  ];
+}
+
+function rodarTraceroute(t: Terminal, e: Equipamento, args: string[]): Saida {
+  const ip = lerIp(args[0] ?? '');
+  if (ip === null) return ['traceroute <ip> [máximo de saltos]'];
+  const max = Math.min(64, Math.max(1, Number(args[1] ?? 30) || 30));
+  const r = traceroute(t.mundo, e.nome, ip, max);
+  t.mundo.flags.traceroutes = { ...(t.mundo.flags.traceroutes ?? {}), [`${e.nome}>${ipTexto(ip)}`]: { chegou: r.chegou, saltos: r.saltos.map((s) => (s.ip === undefined ? null : ipTexto(s.ip))) } };
+  return [...r.linhas, ...(r.saltos.length ? ['Cada linha é a sonda que morreu com TTL zero naquele roteador, que avisou de volta. "*" é sonda sem resposta.'] : [])];
+}
+
+function linhaRota(r: Rota): string {
+  const via = r.via !== undefined ? `via ${ipTexto(r.via)}` : 'conectada';
+  return `${r.origem.padEnd(10)} ${textoCidr(r.destino).padEnd(19)} ${via.padEnd(21)} ${r.porta ?? '?'}${r.valida ? '' : '  (próximo salto fora das minhas redes: rota inútil)'}`;
+}
+
+function mostraRotas(e: Equipamento): Saida {
+  const rotas = rotasDe(e).sort((a, b) => b.destino.prefixo - a.destino.prefixo);
+  if (!rotas.length) return ['Tabela de rotas vazia. Sem endereço nas interfaces, não há nem rota conectada.'];
+  return ['ORIGEM     DESTINO             PRÓXIMO SALTO         PORTA', ...rotas.map(linhaRota), 'Na dúvida, vence o prefixo mais longo (o mais específico).'];
+}
+
+function mostraArp(e: Equipamento): Saida {
+  const arp = (e.s.arp ?? {}) as Record<number, string>;
+  const l = Object.entries(arp).map(([ip, mac]) => `  ${ipTexto(Number(ip)).padEnd(16)} ${mac}`);
+  return l.length ? ['CACHE ARP (só vizinhos da mesma rede de enlace; para fora, o MAC é o do gateway)', ...l] : ['Cache ARP vazio.'];
+}
+
+/** Calculadora de sub-rede, agregação e IPv6: funciona em qualquer console da camada de rede. */
+function calculadora(cmd: string, args: string[]): Saida | null {
+  switch (cmd) {
+    case 'subrede': {
+      const c = lerCidr(args[0] ?? '');
+      if (!c) return ['subrede <endereço/prefixo> [novo prefixo], por exemplo: subrede 192.0.2.77/26'];
+      const i = infoSubrede(c);
+      const l = [
+        `${textoCidr(c)}`,
+        `  máscara        ${i.mascara} (/${i.prefixo})`,
+        `  rede           ${i.rede}`,
+        `  broadcast      ${i.broadcast}`,
+        `  hosts          ${i.primeiro} a ${i.ultimo}: ${i.hosts.toLocaleString('pt-BR')} endereços utilizáveis`,
+        `  conta          2^(32 - ${i.prefixo}) - 2 = ${i.hosts.toLocaleString('pt-BR')} (tira o de rede e o de broadcast)`,
+      ];
+      if (ehPrivado(c.endereco)) l.push('  faixa privada (RFC 1918): só sai para a internet atrás de NAT');
+      else if (ehDocumentacao(c.endereco)) l.push('  faixa de documentação (RFC 5737): usada em exemplos');
+      if (args[1]) {
+        const p = Number(args[1].replace('/', ''));
+        const partes = dividir(c, p);
+        if (!partes.length) return [...l, `Não dá para dividir /${c.prefixo} em /${args[1]}.`];
+        l.push(`  dividida em /${p}: ${2 ** (p - c.prefixo)} sub-redes de ${quantidadeHosts(p)} hosts`, ...partes.slice(0, 16).map((x) => `    ${textoCidr(x)}`));
+        if (partes.length > 16) l.push(`    ... e mais ${partes.length - 16}`);
+      }
+      return l;
+    }
+    case 'agregar': {
+      const lista = args.map(lerCidr);
+      if (!lista.length || lista.some((x) => !x)) return ['agregar <prefixo> <prefixo> ..., por exemplo: agregar 192.0.2.0/26 192.0.2.64/26'];
+      const a = agregar(lista as Cidr[]);
+      const s = superrede(lista as Cidr[])!;
+      return [`Agregado exato: ${a.map(textoCidr).join(', ')}`, `Menor prefixo que cobre todos: ${textoCidr(s)}${a.length > 1 ? ' (cobre endereços a mais)' : ''}`];
+    }
+    case 'ipv6': {
+      const x = args[0] ?? '';
+      const cheio = expandirIpv6(x);
+      if (!cheio) return ['ipv6 <endereço>, por exemplo: ipv6 2001:0db8:0000:0000:0000:0000:0000:0001'];
+      const p = Number(x.split('/')[1] ?? 64) || 64;
+      return [`completo   ${cheio}`, `abreviado  ${abreviarIpv6(x)}`, `prefixo    ${prefixoIpv6(x, p)}`, `tipo       ${ehEnlaceLocal(x) ? 'enlace local (fe80::/10), não sai do enlace' : cheio.startsWith('ff') ? 'multicast' : 'global ou outro'}`];
+    }
+    case 'eui64': {
+      const id = eui64(args[0] ?? '');
+      if (!id) return ['eui64 <mac>, por exemplo: eui64 00:1a:2b:3c:4d:5e'];
+      return [
+        `MAC ${args[0]}: parte no meio, enfia ff:fe e inverte o 7º bit do primeiro byte`,
+        `identificador de interface  ${id.map((g) => g.toString(16)).join(':')}`,
+        `enlace local                ${enlaceLocal(args[0]!)}`,
+        `com o prefixo 2001:db8:1::/64  ${enderecoEui64('2001:db8:1::', args[0]!)}`,
+      ];
+    }
+  }
+  return null;
+}
+
+function linhasCaptura(cap: Captura): Saida {
+  const l = [
+    'QUADRO CAPTURADO (último pedido de eco que chegou ao destino)',
+    `  Ethernet  destino ${cap.eth.destino}  origem ${cap.eth.origem}  EtherType 0x${cap.eth.etherType.toString(16).padStart(4, '0')}`,
+    `  IPv4      ${ipTexto(cap.ip.origem)} → ${ipTexto(cap.ip.destino)}  TTL ${cap.ip.ttl}  protocolo ${cap.ip.protocolo}  tamanho ${cap.ip.tamanho}`,
+    `  ICMP      tipo ${cap.icmp.tipo} (pedido de eco)  código ${cap.icmp.codigo}  id 0x${cap.icmp.id.toString(16)}  seq ${cap.icmp.seq}`,
+  ];
+  const d = cap.detalhe;
+  if (!d) return [...l, '  dados     56 bytes de "abcdefgh..." porque alguém tinha que preencher'];
+  l.push(
+    `  dados     ${d.dados} bytes`,
+    `  cabeçalho IPv4 (20 bytes): versão 4, IHL 5, identificação 0x${d.identificacao.toString(16).padStart(4, '0')}, DF ${d.df ? 1 : 0}, checksum 0x${d.checksum.toString(16).padStart(4, '0')} ${d.confere ? '(confere)' : '(NÃO confere)'}`,
+    `  TTL: saiu com ${d.ttlSaida} e chegou com ${cap.ip.ttl}; ${d.roteadores.length ? `${d.roteadores.length} roteador(es) no caminho: ${d.roteadores.join(', ')}` : 'nenhum roteador no caminho'}`,
+  );
+  if (d.roteadores.length) l.push('  O MAC de origem é o do último roteador: o quadro é refeito a cada salto, o pacote IP segue (com TTL e checksum novos).');
+  if (d.fragmentos.length > 1) {
+    l.push(`  chegou em ${d.fragmentos.length} fragmentos, mesma identificação, remontados no destino:`);
+    for (const f of d.fragmentos) l.push(`    deslocamento ${String(f.deslocamento).padStart(4)} (byte ${f.deslocamento * 8}), ${f.dados} bytes de dados, MF ${f.mf ? 1 : 0}`);
+  }
+  return l;
+}
+
+/** Comandos da camada de rede no PC. Só falam quando o comando é deles. */
+const REDE_PC: ConsoleFn = (t, e, cmd, args) => {
+  switch (cmd) {
+    case 'gateway': {
+      if (!args[0]) return [e.s.gateway ? `gateway padrão ${e.s.gateway}` : 'sem gateway padrão'];
+      if (args[0] === 'nenhum') {
+        delete e.s.gateway;
+        return ['Gateway removido. Agora só falo com a minha própria rede.'];
+      }
+      const g = lerIp(args[0]);
+      if (g === null) return ['gateway <ip> | gateway nenhum'];
+      e.s.gateway = args[0];
+      const aviso = e.ip && !pertence(g, e.ip) ? ` Cuidado: ${args[0]} não está na minha rede (${textoCidr({ endereco: enderecoRede(e.ip), prefixo: e.ip.prefixo })}), e o gateway precisa ser alcançável por ARP.` : '';
+      return [`Gateway padrão ${args[0]}: tudo que não é da minha rede vai para ele.${aviso}`];
+    }
+    case 'traceroute':
+    case 'tracert':
+      return rodarTraceroute(t, e, args);
+    case 'dhcp':
+      return pedirDhcp(t.mundo, e.nome).linhas;
+    case 'arp':
+      return mostraArp(e);
+    case 'rotas':
+      return mostraRotas(e);
+    case 'mtu': {
+      const p = e.portas[0]!;
+      if (!args[0]) return [`MTU da eth0: ${p.mtu ?? MTU_PADRAO} bytes`];
+      const n = Number(args[0]);
+      if (!Number.isInteger(n) || n < 68 || n > 9216) return ['MTU de 68 a 9216 bytes. 1500 é o do Ethernet; acima disso é quadro jumbo.'];
+      p.mtu = n;
+      return [`MTU da eth0: ${n} bytes.`];
+    }
+    case 'ip6': {
+      if (!args[0]) return ipv6De(e).map((x) => `${x.endereco}/${x.prefixo}`);
+      const [a, pre] = args[0].split('/');
+      const ab = abreviarIpv6(a ?? '');
+      if (!ab) return ['ip6 <endereço/prefixo>, por exemplo: ip6 2001:db8:1::10/64'];
+      e.s.ipv6 = [`${ab}/${Number(pre ?? 64) || 64}`];
+      return [`IPv6 ${ab}/${Number(pre ?? 64) || 64} configurado. O de enlace local continua lá: ${enlaceLocal(e.mac)}`];
+    }
+    case 'ping6': {
+      if (!args[0]) return ['ping6 <endereço IPv6> [quantidade]'];
+      const n = Math.min(100, Math.max(1, Number(args[1] ?? 4) || 4));
+      const r = ping6(t.mundo, e.nome, args[0], n);
+      return [`PING6 ${abreviarIpv6(args[0]) ?? args[0]}`, ...r.linhas, `--- ${r.recebidos} de ${n} respondidos ---`];
+    }
+  }
+  return calculadora(cmd, args);
+};
+
 const CONSOLE_PC: ConsoleFn = (t, e, cmd, args) => {
   switch (cmd) {
     case 'ip': {
@@ -593,33 +773,20 @@ const CONSOLE_PC: ConsoleFn = (t, e, cmd, args) => {
       e.ip = c;
       return [`Endereço ${args[0]} configurado em eth0.`];
     }
-    case 'mostra':
-      return [`eth0 ${e.mac} ${e.ip ? ipTexto(e.ip.endereco) + '/' + e.ip.prefixo : 'sem IP'} ttl-padrão ${e.ttl}`, ...mostraInterfaces(t, e)];
-    case 'ping': {
-      const ip = lerIp(args[0] ?? '');
-      if (ip === null) return ['ping <ip> [quantidade]'];
-      const n = Math.min(1000, Math.max(1, Number(args[1] ?? 4) || 4));
-      const r = ping(t.mundo, e.nome, ip, n);
-      const mediaPing = r.rtts.length ? r.rtts.reduce((a, b) => a + b, 0) / r.rtts.length : Infinity;
-      t.mundo.flags.pings = { ...(t.mundo.flags.pings ?? {}), [`${e.nome}>${ipTexto(ip)}`]: { n, recebidos: r.recebidos, media: mediaPing } };
-      const mostrar = r.linhas.length > 12 ? [...r.linhas.slice(0, 5), `  ... (${r.linhas.length - 10} linhas omitidas) ...`, ...r.linhas.slice(-5)] : r.linhas;
-      const media = r.rtts.length ? r.rtts.reduce((a, b) => a + b, 0) / r.rtts.length : 0;
-      return [
-        `PING ${ipTexto(ip)}: ${n} pedidos de eco ICMP`,
-        ...mostrar,
-        `--- ${r.recebidos} de ${n} respondidos, ${fmt(((n - r.recebidos) / n) * 100, 1)} % de perda${r.rtts.length ? `, média ${media < 1 ? media.toFixed(3) : media.toFixed(1)} ms` : ''} ---`,
-      ];
+    case 'mostra': {
+      if (args[0] === 'rotas') return mostraRotas(e);
+      if (args[0] === 'arp') return mostraArp(e);
+      const l = [`eth0 ${e.mac} ${e.ip ? ipTexto(e.ip.endereco) + '/' + e.ip.prefixo : 'sem IP'} ttl-padrão ${e.ttl}`];
+      if (e.s.gateway || e.s.dns || e.s.ipv6) l.push(`gateway ${e.s.gateway ?? '(nenhum)'}${e.s.dns ? `  DNS ${e.s.dns}` : ''}${e.s.concessao ? `  concessão de ${e.s.concessao.servidor} por ${textoTempo(e.s.concessao.segundos)}` : ''}`);
+      if (e.s.ipv6) l.push(`IPv6 ${ipv6De(e).map((x) => `${x.endereco}/${x.prefixo}`).join('  ')}`);
+      return [...l, ...mostraInterfaces(t, e)];
     }
+    case 'ping':
+      return rodarPing(t, e, args);
     case 'capturar': {
       const cap = t.mundo.ultimaCaptura;
       if (!cap) return ['Nada capturado ainda. Faça um ping que chegue em algum lugar.'];
-      return [
-        'QUADRO CAPTURADO (último pedido de eco que chegou ao destino)',
-        `  Ethernet  destino ${cap.eth.destino}  origem ${cap.eth.origem}  EtherType 0x${cap.eth.etherType.toString(16).padStart(4, '0')}`,
-        `  IPv4      ${ipTexto(cap.ip.origem)} → ${ipTexto(cap.ip.destino)}  TTL ${cap.ip.ttl}  protocolo ${cap.ip.protocolo}  tamanho ${cap.ip.tamanho}`,
-        `  ICMP      tipo ${cap.icmp.tipo} (pedido de eco)  código ${cap.icmp.codigo}  id 0x${cap.icmp.id.toString(16)}  seq ${cap.icmp.seq}`,
-        '  dados     56 bytes de "abcdefgh..." porque alguém tinha que preencher',
-      ];
+      return linhasCaptura(cap);
     }
     case 'vazao': {
       const alvo = args[0] ?? t.mundo.flags.servidorTeste;
@@ -630,7 +797,7 @@ const CONSOLE_PC: ConsoleFn = (t, e, cmd, args) => {
       return [`Teste de vazão TCP até ${alvo}:`, ...v.linhas.map((l) => '  ' + l), `RESULTADO: ${fmt(v.mbps, 2)} Mb/s = ${fmt(v.mbps / 8, 2)} MB/s = ${fmt((v.mbps * 1e6) / 8 / 1048576, 2)} MiB/s`];
     }
   }
-  return null;
+  return REDE_PC(t, e, cmd, args);
 };
 
 /** Lista de VLANs como "1,10-20,30". Devolve null se algo estiver fora de 1 a 4094. */
@@ -869,6 +1036,7 @@ const CONSOLE_ROTEADOR: ConsoleFn = (t, e, cmd, args) => {
     case 'login':
       return ['Já está dentro.'];
     case 'mostra':
+      if (args[0] && ['rotas', 'interfaces', 'nat', 'dhcp', 'arp'].includes(args[0])) return REDE_ROTEADOR(t, e, 'mostra', args)!;
       if (args[0] === 'startup') return ['--- configuração de inicialização (gravada) ---', ...s.startup.map((l: string) => '  ' + l), `  senha ${s.senha ? '*****' : '(nenhuma)'}`, `registro de inicialização: ${s.inicio}`];
       return ['--- configuração em execução (memória) ---', ...(s.running.length ? s.running.map((l: string) => '  ' + l) : ['  (vazia)']), `  senha ${s.senhaRunning ? '*****' : '(nenhuma)'}`, `registro de inicialização: ${s.inicio}`];
     case 'copiar':
@@ -893,7 +1061,149 @@ const CONSOLE_ROTEADOR: ConsoleFn = (t, e, cmd, args) => {
       s.inicio = args[0];
       return [`Registro de inicialização: ${args[0]} (vale a partir do próximo boot).`];
   }
-  return null;
+  return REDE_ROTEADOR(t, e, cmd, args);
+};
+
+function porta(e: Equipamento, nome: string | undefined): string | null {
+  return nome && e.portas.some((p) => p.nome === nome) ? nome : null;
+}
+
+function mostraInterfacesIp(t: Terminal, e: Equipamento): Saida {
+  const tab = (e.s.interfaces ?? {}) as Record<string, string>;
+  const n = nat(e);
+  const linhas = ['PORTA     ENDEREÇO            MTU    ENLACE'];
+  for (const p of e.portas) {
+    const c = caboNaPorta(t.mundo, { equip: e.nome, porta: p.nome });
+    const est = c ? avaliar(t.mundo, c) : null;
+    const papel = n ? (n.externa === p.nome ? '  NAT externa' : n.internas.includes(p.nome) ? '  NAT interna' : '') : '';
+    linhas.push(`${p.nome.padEnd(9)} ${(tab[p.nome] ?? 'sem IP').padEnd(19)} ${(String(p.mtu ?? MTU_PADRAO) + (c?.mtu ? ` (cabo ${c.mtu})` : '')).padEnd(6)} ${!c ? 'sem cabo' : est!.up ? `ativa ${est!.velocidade} Mb/s` : 'inativa'}${papel}`);
+  }
+  return linhas;
+}
+
+/** Comandos da camada de rede no roteador: endereços, rotas, NAT, DHCP, MTU, ping e traceroute. */
+const REDE_ROTEADOR: ConsoleFn = (t, e, cmd, args) => {
+  const s = e.s;
+  switch (cmd) {
+    case 'mostra':
+      switch (args[0]) {
+        case 'rotas':
+          return mostraRotas(e);
+        case 'interfaces':
+          return mostraInterfacesIp(t, e);
+        case 'arp':
+          return mostraArp(e);
+        case 'nat': {
+          const n = nat(e);
+          if (!n) return ['NAT desligado.'];
+          const l = [`NAT: de dentro (${n.internas.join(', ')}) para fora (${n.externa}), todo mundo sai com o endereço da ${n.externa}.`, 'PROTO  INTERNO (IP:porta)        EXTERNO (IP:porta)'];
+          for (const x of n.tabela) l.push(`${x.protocolo.padEnd(6)} ${`${x.ipInterno}:${x.portaInterna}`.padEnd(25)} ${x.ipExterno}:${x.portaExterna}`);
+          if (!n.tabela.length) l.push('(tabela vazia: ninguém de dentro saiu ainda)');
+          else l.push('No ICMP, a "porta" é o identificador do eco. Quando duas máquinas usam a mesma, o NAT troca uma delas.');
+          return l;
+        }
+        case 'dhcp': {
+          const d = s.dhcp as ServidorDhcp | undefined;
+          if (!d) return ['Servidor DHCP desligado.'];
+          const ip = (s.interfaces ?? {})[d.porta] as string | undefined;
+          const l = [
+            `Servidor DHCP na ${d.porta} (${ip ?? 'sem IP: assim não responde'})`,
+            `  faixa ${d.inicio} a ${d.fim}, gateway ${d.gateway ?? (ip ? ip.split('/')[0] : '?')}, DNS ${d.dns ?? '(nenhum)'}, concessão ${d.concessao} s (${textoTempo(d.concessao)})`,
+          ];
+          const c = Object.entries(d.concessoes);
+          l.push(...(c.length ? c.map(([mac, x]) => `  ${x.padEnd(16)} ${mac}`) : ['  nenhuma concessão ainda']));
+          return l;
+        }
+      }
+      return null;
+    case 'ip': {
+      const p = porta(e, args[0]);
+      if (!p) return [`ip <porta> <endereço/prefixo>. Portas: ${e.portas.map((x) => x.nome).join(', ')}.`];
+      const tab = (s.interfaces ??= {}) as Record<string, string>;
+      if (args[1] === 'nenhum') {
+        delete tab[p];
+        return [`Endereço tirado da ${p}. A rota conectada dela sumiu junto.`];
+      }
+      const c = lerCidr(args[1] ?? '');
+      if (!c) return ['Formato: ip p1 192.0.2.1/24'];
+      const rede = { endereco: enderecoRede(c), prefixo: c.prefixo };
+      if (c.prefixo < 31 && (c.endereco === rede.endereco || c.endereco === enderecoBroadcast(c))) {
+        return [`${args[1]} é o endereço de rede ou de broadcast. Interface precisa de um endereço de host.`];
+      }
+      const outra = Object.entries(tab).find(([k, v]) => k !== p && lerCidr(v) && pertence(c.endereco, { endereco: enderecoRede(lerCidr(v)!), prefixo: lerCidr(v)!.prefixo }));
+      tab[p] = textoCidr(c);
+      return [`${p}: ${textoCidr(c)}. Rota conectada ${textoCidr(rede)} pela ${p}.${outra ? ` Atenção: a ${outra[0]} já está nessa rede; duas portas na mesma sub-rede confundem a tabela.` : ''}`];
+    }
+    case 'rota': {
+      const d = lerCidr(args[0] ?? '');
+      const via = lerIp(args[1] ?? '');
+      if (!d || via === null) return ['rota <prefixo> <próximo salto>, por exemplo: rota 203.0.113.0/24 198.51.100.2 (rota padrão: rota 0.0.0.0/0 <ip>)'];
+      const rotas = (s.rotas ??= []) as { destino: string; via: string }[];
+      const destino = textoCidr({ endereco: enderecoRede(d), prefixo: d.prefixo });
+      const i = rotas.findIndex((r) => r.destino === destino);
+      if (i >= 0) rotas.splice(i, 1);
+      rotas.push({ destino, via: ipTexto(via) });
+      const alcanca = interfacesL3(e).some((x) => pertence(via, x.cidr));
+      return [`Rota ${destino} via ${ipTexto(via)} ${i >= 0 ? 'trocada' : 'criada'}${d.prefixo === 0 ? ' (rota padrão: quem não casa com nada vai por ela)' : ''}.${alcanca ? '' : ' Mas o próximo salto não está em nenhuma rede minha: a rota fica inútil até alguma interface alcançá-lo.'}`];
+    }
+    case 'sem-rota': {
+      const d = lerCidr(args[0] ?? '');
+      if (!d) return ['sem-rota <prefixo>'];
+      const destino = textoCidr({ endereco: enderecoRede(d), prefixo: d.prefixo });
+      const rotas = (s.rotas ?? []) as { destino: string; via: string }[];
+      const i = rotas.findIndex((r) => r.destino === destino);
+      if (i < 0) return [`Não tenho rota estática para ${destino}. Rota conectada some tirando o IP da porta.`];
+      rotas.splice(i, 1);
+      return [`Rota ${destino} removida.`];
+    }
+    case 'nat': {
+      if (args[0] === 'desliga') {
+        delete s.nat;
+        return ['NAT desligado. Quem tem endereço privado não volta mais da internet.'];
+      }
+      const internas = (args[0] ?? '').split(',').filter(Boolean);
+      const externa = args[1];
+      if (!internas.length || !externa || ![...internas, externa].every((x) => porta(e, x))) return ['nat <portas internas, separadas por vírgula> <porta externa> | nat desliga'];
+      if (internas.includes(externa)) return ['A externa não pode ser também interna.'];
+      configurarNat(e, internas, externa);
+      const ext = (s.interfaces ?? {})[externa] as string | undefined;
+      return [`NAT ligado: quem entra por ${internas.join(', ')} e sai pela ${externa} ganha o endereço ${ext ? ext.split('/')[0] : '(a externa ainda não tem IP)'}.`];
+    }
+    case 'dhcp': {
+      const p = porta(e, args[0]);
+      const ini = lerIp(args[1] ?? '');
+      const fim = lerIp(args[2] ?? '');
+      if (!p || ini === null || fim === null || fim < ini) return ['dhcp <porta> <primeiro> <último> [gw <ip>] [dns <ip>] [tempo <segundos>], por exemplo: dhcp lan 192.168.0.100 192.168.0.199 dns 192.168.0.1 tempo 86400'];
+      const o: { gateway?: string; dns?: string; concessao?: number } = {};
+      for (let i = 3; i < args.length; i += 2) {
+        const k = args[i];
+        const v = args[i + 1] ?? '';
+        if (k === 'gw' || k === 'gateway') o.gateway = lerIp(v) !== null ? v : undefined;
+        else if (k === 'dns') o.dns = lerIp(v) !== null ? v : undefined;
+        else if (k === 'tempo') o.concessao = Math.max(60, Number(v) || 86400);
+      }
+      configurarDhcp(e, p, ipTexto(ini), ipTexto(fim), o);
+      const ip = lerCidr(((s.interfaces ?? {}) as Record<string, string>)[p] ?? '');
+      const aviso = !ip ? ' A porta ainda não tem IP: sem isso o servidor não tem de onde responder.' : !pertence(ini, ip) || !pertence(fim, ip) ? ` A faixa sai da rede da ${p} (${textoCidr({ endereco: enderecoRede(ip), prefixo: ip.prefixo })}).` : '';
+      return [`Servidor DHCP na ${p}: ${ipTexto(ini)} a ${ipTexto(fim)} (${fim - ini + 1} endereços).${aviso}`];
+    }
+    case 'sem-dhcp':
+      delete s.dhcp;
+      return ['Servidor DHCP desligado. As concessões que já foram dadas valem até vencer.'];
+    case 'mtu': {
+      const p = porta(e, args[0]);
+      const n = Number(args[1]);
+      if (!p || !Number.isInteger(n) || n < 68 || n > 9216) return ['mtu <porta> <bytes>, de 68 a 9216. O Ethernet usa 1500.'];
+      acharPorta(t.mundo, { equip: e.nome, porta: p }).mtu = n;
+      return [`MTU da ${p}: ${n} bytes. Pacote maior que isso é fragmentado aqui, ou descartado se vier com DF.`];
+    }
+    case 'ping':
+      return rodarPing(t, e, args);
+    case 'traceroute':
+    case 'tracert':
+      return rodarTraceroute(t, e, args);
+  }
+  return calculadora(cmd, args);
 };
 
 const CONSOLE_MODEM: ConsoleFn = (_t, e, cmd, args) => {
@@ -1131,12 +1441,12 @@ function discarPpp(m: Mundo, e: Equipamento): string[] {
 
 const CONSOLE_GENERICO: ConsoleFn = (t, e, cmd) => (cmd === 'mostra' ? mostraInterfaces(t, e) : null);
 
-const CONSOLES: Partial<Record<Equipamento['tipo'], { fn: ConsoleFn; ajuda: string[] }>> = {
-  pc: { fn: CONSOLE_PC, ajuda: ['ip [endereço/prefixo]', 'mostra', 'ping <ip> [quantidade]', 'capturar', 'vazao [equipamento]'] },
+const CONSOLES: Partial<Record<Equipamento['tipo'], { fn: ConsoleFn; ajuda: string[]; rede?: string[] }>> = {
+  pc: { fn: CONSOLE_PC, ajuda: ['ip [endereço/prefixo]', 'mostra', 'ping <ip> [quantidade]', 'capturar', 'vazao [equipamento]'], rede: ['gateway <ip|nenhum>', 'ping <ip> [quantidade] [tamanho] [df]', 'traceroute <ip> [máximo]', 'dhcp', 'mostra rotas | mostra arp', 'mtu [bytes]', 'ip6 <endereço/prefixo>', 'ping6 <endereço> [quantidade]', 'subrede <endereço/prefixo> [novo prefixo]', 'agregar <prefixo> <prefixo> ...', 'ipv6 <endereço>', 'eui64 <mac>'] },
   switch: { fn: CONSOLE_SWITCH, ajuda: ['mostra', 'mostra mac', 'mostra stp', 'mostra vlan', 'limpa mac', 'stp <on|off>', 'prioridade <n>', 'vlan <porta> <id>', 'tronco <porta> <lista|nao>'] },
   hub: { fn: CONSOLE_HUB, ajuda: ['mostra'] },
   canal: { fn: CONSOLE_CANAL, ajuda: ['mostra', 'protocolo <aloha|aloha-slotted|csma-np|csma-1p|csma-cd|csma-ca|bitmap|token>', 'carga <G>', 'estacoes <n>', 'atraso <a>', 'rts-cts <sim|nao>', 'ocultas <sim|nao>', 'simular'] },
-  roteador: { fn: CONSOLE_ROTEADOR, ajuda: ['login <senha>', 'mostra [startup]', 'copiar startup running', 'senha <nova>', 'salvar', 'inicio <normal|ignorar-config>', 'interromper (só durante o boot)'] },
+  roteador: { fn: CONSOLE_ROTEADOR, ajuda: ['login <senha>', 'mostra [startup]', 'copiar startup running', 'senha <nova>', 'salvar', 'inicio <normal|ignorar-config>', 'interromper (só durante o boot)'], rede: ['ip <porta> <endereço/prefixo|nenhum>', 'rota <prefixo> <próximo salto>', 'sem-rota <prefixo>', 'mostra rotas | interfaces | arp | nat | dhcp', 'nat <internas> <externa> | nat desliga', 'dhcp <porta> <primeiro> <último> [gw <ip>] [dns <ip>] [tempo <s>]', 'sem-dhcp', 'mtu <porta> <bytes>', 'ping <ip> [quantidade] [tamanho] [df]', 'traceroute <ip> [máximo]', 'subrede | agregar | ipv6 | eui64'] },
   modem: { fn: CONSOLE_MODEM, ajuda: ['mostra', 'taxa-simbolos <baud>', 'modulacao <bpsk|qpsk|qam16|qam64|qam256>', 'treinar'] },
   mux: { fn: CONSOLE_MUX, ajuda: ['mostra', 'slot <lista> <enquadramento|sinalizacao|voz|dados|livre>'] },
   radio: { fn: CONSOLE_RADIO, ajuda: ['mostra'] },
@@ -1168,8 +1478,9 @@ export class Terminal {
   ajuda(): Saida {
     if (this.contexto) {
       const e = this.mundo.equipamentos.get(this.contexto)!;
-      const c = CONSOLES[e.tipo] ?? { ajuda: ['mostra'] };
-      return [`Console de ${e.nome} (${e.modelo}):`, ...c.ajuda.map((a) => '  ' + a), '  sair'];
+      const c: { ajuda: string[]; rede?: string[] } = CONSOLES[e.tipo] ?? { ajuda: ['mostra'] };
+      const rede = c.rede && temCamadaRede(this.mundo) ? ['camada de rede:', ...c.rede.map((a) => '  ' + a)] : [];
+      return [`Console de ${e.nome} (${e.modelo}):`, ...c.ajuda.map((a) => '  ' + a), ...rede.map((a) => '  ' + a), '  sair'];
     }
     const grupos: [Comando['grupo'], string][] = [
       ['geral', 'GERAIS'],

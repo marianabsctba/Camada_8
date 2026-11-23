@@ -7,6 +7,8 @@ import { perdaElemento } from './fisico';
 import { PROTOCOLOS_MAC } from './mac';
 import { caboNaPorta, TRANSCEPTORES, type Cabo, type Equipamento, type Mundo } from './mundo';
 import { ipTexto } from './util';
+import { enlaceLocal } from './ip';
+import { interfacesL3, temCamadaRede } from './roteamento';
 
 export interface Opcao {
   valor: string;
@@ -59,6 +61,98 @@ const num = (nome: string, rotulo: string, unidade?: string, padrao?: string): C
 const escolha = (nome: string, rotulo: string, opcoes: Opcao[], padrao?: string): Campo => ({ nome, rotulo, tipo: 'escolha', opcoes, padrao: padrao ?? opcoes[0]?.valor });
 const op = (valor: string, rotulo = valor): Opcao => ({ valor, rotulo });
 
+/* ---------- Camada de rede ---------- */
+
+/** Todos os endereços IP do mundo (interfaces de roteador incluídas), menos os do próprio aparelho. */
+function ipsConhecidos(m: Mundo, exceto: string): Opcao[] {
+  const out: Opcao[] = [];
+  for (const x of m.equipamentos.values()) {
+    if (x.nome === exceto) continue;
+    for (const i of interfacesL3(x)) out.push(op(ipTexto(i.cidr.endereco), `${ipTexto(i.cidr.endereco)} (${x.nome}${x.tipo === 'roteador' ? ` · ${i.porta}` : ''})`));
+  }
+  return out;
+}
+
+function campoDestino(m: Mundo, e: Equipamento): Campo {
+  const ips = ipsConhecidos(m, e.nome);
+  return ips.length ? escolha('destino', 'Destino', ips) : { nome: 'destino', rotulo: 'Destino', tipo: 'texto', padrao: '203.0.113.10' };
+}
+
+const subrede = (ctx: string): Acao => ({
+  id: 'subrede',
+  rotulo: 'Calculadora de sub-rede',
+  ajuda: 'O prefixo diz quantos bits são da rede. O resto é de host: 2^(bits de host) - 2 endereços, porque o primeiro é a rede e o último é o broadcast. Se quiser, divida em sub-redes menores.',
+  contexto: ctx,
+  campos: [{ nome: 'cidr', rotulo: 'Endereço/prefixo', tipo: 'texto', padrao: '192.0.2.64/26' }, { nome: 'dividir', rotulo: 'Dividir em /n (opcional)', tipo: 'texto', padrao: '' }],
+  comandos: (v) => [`subrede ${v.cidr}${v.dividir ? ` ${v.dividir}` : ''}`],
+});
+
+function acoesRedePc(m: Mundo, e: Equipamento): Acao[] {
+  const ctx = e.nome;
+  return [
+    { id: 'gateway', rotulo: 'Configurar o gateway padrão', ajuda: 'O roteador da sua rede. Tudo que não é da sua sub-rede vai para ele: o PC faz ARP só para o gateway, nunca para o destino final.', contexto: ctx, campos: [{ nome: 'gw', rotulo: 'Gateway', tipo: 'texto', padrao: e.s.gateway ?? (e.ip ? ipTexto(((e.ip.endereco & ~0xff) | 1) >>> 0) : '192.0.2.1') }], comandos: (v) => [`gateway ${v.gw}`, 'mostra rotas'] },
+    { id: 'dhcp', rotulo: 'Pedir endereço por DHCP', ajuda: 'Quatro mensagens: descoberta (em broadcast), oferta, pedido e confirmação. O servidor entrega endereço, máscara, gateway, DNS e por quanto tempo vale.', contexto: ctx, comandos: () => ['dhcp', 'mostra'] },
+    { id: 'traceroute', rotulo: 'Traceroute', ajuda: 'Manda sondas com TTL 1, 2, 3... Cada roteador que zera o TTL descarta a sonda e avisa com ICMP "tempo esgotado", revelando o próprio endereço. Assim aparece o caminho, salto a salto.', contexto: ctx, campos: [campoDestino(m, e)], comandos: (v) => [`traceroute ${v.destino}`] },
+    {
+      id: 'ping-tamanho',
+      rotulo: 'Ping com tamanho e DF',
+      ajuda: 'Escolha quantos bytes de dados vão no ICMP (o pacote IP tem mais 28: 20 do IP e 8 do ICMP). Pacote maior que o MTU do enlace é fragmentado; com DF ligado, o roteador descarta e devolve "fragmentação necessária".',
+      contexto: ctx,
+      campos: [campoDestino(m, e), num('n', 'Quantos pedidos', undefined, '1'), num('tamanho', 'Bytes de dados', 'bytes', '1472'), escolha('df', 'Bit DF (não fragmente)', [op('nao', 'desligado'), op('df', 'ligado')])],
+      comandos: (v) => [`ping ${v.destino} ${v.n || 1} ${v.tamanho || 56}${v.df === 'df' ? ' df' : ''}`, 'capturar'],
+    },
+    { id: 'rotas', rotulo: 'Ver a tabela de rotas e o ARP', ajuda: 'Até um PC tem tabela de rotas: a da própria rede (conectada) e a padrão, para o gateway. O cache ARP mostra os vizinhos que já responderam.', contexto: ctx, comandos: () => ['mostra rotas', 'mostra arp'] },
+    { id: 'mtu', rotulo: 'Ajustar o MTU', ajuda: 'Maior pacote IP que sai por esta placa. O Ethernet usa 1500.', contexto: ctx, campos: [num('mtu', 'MTU', 'bytes', String(e.portas[0]?.mtu ?? 1500))], comandos: (v) => [`mtu ${v.mtu}`] },
+    subrede(ctx),
+    { id: 'agregar', rotulo: 'Agregar prefixos', ajuda: 'Duas sub-redes irmãs (mesmo tamanho, lado a lado, começando num múltiplo do dobro) viram uma só com prefixo um bit menor. Assim uma rota anuncia muitas redes.', contexto: ctx, campos: [{ nome: 'lista', rotulo: 'Prefixos separados por espaço', tipo: 'texto', padrao: '192.0.2.0/26 192.0.2.64/26' }], comandos: (v) => [`agregar ${v.lista}`] },
+    { id: 'ipv6', rotulo: 'Abreviar e expandir IPv6', ajuda: 'IPv6 tem 128 bits em 8 grupos de 4 dígitos hexadecimais. Abrevia tirando zeros à esquerda e trocando a maior sequência de grupos zerados por "::", uma vez só.', contexto: ctx, campos: [{ nome: 'end', rotulo: 'Endereço', tipo: 'texto', padrao: '2001:0db8:0000:0000:0000:ff00:0042:8329' }], comandos: (v) => [`ipv6 ${v.end}`] },
+    { id: 'eui64', rotulo: 'Endereço IPv6 a partir do MAC', ajuda: 'EUI-64: parte o MAC de 48 bits no meio, enfia ff:fe e inverte o bit universal/local. Com fe80:: na frente vira o endereço de enlace local.', contexto: ctx, campos: [{ nome: 'mac', rotulo: 'MAC', tipo: 'texto', padrao: e.mac }], comandos: (v) => [`eui64 ${v.mac}`] },
+    { id: 'ip6', rotulo: 'Configurar IPv6', ajuda: 'Endereço global com prefixo /64, por exemplo 2001:db8:1::10/64. O de enlace local (fe80::) já existe sozinho, feito do MAC.', contexto: ctx, campos: [{ nome: 'end', rotulo: 'Endereço/prefixo', tipo: 'texto', padrao: '2001:db8:1::10/64' }], comandos: (v) => [`ip6 ${v.end}`, 'mostra'] },
+    { id: 'ping6', rotulo: 'Ping IPv6 no enlace', ajuda: 'No IPv6 o ARP vira descoberta de vizinho (NS e NA, por multicast) e o TTL se chama hop limit. Aqui o ping6 só vale dentro do mesmo enlace.', contexto: ctx, campos: [{ nome: 'end', rotulo: 'Destino IPv6', tipo: 'texto', padrao: enlaceLocal([...m.equipamentos.values()].find((x) => x.nome !== e.nome && (x.tipo === 'pc' || x.tipo === 'roteador'))?.mac ?? e.mac) ?? 'fe80::1' }], comandos: (v) => [`ping6 ${v.end}`] },
+  ];
+}
+
+function acoesRedeRoteador(m: Mundo, e: Equipamento): Acao[] {
+  const ctx = e.nome;
+  const tab = (e.s.interfaces ?? {}) as Record<string, string>;
+  const portas = e.portas.map((p) => op(p.nome, `${p.nome}${tab[p.nome] ? ` (${tab[p.nome]})` : ' (sem IP)'}`));
+  const estaticas = ((e.s.rotas ?? []) as { destino: string; via: string }[]).map((r) => op(r.destino, `${r.destino} via ${r.via}`));
+  const n = e.s.nat as { internas: string[]; externa: string } | undefined;
+  const a: Acao[] = [
+    { id: 'rot-interfaces', rotulo: 'Ver as interfaces', ajuda: 'Cada porta do roteador é uma rede diferente, com um endereço IP. É isso que separa os domínios de broadcast.', contexto: ctx, comandos: () => ['mostra interfaces'] },
+    { id: 'rot-ip', rotulo: 'Pôr endereço numa porta', ajuda: 'Cada interface ganha um endereço da rede ligada a ela. Isso cria sozinho a rota conectada para aquela rede. "nenhum" tira o endereço.', contexto: ctx, campos: [escolha('porta', 'Porta', portas), { nome: 'ip', rotulo: 'Endereço/prefixo', tipo: 'texto', padrao: tab[e.portas[0]?.nome ?? ''] ?? '192.0.2.1/24' }], comandos: (v) => [`ip ${v.porta} ${v.ip}`, 'mostra interfaces'] },
+    { id: 'rot-rotas', rotulo: 'Ver a tabela de rotas', ajuda: 'Conectadas (das interfaces), estáticas (alguém digitou) e a padrão 0.0.0.0/0. Para cada pacote vence a rota de prefixo mais longo que casa com o destino.', contexto: ctx, comandos: () => ['mostra rotas'] },
+    { id: 'rot-rota', rotulo: 'Criar rota estática', ajuda: 'Diz: para chegar nesta rede, entregue ao próximo salto. O próximo salto precisa estar numa rede conectada. 0.0.0.0/0 é a rota padrão, o "resto do mundo".', contexto: ctx, campos: [{ nome: 'destino', rotulo: 'Rede de destino', tipo: 'texto', padrao: '203.0.113.0/24' }, { nome: 'via', rotulo: 'Próximo salto', tipo: 'texto', padrao: '198.51.100.2' }], comandos: (v) => [`rota ${v.destino} ${v.via}`, 'mostra rotas'] },
+  ];
+  if (estaticas.length) a.push({ id: 'rot-sem-rota', rotulo: 'Apagar rota estática', ajuda: 'Tira a rota da tabela. Os pacotes para aquela rede passam a seguir a próxima rota que casar, ou morrem com "destino inalcançável".', contexto: ctx, campos: [escolha('destino', 'Rota', estaticas)], comandos: (v) => [`sem-rota ${v.destino}`, 'mostra rotas'] });
+  else a.push({ id: 'rot-sem-rota', rotulo: 'Apagar rota estática', ajuda: 'Tira a rota da tabela. Os pacotes para aquela rede passam a seguir a próxima rota que casar, ou morrem com "destino inalcançável".', contexto: ctx, campos: [{ nome: 'destino', rotulo: 'Rota', tipo: 'texto', padrao: '203.0.113.0/24' }], comandos: (v) => [`sem-rota ${v.destino}`, 'mostra rotas'] });
+  a.push(
+    {
+      id: 'rot-nat',
+      rotulo: 'Ligar o NAT',
+      ajuda: 'Endereço privado (10/8, 172.16/12, 192.168/16) não volta da internet. O NAT troca o IP e a porta de origem de quem sai pelo endereço público da porta externa e anota a troca numa tabela, para desfazer na volta.',
+      contexto: ctx,
+      campos: [escolha('interna', 'Porta interna', portas, n?.internas[0]), escolha('externa', 'Porta externa', portas, n?.externa ?? e.portas[1]?.nome)],
+      comandos: (v) => [`nat ${v.interna} ${v.externa}`, 'mostra nat'],
+    },
+    { id: 'rot-nat-ver', rotulo: 'Ver a tabela do NAT', ajuda: 'Cada linha é uma conversa de dentro para fora: IP e porta internos, e o IP e a porta que o mundo vê.', contexto: ctx, comandos: () => ['mostra nat'] },
+    {
+      id: 'rot-dhcp',
+      rotulo: 'Servidor DHCP',
+      ajuda: 'Entrega endereço para quem pedir na porta escolhida: uma faixa de endereços, o gateway (por padrão, o próprio roteador), o DNS e o tempo de concessão.',
+      contexto: ctx,
+      campos: [escolha('porta', 'Porta', portas), { nome: 'inicio', rotulo: 'Primeiro endereço', tipo: 'texto', padrao: '192.168.0.100' }, { nome: 'fim', rotulo: 'Último endereço', tipo: 'texto', padrao: '192.168.0.199' }, { nome: 'dns', rotulo: 'DNS', tipo: 'texto', padrao: '192.168.0.1' }, num('tempo', 'Concessão', 's', '86400')],
+      comandos: (v) => [`dhcp ${v.porta} ${v.inicio} ${v.fim}${v.dns ? ` dns ${v.dns}` : ''} tempo ${v.tempo || 86400}`, 'mostra dhcp'],
+    },
+    { id: 'rot-dhcp-ver', rotulo: 'Ver o servidor DHCP', ajuda: 'A faixa, o que vai junto do endereço e quem já recebeu o quê.', contexto: ctx, comandos: () => ['mostra dhcp'] },
+    { id: 'rot-mtu', rotulo: 'MTU de uma porta', ajuda: 'Maior pacote IP que sai por aquela porta. Maior que isso, o roteador fragmenta (ou descarta, se o pacote vier com DF).', contexto: ctx, campos: [escolha('porta', 'Porta', portas), num('mtu', 'MTU', 'bytes', '1500')], comandos: (v) => [`mtu ${v.porta} ${v.mtu}`, 'mostra interfaces'] },
+    { id: 'rot-ping', rotulo: 'Ping daqui', ajuda: 'O próprio roteador manda o pedido de eco, saindo pela porta que a tabela de rotas escolher.', contexto: ctx, campos: [campoDestino(m, e), num('n', 'Quantos pedidos', undefined, '4')], comandos: (v) => [`ping ${v.destino} ${v.n || 4}`] },
+    { id: 'rot-traceroute', rotulo: 'Traceroute daqui', ajuda: 'Sondas com TTL crescente: cada roteador do caminho se revela ao avisar que o TTL acabou.', contexto: ctx, campos: [campoDestino(m, e)], comandos: (v) => [`traceroute ${v.destino}`] },
+    { ...subrede(ctx), id: 'rot-subrede' },
+  );
+  return a;
+}
+
 /* ---------- Equipamentos ---------- */
 
 function acoesConsole(m: Mundo, e: Equipamento): Acao[] {
@@ -73,6 +167,7 @@ function acoesConsole(m: Mundo, e: Equipamento): Acao[] {
         { id: 'ping', rotulo: 'Fazer ping', ajuda: 'Manda pedidos de eco ICMP e espera as respostas. Mede se chega, quanto se perde e quanto demora.', contexto: ctx, campos: [{ nome: 'destino', rotulo: 'Destino', tipo: ips.length ? 'escolha' : 'texto', opcoes: ips, padrao: ips[0]?.valor ?? '192.0.2.1' }, num('n', 'Quantos pedidos', undefined, '4')], comandos: (v) => [`ping ${v.destino} ${v.n || 4}`] },
         { id: 'capturar', rotulo: 'Ver o último quadro capturado', ajuda: 'Mostra o último pedido de eco que chegou ao destino, camada por camada: Ethernet, IPv4 e ICMP.', contexto: ctx, comandos: () => ['capturar'] },
       );
+      if (temCamadaRede(m)) a.push(...acoesRedePc(m, e));
       if (m.flags.servidorTeste) a.push({ id: 'vazao', rotulo: 'Medir vazão', ajuda: 'Teste de vazão TCP até o servidor de teste. Mostra o resultado em Mb/s, MB/s e MiB/s.', contexto: ctx, comandos: () => ['vazao'] });
       a.push(mostra);
       break;
@@ -102,6 +197,7 @@ function acoesConsole(m: Mundo, e: Equipamento): Acao[] {
         { id: 'salvar', rotulo: 'Salvar', ajuda: 'Grava a configuração em execução por cima da de inicialização. Não tem desfazer.', contexto: ctx, comandos: () => ['salvar'] },
         { id: 'mostra-config', rotulo: 'Ver configurações', ajuda: 'Mostra a configuração em execução e a gravada, lado a lado.', contexto: ctx, comandos: () => ['mostra', 'mostra startup'] },
       );
+      if (temCamadaRede(m)) a.unshift(...acoesRedeRoteador(m, e));
       break;
     }
     case 'modem':
