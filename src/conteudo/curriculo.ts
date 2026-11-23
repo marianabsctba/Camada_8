@@ -62,11 +62,11 @@ const ATO1: Linha[] = [
 ];
 
 const ATO2: Linha[] = [
-  ['3.1.1', 'O que o enlace promete', ['central-sala']],
+  ['3.1.1', 'O que o enlace promete', ['central-sala'], 57],
   ['3.1.2', 'Onde começa o quadro', ['estacao-agua'], 19],
   ['3.1.2', 'O byte que é flag', ['estacao-agua-2'], 20],
   ['3.1.2', 'Cinco uns', ['prefeitura-fibra'], 21],
-  ['3.1.3 e 3.1.4', 'Erro e fluxo', ['central-modem']],
+  ['3.1.3 e 3.1.4', 'Erro e fluxo', ['central-modem'], 58],
   ['3.2.1', 'Mão única', ['represa'], 23],
   ['3.2.2', 'Paridade não basta', ['cooperativa-2'], 22],
   ['3.2.2', 'Divisão por polinômio', ['laboratorio'], 24],
@@ -76,7 +76,7 @@ const ATO2: Linha[] = [
   ['3.4', 'Janela de oito', ['hospital'], 28],
   ['3.4', 'Só o que se perdeu', ['serra'], 29],
   ['3.5.1', 'PPP no último quilômetro', ['cidade-vizinha'], 30],
-  ['3.5.2 e 3.5.3', 'O enlace do ADSL e do cabo', ['central-dsl']],
+  ['3.5.2 e 3.5.3', 'O enlace do ADSL e do cabo', ['central-dsl'], 59],
 ];
 
 const ATO3: Linha[] = [
