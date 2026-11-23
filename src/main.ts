@@ -350,9 +350,11 @@ function sairDo3d() {
   soltarMouse();
 }
 
+const jogavel = (e: EntradaCurriculo) => DIAS.some((d) => d.numero === e.numero);
+
 /** Próximo dia jogável ainda não feito, na ordem do currículo. */
 function proximaEntrada(): EntradaCurriculo | undefined {
-  return CURRICULO.find((e) => e.ref !== undefined && !resolvidos.includes(e.numero));
+  return CURRICULO.find((e) => jogavel(e) && !resolvidos.includes(e.numero));
 }
 
 function diaDaEntrada(e: EntradaCurriculo): Dia | undefined {
@@ -378,7 +380,7 @@ function mapaTela(recente?: number) {
   const lista = el('ol', { class: 'lista-dias' });
   for (const e of CURRICULO.filter((x) => x.ato === atoAtual)) {
     const feito = resolvidos.includes(e.numero);
-    const pronto = e.ref !== undefined;
+    const pronto = jogavel(e);
     const ehProx = prox?.numero === e.numero;
     const li = el('li', { class: feito ? 'feito' : ehProx ? 'proximo' : pronto ? 'pronto' : 'construcao' }, el('span', { class: 'num' }, String(e.numero)), el('span', {}, e.titulo, el('small', {}, `seção ${e.secao}${pronto ? '' : ' · em construção'}`)));
     if (pronto && (feito || ehProx)) {
@@ -460,7 +462,7 @@ function fechamento(dia: Dia) {
   sairDo3d();
   if (!resolvidos.includes(dia.numero)) resolvidos = [...resolvidos, dia.numero];
   gravarEstado();
-  const doAto = CURRICULO.filter((e) => e.ato === dia.ato && e.ref !== undefined);
+  const doAto = CURRICULO.filter((e) => e.ato === dia.ato && jogavel(e));
   const fechouAto = doAto.every((e) => resolvidos.includes(e.numero));
   const acendeu = [...new Set((dia.luz ?? []).map((l) => nomeDoLugar(lugarDaLuz(l))))];
   const mapa = el('button', { class: 'botao' }, 'Ver o mapa da cidade');

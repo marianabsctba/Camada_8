@@ -2,9 +2,7 @@
 
 Cada subseção do currículo de referência (8 capítulos) e o dia do jogo que a ensina. A ordem oficial dos dias está em `src/conteudo/curriculo.ts`.
 
-Legenda: **pronta** (dia jogável, com aula, prática guiada e desafio), **planejada** (o dia existe no mapa, ainda em construção), **agrupada** (a subseção divide o dia com outras subseções curtas), **resumo** (resumo ou visão geral do capítulo, sem conteúdo novo; vira a revisão no fechamento do ato).
-
-**287 subseções**: 30 com dia pronto, 248 com dia planejado, 9 resumos de capítulo. 181 subseções dividem o dia com outras.
+Legenda: **287 subseções**: 63 com dia pronto, 215 com dia planejado, 9 resumos de capítulo. 181 subseções dividem o dia com outras. O ato 0 (capítulo 1) está completo.
 
 ## Correções feitas nesta auditoria
 
@@ -16,52 +14,51 @@ Legenda: **pronta** (dia jogável, com aula, prática guiada e desafio), **plane
 
 ## Ainda falta
 
-- Escrever os dias planejados: 248 subseções esperam o seu dia.
+- Escrever os dias planejados: 215 subseções esperam o seu dia.
 - Subseções agrupadas podem ganhar um dia só delas quando o conteúdo pedir.
-
 
 ## Capítulo 1
 
 | Subseção | Dia | Situação |
 |---|---|---|
-| 1.1.1 | 1: Para que serve uma rede | planejada, agrupada |
-| 1.1.2 | 1: Para que serve uma rede | planejada, agrupada |
-| 1.1.3 | 1: Para que serve uma rede | planejada, agrupada |
-| 1.1.4 | 1: Para que serve uma rede | planejada, agrupada |
-| 1.1.5 | 1: Para que serve uma rede | planejada, agrupada |
-| 1.2.1 | 2: Tipos de rede | planejada, agrupada |
-| 1.2.2 | 2: Tipos de rede | planejada, agrupada |
-| 1.2.3 | 2: Tipos de rede | planejada, agrupada |
-| 1.2.4 | 2: Tipos de rede | planejada, agrupada |
-| 1.2.5 | 2: Tipos de rede | planejada, agrupada |
+| 1.1.1 | 1: Para que serve uma rede | pronta e fiel, agrupada |
+| 1.1.2 | 1: Para que serve uma rede | pronta e fiel, agrupada |
+| 1.1.3 | 1: Para que serve uma rede | pronta e fiel, agrupada |
+| 1.1.4 | 1: Para que serve uma rede | pronta e fiel, agrupada |
+| 1.1.5 | 1: Para que serve uma rede | pronta e fiel, agrupada |
+| 1.2.1 | 2: Tipos de rede | pronta e fiel, agrupada |
+| 1.2.2 | 2: Tipos de rede | pronta e fiel, agrupada |
+| 1.2.3 | 2: Tipos de rede | pronta e fiel, agrupada |
+| 1.2.4 | 2: Tipos de rede | pronta e fiel, agrupada |
+| 1.2.5 | 2: Tipos de rede | pronta e fiel, agrupada |
 | 1.3.1 | 3: Duas casas, um cabo | pronta e fiel (a prática adianta endereço IP), agrupada |
 | 1.3.2 | 3: Duas casas, um cabo | pronta e fiel (a prática adianta endereço IP), agrupada |
 | 1.3.3 | 3: Duas casas, um cabo | pronta e fiel (a prática adianta endereço IP), agrupada |
-| 1.3.4 | 4: Do bairro ao mundo | planejada, agrupada |
-| 1.3.5 | 4: Do bairro ao mundo | planejada, agrupada |
-| 1.3.6 | 4: Do bairro ao mundo | planejada, agrupada |
-| 1.4.1 | 5: Como a Internet é montada | planejada |
-| 1.4.2 | 6: Celular e Wi-Fi | planejada |
-| 1.4.3 | 6: Celular e Wi-Fi | planejada |
-| 1.5.1 | 7: Camadas de protocolos | planejada |
-| 1.5.2 | 7: Camadas de protocolos | planejada |
-| 1.5.3 | 8: Conexões e serviços | planejada, agrupada |
-| 1.5.4 | 8: Conexões e serviços | planejada, agrupada |
-| 1.5.5 | 8: Conexões e serviços | planejada, agrupada |
+| 1.3.4 | 4: Do bairro ao mundo | pronta e fiel, agrupada |
+| 1.3.5 | 4: Do bairro ao mundo | pronta e fiel, agrupada |
+| 1.3.6 | 4: Do bairro ao mundo | pronta e fiel, agrupada |
+| 1.4.1 | 5: Como a Internet é montada | pronta e fiel |
+| 1.4.2 | 6: Celular e Wi-Fi | pronta e fiel |
+| 1.4.3 | 6: Celular e Wi-Fi | pronta e fiel |
+| 1.5.1 | 7: Camadas de protocolos | pronta e fiel |
+| 1.5.2 | 7: Camadas de protocolos | pronta e fiel |
+| 1.5.3 | 8: Conexões e serviços | pronta e fiel, agrupada |
+| 1.5.4 | 8: Conexões e serviços | pronta e fiel, agrupada |
+| 1.5.5 | 8: Conexões e serviços | pronta e fiel, agrupada |
 | 1.6.1 | 9: Quem fala com quem | pronta e fiel |
 | 1.6.2 | 9: Quem fala com quem | pronta e fiel |
-| 1.6.3 | 10: Os modelos e as críticas | planejada, agrupada |
-| 1.6.4 | 10: Os modelos e as críticas | planejada, agrupada |
-| 1.6.5 | 10: Os modelos e as críticas | planejada, agrupada |
-| 1.7.1 | 11: Quem manda nos padrões | planejada, agrupada |
-| 1.7.2 | 11: Quem manda nos padrões | planejada, agrupada |
-| 1.7.3 | 11: Quem manda nos padrões | planejada, agrupada |
-| 1.7.4 | 11: Quem manda nos padrões | planejada, agrupada |
-| 1.8.1 | 12: Neutralidade da rede | planejada |
-| 1.8.2 | 12: Neutralidade da rede | planejada |
-| 1.8.3 | 13: Segurança, privacidade e desinformação | planejada, agrupada |
-| 1.8.4 | 13: Segurança, privacidade e desinformação | planejada, agrupada |
-| 1.8.5 | 13: Segurança, privacidade e desinformação | planejada, agrupada |
+| 1.6.3 | 10: Os modelos e as críticas | pronta e fiel, agrupada |
+| 1.6.4 | 10: Os modelos e as críticas | pronta e fiel, agrupada |
+| 1.6.5 | 10: Os modelos e as críticas | pronta e fiel, agrupada |
+| 1.7.1 | 11: Quem manda nos padrões | pronta e fiel, agrupada |
+| 1.7.2 | 11: Quem manda nos padrões | pronta e fiel, agrupada |
+| 1.7.3 | 11: Quem manda nos padrões | pronta e fiel, agrupada |
+| 1.7.4 | 11: Quem manda nos padrões | pronta e fiel, agrupada |
+| 1.8.1 | 12: Neutralidade da rede | pronta e fiel |
+| 1.8.2 | 12: Neutralidade da rede | pronta e fiel |
+| 1.8.3 | 13: Segurança, privacidade e desinformação | pronta e fiel, agrupada |
+| 1.8.4 | 13: Segurança, privacidade e desinformação | pronta e fiel, agrupada |
+| 1.8.5 | 13: Segurança, privacidade e desinformação | pronta e fiel, agrupada |
 | 1.9 | 14: Bit não é byte | pronta e fiel |
 | 1.10 | (nenhum) | resumo |
 | 1.11 | (nenhum) | resumo |

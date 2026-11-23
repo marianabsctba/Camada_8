@@ -3,14 +3,18 @@
 import { ATO0 } from './ato0';
 import { ATO1 } from './ato1';
 import { ATO2 } from './ato2';
+import { ATO0A } from './ato0a';
+import { ATO0B } from './ato0b';
+import { ATO0C } from './ato0c';
+import { ATO0D } from './ato0d';
 import { CURRICULO } from './curriculo';
 import { EXTRAS } from './extras';
 import { PASSOS } from './passos';
 import type { Dia } from './tipos';
 
-const ORIGINAIS = new Map([...ATO0, ...ATO1, ...ATO2].map((d) => [d.numero, d]));
+const ORIGINAIS = new Map([...ATO0, ...ATO1, ...ATO2, ...ATO0A, ...ATO0B, ...ATO0C, ...ATO0D].map((d) => [d.numero, d]));
 
-export const DIAS: Dia[] = CURRICULO.filter((e) => e.ref !== undefined).map((e) => {
+export const DIAS: Dia[] = CURRICULO.filter((e) => e.ref !== undefined && ORIGINAIS.has(e.ref)).map((e) => {
   const d = ORIGINAIS.get(e.ref!)!;
   const x = EXTRAS[e.ref!];
   // a carta usa o número novo do dia, não o do roteiro original
@@ -24,8 +28,8 @@ export const DIAS: Dia[] = CURRICULO.filter((e) => e.ref !== undefined).map((e) 
     secao: e.secao,
     luz: e.luz,
     passos: d.passos ?? PASSOS[e.ref!] ?? [],
-    aula: x?.aula,
-    desafio: x?.desafio,
+    aula: d.aula ?? x?.aula,
+    desafio: d.desafio ?? x?.desafio,
   };
 });
 

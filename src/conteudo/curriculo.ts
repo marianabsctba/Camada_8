@@ -14,19 +14,19 @@ export interface EntradaCurriculo {
 type Linha = [secao: string, titulo: string, luz: string[], ref?: number];
 
 const ATO0: Linha[] = [
-  ['1.1', 'Para que serve uma rede', ['galpao']],
-  ['1.2', 'Tipos de rede', ['placa-galpao']],
+  ['1.1', 'Para que serve uma rede', ['galpao'], 31],
+  ['1.2', 'Tipos de rede', ['placa-galpao'], 32],
   ['1.3.1 a 1.3.3', 'Duas casas, um cabo', ['casa-1', 'casa-2'], 2],
-  ['1.3.4 a 1.3.6', 'Do bairro ao mundo', ['estrada']],
-  ['1.4.1', 'Como a Internet é montada', ['poste-1']],
-  ['1.4.2 e 1.4.3', 'Celular e Wi-Fi', ['torre-celular']],
-  ['1.5.1 e 1.5.2', 'Camadas de protocolos', ['rack-galpao']],
-  ['1.5.3 a 1.5.5', 'Conexões e serviços', ['casa-3']],
+  ['1.3.4 a 1.3.6', 'Do bairro ao mundo', ['estrada'], 33],
+  ['1.4.1', 'Como a Internet é montada', ['poste-1'], 34],
+  ['1.4.2 e 1.4.3', 'Celular e Wi-Fi', ['torre-celular'], 35],
+  ['1.5.1 e 1.5.2', 'Camadas de protocolos', ['rack-galpao'], 36],
+  ['1.5.3 a 1.5.5', 'Conexões e serviços', ['casa-3'], 37],
   ['1.6.1 e 1.6.2', 'Quem fala com quem', ['casa-4'], 4],
-  ['1.6.3 a 1.6.5', 'Os modelos e as críticas', ['biblioteca']],
-  ['1.7', 'Quem manda nos padrões', ['prefeitura']],
-  ['1.8.1 e 1.8.2', 'Neutralidade da rede', ['camara']],
-  ['1.8.3 a 1.8.5', 'Segurança, privacidade e desinformação', ['camara']],
+  ['1.6.3 a 1.6.5', 'Os modelos e as críticas', ['biblioteca'], 38],
+  ['1.7', 'Quem manda nos padrões', ['prefeitura'], 39],
+  ['1.8.1 e 1.8.2', 'Neutralidade da rede', ['camara'], 40],
+  ['1.8.3 a 1.8.5', 'Segurança, privacidade e desinformação', ['camara-2'], 41],
   ['1.9', 'Bit não é byte', ['casa-5'], 3],
 ];
 

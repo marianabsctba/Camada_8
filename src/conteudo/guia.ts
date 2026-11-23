@@ -17,6 +17,7 @@ export interface ResultadoPasso {
 
 /** Campos que o passo pede, com rótulo e opções vindos da ação (ou a resposta, numa pergunta). */
 export function camposDoPasso(t: Terminal, passo: Passo) {
+  if (passo.escolha) return [{ nome: 'resposta', rotulo: 'Escolha', tipo: 'escolha' as const, opcoes: passo.escolha.opcoes.map((o, i) => ({ valor: String(i), rotulo: o })) }];
   if (passo.pergunta) return [{ nome: 'resposta', rotulo: 'Sua resposta', tipo: 'texto' as const }];
   const acao = acaoDoPasso(t, passo);
   return (acao?.campos ?? []).filter((c) => passo.pedir?.includes(c.nome));
@@ -28,6 +29,11 @@ export function acaoDoPasso(t: Terminal, passo: Passo) {
 }
 
 export function executarPasso(t: Terminal, dia: Dia, passo: Passo, escolhas: Record<string, string>): ResultadoPasso {
+  if (passo.escolha) {
+    const i = Number(escolhas.resposta);
+    if (escolhas.resposta === undefined || escolhas.resposta === '' || !Number.isInteger(i)) return { ok: 'Escolha uma opção.', feito: [] };
+    return { ok: i === passo.escolha.certa || passo.escolha.errada?.[i] || 'Não é essa. Releia o porquê e tente de novo.', feito: [] };
+  }
   if (passo.pergunta) {
     const p = dia.perguntas?.find((x) => x.id === passo.pergunta);
     const r = (escolhas.resposta ?? '').trim();

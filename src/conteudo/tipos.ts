@@ -27,6 +27,8 @@ export interface Passo {
   acao?: string;
   /** Id da pergunta do chamado, quando o passo é responder. */
   pergunta?: string;
+  /** Passo de múltipla escolha: a pessoa escolhe uma opção; cada errada pode ter a sua explicação. */
+  escolha?: { opcoes: string[]; certa: number; errada?: Record<number, string> };
   /** Campos que a pessoa escolhe; os outros vêm de "valores" ou do padrão da ação. */
   pedir?: string[];
   valores?: Record<string, string>;
