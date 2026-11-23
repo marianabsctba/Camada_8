@@ -27,12 +27,13 @@ import { ATO4E } from './ato4e';
 import { ATO4F } from './ato4f';
 import { ATO4G } from './ato4g';
 import { ATO4H } from './ato4h';
+import { ATO4I } from './ato4i';
 import { CURRICULO } from './curriculo';
 import { EXTRAS } from './extras';
 import { PASSOS } from './passos';
 import type { Dia } from './tipos';
 
-const ORIGINAIS = new Map([...ATO0, ...ATO1, ...ATO2, ...ATO0A, ...ATO0B, ...ATO0C, ...ATO0D, ...ATO1A, ...ATO1B, ...ATO1C, ...ATO1D, ...ATO1E, ...ATO2B, ...ATO3A, ...ATO3B, ...ATO3C, ...ATO3D, ...ATO3E, ...ATO3F, ...ATO4A, ...ATO4B, ...ATO4C, ...ATO4D, ...ATO4E, ...ATO4F, ...ATO4G, ...ATO4H].map((d) => [d.numero, d]));
+const ORIGINAIS = new Map([...ATO0, ...ATO1, ...ATO2, ...ATO0A, ...ATO0B, ...ATO0C, ...ATO0D, ...ATO1A, ...ATO1B, ...ATO1C, ...ATO1D, ...ATO1E, ...ATO2B, ...ATO3A, ...ATO3B, ...ATO3C, ...ATO3D, ...ATO3E, ...ATO3F, ...ATO4A, ...ATO4B, ...ATO4C, ...ATO4D, ...ATO4E, ...ATO4F, ...ATO4G, ...ATO4H, ...ATO4I].map((d) => [d.numero, d]));
 
 export const DIAS: Dia[] = CURRICULO.filter((e) => e.ref !== undefined && ORIGINAIS.has(e.ref)).map((e) => {
   const d = ORIGINAIS.get(e.ref!)!;

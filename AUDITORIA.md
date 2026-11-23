@@ -2,7 +2,7 @@
 
 Cada subseção do currículo de referência (8 capítulos) e o dia do jogo que a ensina. A ordem oficial dos dias está em `src/conteudo/curriculo.ts`.
 
-Legenda: **287 subseções**: 129 com dia pronto, 149 com dia planejado, 9 resumos de capítulo. 181 subseções dividem o dia com outras. Os atos 0 a 3 (capítulos 1 a 4) estão completos.
+Legenda: **287 subseções**: 170 com dia pronto, 108 com dia planejado, 9 resumos de capítulo. 181 subseções dividem o dia com outras. Os atos 0 a 4 (capítulos 1 a 5) estão completos.
 
 ## Correções feitas nesta auditoria
 
@@ -14,7 +14,7 @@ Legenda: **287 subseções**: 129 com dia pronto, 149 com dia planejado, 9 resum
 
 ## Ainda falta
 
-- Escrever os dias planejados: 149 subseções esperam o seu dia.
+- Escrever os dias planejados: 108 subseções esperam o seu dia (atos 5, 6 e 7).
 - Reforçar a arquitetura do 802.11 (4.4.1) no dia Canal lotado.
 - Subseções agrupadas podem ganhar um dia só delas quando o conteúdo pedir.
 
@@ -176,47 +176,47 @@ Legenda: **287 subseções**: 129 com dia pronto, 149 com dia planejado, 9 resum
 
 | Subseção | Dia | Situação |
 |---|---|---|
-| 5.1.1 | 76: Armazena e repassa | planejada |
-| 5.1.2 | 76: Armazena e repassa | planejada |
-| 5.1.3 | 77: Datagrama ou circuito virtual | planejada, agrupada |
-| 5.1.4 | 77: Datagrama ou circuito virtual | planejada, agrupada |
-| 5.1.5 | 77: Datagrama ou circuito virtual | planejada, agrupada |
-| 5.2.1 | 78: O caminho mais curto | planejada |
-| 5.2.2 | 78: O caminho mais curto | planejada |
-| 5.2.3 | 79: Inundação | planejada |
-| 5.2.4 | 80: Contagem ao infinito | planejada |
-| 5.2.5 | 81: Estado de enlace | planejada |
-| 5.2.6 | 82: Roteamento hierárquico | planejada |
-| 5.2.7 | 83: Um para todos, um para alguns | planejada, agrupada |
-| 5.2.8 | 83: Um para todos, um para alguns | planejada, agrupada |
-| 5.2.9 | 83: Um para todos, um para alguns | planejada, agrupada |
-| 5.3.1 | 84: Congestionamento | planejada |
-| 5.3.2 | 84: Congestionamento | planejada |
-| 5.4.1 | 85: Filas e prioridades | planejada, agrupada |
-| 5.4.2 | 85: Filas e prioridades | planejada, agrupada |
-| 5.4.3 | 85: Filas e prioridades | planejada, agrupada |
-| 5.4.4 | 86: Serviços diferenciados | planejada |
-| 5.4.5 | 86: Serviços diferenciados | planejada |
-| 5.5.1 | 87: Redes diferentes, um túnel | planejada, agrupada |
-| 5.5.2 | 87: Redes diferentes, um túnel | planejada, agrupada |
-| 5.5.3 | 87: Redes diferentes, um túnel | planejada, agrupada |
-| 5.5.4 | 87: Redes diferentes, um túnel | planejada, agrupada |
-| 5.5.5 | 88: Fragmentação | planejada |
-| 5.5.6 | 88: Fragmentação | planejada |
-| 5.6.1 | 89: A rede programável | planejada, agrupada |
-| 5.6.2 | 89: A rede programável | planejada, agrupada |
-| 5.6.3 | 89: A rede programável | planejada, agrupada |
-| 5.6.4 | 89: A rede programável | planejada, agrupada |
-| 5.7.1 | 90: O cabeçalho IPv4 | planejada |
-| 5.7.2 | 91: Sub-redes; 92: NAT | planejada |
-| 5.7.3 | 93: IPv6 | planejada |
-| 5.7.4 | 94: ICMP, ARP e DHCP | planejada |
-| 5.7.5 | 95: MPLS | planejada |
-| 5.7.6 | 96: OSPF | planejada |
-| 5.7.7 | 97: BGP | planejada |
-| 5.7.8 | 98: Multicast | planejada |
-| 5.8.1 | 99: Política na camada de rede | planejada |
-| 5.8.2 | 99: Política na camada de rede | planejada |
+| 5.1.1 | 76: Armazena e repassa | pronta e fiel |
+| 5.1.2 | 76: Armazena e repassa | pronta e fiel |
+| 5.1.3 | 77: Datagrama ou circuito virtual | pronta e fiel, agrupada |
+| 5.1.4 | 77: Datagrama ou circuito virtual | pronta e fiel, agrupada |
+| 5.1.5 | 77: Datagrama ou circuito virtual | pronta e fiel, agrupada |
+| 5.2.1 | 78: O caminho mais curto | pronta e fiel |
+| 5.2.2 | 78: O caminho mais curto | pronta e fiel |
+| 5.2.3 | 79: Inundação | pronta e fiel |
+| 5.2.4 | 80: Contagem ao infinito | pronta e fiel |
+| 5.2.5 | 81: Estado de enlace | pronta e fiel |
+| 5.2.6 | 82: Roteamento hierárquico | pronta e fiel |
+| 5.2.7 | 83: Um para todos, um para alguns | pronta e fiel, agrupada |
+| 5.2.8 | 83: Um para todos, um para alguns | pronta e fiel, agrupada |
+| 5.2.9 | 83: Um para todos, um para alguns | pronta e fiel, agrupada |
+| 5.3.1 | 84: Congestionamento | pronta e fiel |
+| 5.3.2 | 84: Congestionamento | pronta e fiel |
+| 5.4.1 | 85: Filas e prioridades | pronta e fiel, agrupada |
+| 5.4.2 | 85: Filas e prioridades | pronta e fiel, agrupada |
+| 5.4.3 | 85: Filas e prioridades | pronta e fiel, agrupada |
+| 5.4.4 | 86: Serviços diferenciados | pronta e fiel |
+| 5.4.5 | 86: Serviços diferenciados | pronta e fiel |
+| 5.5.1 | 87: Redes diferentes, um túnel | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
+| 5.5.2 | 87: Redes diferentes, um túnel | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
+| 5.5.3 | 87: Redes diferentes, um túnel | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
+| 5.5.4 | 87: Redes diferentes, um túnel | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
+| 5.5.5 | 88: Fragmentação | pronta e fiel |
+| 5.5.6 | 88: Fragmentação | pronta e fiel |
+| 5.6.1 | 89: A rede programável | pronta e fiel, agrupada |
+| 5.6.2 | 89: A rede programável | pronta e fiel, agrupada |
+| 5.6.3 | 89: A rede programável | pronta e fiel, agrupada |
+| 5.6.4 | 89: A rede programável | pronta e fiel, agrupada |
+| 5.7.1 | 90: O cabeçalho IPv4 | pronta e fiel |
+| 5.7.2 | 91: Sub-redes; 92: NAT | pronta e fiel |
+| 5.7.3 | 93: IPv6 | pronta e fiel |
+| 5.7.4 | 94: ICMP, ARP e DHCP | pronta e fiel |
+| 5.7.5 | 95: MPLS | pronta e fiel |
+| 5.7.6 | 96: OSPF | pronta e fiel |
+| 5.7.7 | 97: BGP | pronta e fiel |
+| 5.7.8 | 98: Multicast | pronta e fiel |
+| 5.8.1 | 99: Política na camada de rede | pronta e fiel |
+| 5.8.2 | 99: Política na camada de rede | pronta e fiel |
 | 5.9 | (nenhum) | resumo |
 
 ## Capítulo 6

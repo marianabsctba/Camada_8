@@ -136,7 +136,9 @@ export function simularBalde(c: ConfigBalde): ResultadoBalde {
     if (i % passoSerie === 0) r.serie.push({ t, saida: saiu / dt });
     t += dt;
     if (saiu > 0) r.fim = t;
-    if (chegou >= c.rajada - 1e-9 && naFila <= 1e-9) break;
+    // Fila vazia zera o acumulado: sem isso, um resíduo de ponto flutuante segurava o laço até o limite.
+    if (!fila.length) naFila = 0;
+    if (chegou >= c.rajada * (1 - 1e-9) && naFila <= 1e-6) break;
   }
   return r;
 }
