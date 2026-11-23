@@ -108,6 +108,7 @@ function acoesRedePc(m: Mundo, e: Equipamento): Acao[] {
     { id: 'ipv6', rotulo: 'Abreviar e expandir IPv6', ajuda: 'IPv6 tem 128 bits em 8 grupos de 4 dígitos hexadecimais. Abrevia tirando zeros à esquerda e trocando a maior sequência de grupos zerados por "::", uma vez só.', contexto: ctx, campos: [{ nome: 'end', rotulo: 'Endereço', tipo: 'texto', padrao: '2001:0db8:0000:0000:0000:ff00:0042:8329' }], comandos: (v) => [`ipv6 ${v.end}`] },
     { id: 'eui64', rotulo: 'Endereço IPv6 a partir do MAC', ajuda: 'EUI-64: parte o MAC de 48 bits no meio, enfia ff:fe e inverte o bit universal/local. Com fe80:: na frente vira o endereço de enlace local.', contexto: ctx, campos: [{ nome: 'mac', rotulo: 'MAC', tipo: 'texto', padrao: e.mac }], comandos: (v) => [`eui64 ${v.mac}`] },
     { id: 'ip6', rotulo: 'Configurar IPv6', ajuda: 'Endereço global com prefixo /64, por exemplo 2001:db8:1::10/64. O de enlace local (fe80::) já existe sozinho, feito do MAC.', contexto: ctx, campos: [{ nome: 'end', rotulo: 'Endereço/prefixo', tipo: 'texto', padrao: '2001:db8:1::10/64' }], comandos: (v) => [`ip6 ${v.end}`, 'mostra'] },
+    { id: 'grupo', rotulo: 'Entrar ou sair de grupo multicast', ajuda: 'O PC avisa o roteador da rede pelo IGMP que quer ouvir um grupo (224.0.0.0 a 239.255.255.255). Sem ninguém ouvindo, o roteador poda aquele galho.', contexto: ctx, campos: [escolha('acao', 'Ação', [op('entrar', 'entrar'), op('sair', 'sair')]), { nome: 'grupo', rotulo: 'Grupo', tipo: 'texto', padrao: '239.1.1.1' }], comandos: (v) => [`grupo ${v.acao} ${v.grupo}`] },
     { id: 'ping6', rotulo: 'Ping IPv6 no enlace', ajuda: 'No IPv6 o ARP vira descoberta de vizinho (NS e NA, por multicast) e o TTL se chama hop limit. Aqui o ping6 só vale dentro do mesmo enlace.', contexto: ctx, campos: [{ nome: 'end', rotulo: 'Destino IPv6', tipo: 'texto', padrao: enlaceLocal([...m.equipamentos.values()].find((x) => x.nome !== e.nome && (x.tipo === 'pc' || x.tipo === 'roteador'))?.mac ?? e.mac) ?? 'fe80::1' }], comandos: (v) => [`ping6 ${v.end}`] },
   ];
 }
@@ -150,7 +151,59 @@ function acoesRedeRoteador(m: Mundo, e: Equipamento): Acao[] {
     { id: 'rot-traceroute', rotulo: 'Traceroute daqui', ajuda: 'Sondas com TTL crescente: cada roteador do caminho se revela ao avisar que o TTL acabou.', contexto: ctx, campos: [campoDestino(m, e)], comandos: (v) => [`traceroute ${v.destino}`] },
     { ...subrede(ctx), id: 'rot-subrede' },
   );
+  a.push(...acoesProtocolos(m, e, portas));
   return a;
+}
+
+/** Protocolos de roteamento, algoritmos e queda de enlace no roteador. */
+function acoesProtocolos(m: Mundo, e: Equipamento, portas: Opcao[]): Acao[] {
+  const ctx = e.nome;
+  const s = e.s;
+  const outros = [...m.equipamentos.values()].filter((x) => x.tipo === 'roteador' && x.nome !== e.nome).map((x) => op(x.nome));
+  const todos = [...m.equipamentos.values()].filter((x) => x.tipo === 'roteador').map((x) => op(x.nome));
+  const liga = (atual: boolean | undefined) => escolha('estado', 'Estado', [op('on', 'ligado'), op('off', 'desligado')], atual ? 'off' : 'on');
+  const derrubadas = e.portas.filter((p) => p.desligada).map((p) => op(p.nome));
+  const redes = Object.values((s.interfaces ?? {}) as Record<string, string>);
+  const anunciados = ((s.bgp?.anuncia ?? []) as string[]).map((x) => op(x));
+  return [
+    { id: 'rot-ospf', rotulo: 'Ligar ou desligar o OSPF', ajuda: 'Estado de enlace: o roteador descobre os vizinhos com hello, mede o custo de cada enlace, inunda um pacote de estado de enlace (LSP) e todo mundo roda o Dijkstra no mesmo mapa.', contexto: ctx, campos: [liga(s.ospf?.ligado)], comandos: (v) => [`ospf ${v.estado}`, 'mostra ospf'] },
+    { id: 'rot-ospf-custo', rotulo: 'Custo OSPF de uma porta', ajuda: 'Por padrão o custo é 10^8 dividido pela velocidade em bit/s (100 Mb/s dá 1, e mais rápido também dá 1). Custo maior afasta o tráfego daquele enlace.', contexto: ctx, campos: [escolha('porta', 'Porta', portas), num('custo', 'Custo', undefined, '10')], comandos: (v) => [`ospf custo ${v.porta} ${v.custo || 10}`, 'mostra ospf'] },
+    { id: 'rot-ospf-area', rotulo: 'Área OSPF de uma porta', ajuda: 'Rede grande se divide em áreas. A área 0 é o backbone; o roteador que fica entre a 0 e outra é o de borda (ABR) e resume uma para a outra.', contexto: ctx, campos: [escolha('porta', 'Porta', portas), num('area', 'Área', undefined, '0')], comandos: (v) => [`ospf area ${v.porta} ${v.area || 0}`, 'mostra ospf'] },
+    { id: 'rot-ospf-ver', rotulo: 'Ver OSPF e o banco de estado de enlace', ajuda: 'Vizinhos, custo e área de cada interface, rotas aprendidas e os LSPs guardados, com número de sequência e idade.', contexto: ctx, comandos: () => ['mostra ospf', 'mostra lsdb'] },
+    { id: 'rot-rip', rotulo: 'Ligar ou desligar o RIP', ajuda: 'Vetor de distância: cada roteador conta aos vizinhos a distância (em saltos) que acha que tem até cada rede. 16 é infinito.', contexto: ctx, campos: [liga(s.rip?.ligado)], comandos: (v) => [`rip ${v.estado}`, 'mostra rip'] },
+    { id: 'rot-rip-horizonte', rotulo: 'Horizonte dividido do RIP', ajuda: 'Ligado: não conta ao vizinho a rota que aprendeu dele. Envenenado: conta, mas com 16. Os dois evitam a contagem ao infinito quando a rede é uma linha.', contexto: ctx, campos: [escolha('h', 'Horizonte', [op('on', 'dividido'), op('envenenado', 'envenenamento reverso'), op('off', 'desligado')])], comandos: (v) => [`rip horizonte ${v.h}`, 'mostra rip'] },
+    { id: 'rot-rip-ver', rotulo: 'Ver a tabela do RIP', ajuda: 'Destino, quantos saltos e por qual vizinho, do jeito que este roteador acredita agora.', contexto: ctx, comandos: () => ['mostra rip'] },
+    { id: 'rot-rodar', rotulo: 'Rodar os protocolos', ajuda: 'Uma rodada é todo mundo mandar o vetor aos vizinhos ao mesmo tempo. Deixe em branco para rodar até convergir, ou diga quantas para ver passo a passo.', contexto: ctx, campos: [{ nome: 'n', rotulo: 'Rodadas (vazio: até convergir)', tipo: 'texto', padrao: '' }], comandos: (v) => [`rodar-protocolos${v.n ? ` ${v.n}` : ''}`] },
+    { id: 'rot-dijkstra', rotulo: 'Dijkstra passo a passo', ajuda: 'A cada passo, o nó provisório de menor distância vira permanente e atualiza os vizinhos. No fim, o caminho mais curto daqui para cada roteador.', contexto: ctx, campos: [escolha('destino', 'Destino (opcional)', [op('', 'todos'), ...outros])], comandos: (v) => [`dijkstra${v.destino ? ` ${v.destino}` : ''}`] },
+    { id: 'rot-arvore', rotulo: 'Árvore de escoamento', ajuda: 'Os caminhos ótimos de todos até um destino formam uma árvore (princípio de otimização). Cada roteador só precisa saber o próximo salto.', contexto: ctx, campos: [escolha('destino', 'Destino', todos, outros[0]?.valor ?? e.nome)], comandos: (v) => [`arvore ${v.destino}`] },
+    { id: 'rot-inundar', rotulo: 'Inundação', ajuda: 'Manda o pacote por todos os enlaces, menos o de chegada. Sem controle, em rede com laço, nunca para. Com contador de saltos ou número de sequência, para.', contexto: ctx, campos: [escolha('modo', 'Controle', [op('sequencia', 'número de sequência'), op('saltos', 'contador de saltos'), op('sem-controle', 'sem controle')]), { nome: 'k', rotulo: 'Saltos (só no contador)', tipo: 'texto', padrao: '' }], comandos: (v) => [`inundar ${v.modo}${v.modo === 'saltos' && v.k ? ` ${v.k}` : ''}`] },
+    { id: 'rot-difusao', rotulo: 'Comparar jeitos de difusão', ajuda: 'Inundação, encaminhamento por caminho reverso (RPF) e árvore de difusão: quantas cópias cada um gasta para alcançar todos.', contexto: ctx, comandos: () => ['difusao'] },
+    { id: 'rot-multicast', rotulo: 'Árvore multicast de um grupo', ajuda: 'Só recebe quem pediu pelo IGMP. A árvore de difusão é podada nos galhos sem ninguém do grupo.', contexto: ctx, campos: [{ nome: 'grupo', rotulo: 'Grupo', tipo: 'texto', padrao: '239.1.1.1' }], comandos: (v) => ['mostra igmp', `multicast ${v.grupo}`] },
+    { id: 'rot-anycast', rotulo: 'Anycast: quem fica mais perto', ajuda: 'O mesmo endereço em vários lugares. O roteamento leva cada um ao mais próximo, sem configuração especial.', contexto: ctx, campos: [campoDestino(m, e)], comandos: (v) => [`anycast ${v.destino}`] },
+    { id: 'rot-regiao', rotulo: 'Pôr numa região', ajuda: 'No roteamento hierárquico cada roteador sabe os detalhes da própria região e só uma linha para cada outra região.', contexto: ctx, campos: [{ nome: 'regiao', rotulo: 'Região', tipo: 'texto', padrao: String(s.regiao ?? 'norte') }], comandos: (v) => [`regiao ${v.regiao || 'norte'}`, 'hierarquia'] },
+    { id: 'rot-hierarquia', rotulo: 'Comparar plano com hierárquico', ajuda: 'Tamanho da tabela nos dois jeitos e quanto o pacote anda a mais por entrar na região pela porta mais perto, não pela melhor.', contexto: ctx, comandos: () => ['hierarquia'] },
+    { id: 'rot-derrubar', rotulo: 'Derrubar uma porta', ajuda: 'Simula a queda do enlace, como um cabo cortado. Veja os protocolos reagirem: o OSPF na hora, o RIP rodada a rodada.', contexto: ctx, campos: [escolha('porta', 'Porta', portas)], comandos: (v) => [`derrubar ${v.porta}`, 'mostra rotas'] },
+    { id: 'rot-levantar', rotulo: 'Levantar uma porta derrubada', ajuda: 'Devolve o enlace. O OSPF reencontra o vizinho e recalcula.', contexto: ctx, campos: [escolha('porta', 'Porta', derrubadas.length ? derrubadas : portas)], comandos: (v) => [`levantar ${v.porta}`, 'mostra rotas'] },
+    { id: 'rot-mpls-lsp', rotulo: 'Montar caminho MPLS', ajuda: 'Comutação por rótulos: este roteador empilha um rótulo, os do meio só trocam o rótulo (sem olhar o IP) e o último desempilha. Diga os próximos roteadores do caminho, em ordem.', contexto: ctx, campos: [{ nome: 'fec', rotulo: 'Prefixo (FEC)', tipo: 'texto', padrao: '203.0.113.0/24' }, { nome: 'rota', rotulo: 'Roteadores seguintes, separados por espaço', tipo: 'texto', padrao: outros[0]?.valor ?? '' }], comandos: (v) => [`mpls lsp ${v.fec} ${v.rota}`, 'mostra mpls'] },
+    { id: 'rot-mpls-enviar', rotulo: 'Mandar pacote pelo MPLS', ajuda: 'Mostra a pilha de rótulos em cada roteador: empilhar, trocar, desempilhar.', contexto: ctx, campos: [{ nome: 'destino', rotulo: 'Destino', tipo: 'texto', padrao: '203.0.113.10' }], comandos: (v) => [`mpls enviar ${v.destino}`] },
+    { id: 'rot-mpls-ver', rotulo: 'Ver a tabela de rótulos', ajuda: 'Rótulo de entrada, operação, rótulo de saída e próximo roteador.', contexto: ctx, comandos: () => ['mostra mpls'] },
+    { id: 'rot-bgp-as', rotulo: 'Ligar o BGP (número do AS)', ajuda: 'Cada sistema autônomo tem um número. Use AS de documentação (64496 a 64511) ou privado (64512 a 65534).', contexto: ctx, campos: [num('asn', 'AS', undefined, String(s.bgp?.asn ?? 64500))], comandos: (v) => [`bgp as ${v.asn || 64500}`, 'mostra bgp'] },
+    { id: 'rot-bgp-vizinho', rotulo: 'Vizinho BGP', ajuda: 'A sessão sobe quando os dois lados se configuram. A relação manda na política: rota de cliente é preferida e vai para todos; de par ou de provedor só vai para clientes.', contexto: ctx, campos: [{ nome: 'ip', rotulo: 'IP do vizinho', tipo: 'texto', padrao: '10.0.13.2' }, num('asn', 'AS do vizinho', undefined, '64501'), escolha('rel', 'O vizinho é meu', [op('par', 'par'), op('cliente', 'cliente'), op('provedor', 'provedor')])], comandos: (v) => [`bgp vizinho ${v.ip} ${v.asn || 64501} ${v.rel}`, 'mostra bgp'] },
+    { id: 'rot-bgp-anunciar', rotulo: 'Anunciar prefixo no BGP', ajuda: 'O anúncio leva o caminho de AS. Anunciar o prefixo de outro, ou um pedaço mais específico dele, é sequestro: o mais específico vence em todo lugar.', contexto: ctx, campos: [{ nome: 'p', rotulo: 'Prefixo', tipo: 'texto', padrao: redes[0] ? textoRede(redes[0]) : '192.0.2.0/24' }], comandos: (v) => [`bgp anunciar ${v.p}`, 'mostra bgp'] },
+    { id: 'rot-bgp-retirar', rotulo: 'Retirar prefixo do BGP', ajuda: 'Os vizinhos recebem a retirada e procuram outro caminho, se houver.', contexto: ctx, campos: [anunciados.length ? escolha('p', 'Prefixo', anunciados) : { nome: 'p', rotulo: 'Prefixo', tipo: 'texto', padrao: '192.0.2.0/24' }], comandos: (v) => [`bgp retirar ${v.p}`, 'mostra bgp'] },
+    { id: 'rot-bgp-ver', rotulo: 'Ver o BGP', ajuda: 'Sessões, melhores rotas com o caminho de AS e alertas de prefixo mais específico vindo de outro AS.', contexto: ctx, comandos: () => ['mostra bgp'] },
+  ];
+}
+
+/** "192.0.2.1/24" vira "192.0.2.0/24". */
+function textoRede(cidr: string): string {
+  const [a, p] = cidr.split('/');
+  const n = Number(p);
+  const ip = (a ?? '').split('.').map(Number);
+  if (ip.length !== 4 || !(n >= 0 && n <= 32)) return cidr;
+  const v = ((ip[0]! << 24) | (ip[1]! << 16) | (ip[2]! << 8) | ip[3]!) >>> 0;
+  const masc = n === 0 ? 0 : (0xffffffff << (32 - n)) >>> 0;
+  return `${ipTexto((v & masc) >>> 0)}/${n}`;
 }
 
 /* ---------- Equipamentos ---------- */

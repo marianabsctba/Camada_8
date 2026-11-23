@@ -101,6 +101,8 @@ function fora(motivo: string, atrasoS = 0, info: string[] = [], dados: Record<st
 }
 
 export function avaliar(m: Mundo, c: Cabo): EstadoEnlace {
+  const derrubada = [c.a, c.b].find((p) => m.equipamentos.get(p.equip)?.portas.find((x) => x.nome === p.porta)?.desligada);
+  if (derrubada) return fora(`porta ${derrubada.equip}:${derrubada.porta} derrubada de propósito (use "levantar ${derrubada.porta}" no console dela)`, c.metros / 2e8);
   switch (c.meio) {
     case 'cat5e':
     case 'cat6':

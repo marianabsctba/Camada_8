@@ -10,6 +10,8 @@ import { simularArq, type ConfigArq, type Linha } from './arq';
 import { amostraDaLinha, hex, transmitir, type ConfigEnlace } from './enlace';
 import { fmt, ipTexto, lerCidr, lerIp, lerNumero, rngSemente, type Cidr } from './util';
 import { abreviarIpv6, agregar, dividir, ehDocumentacao, ehEnlaceLocal, ehPrivado, enderecoBroadcast, enderecoEui64, enderecoRede, enlaceLocal, eui64, expandirIpv6, infoSubrede, pertence, prefixoIpv6, quantidadeHosts, superrede, textoCidr } from './ip';
+import { comandoGrupo, comandosRoteamento } from './cliRotas';
+import { recalcularProtocolos, temProtocolos } from './protocolos';
 import { configurarDhcp, configurarNat, interfacesL3, ipv6De, MTU_PADRAO, nat, pedirDhcp, ping6, rotasDe, temCamadaRede, textoTempo, traceroute, type OpcoesPing, type Rota, type ServidorDhcp } from './roteamento';
 
 type Saida = string[];
@@ -623,7 +625,7 @@ function rodarTraceroute(t: Terminal, e: Equipamento, args: string[]): Saida {
 
 function linhaRota(r: Rota): string {
   const via = r.via !== undefined ? `via ${ipTexto(r.via)}` : 'conectada';
-  return `${r.origem.padEnd(10)} ${textoCidr(r.destino).padEnd(19)} ${via.padEnd(21)} ${r.porta ?? '?'}${r.valida ? '' : '  (próximo salto fora das minhas redes: rota inútil)'}`;
+  return `${r.origem.padEnd(10)} ${textoCidr(r.destino).padEnd(19)} ${via.padEnd(21)} ${r.porta ?? '?'}${r.valida ? '' : '  (próximo salto fora das minhas redes: rota inútil)'}${r.metrica !== undefined ? `  métrica ${r.metrica}` : ''}${r.nota ? ` (${r.nota})` : ''}`;
 }
 
 function mostraRotas(e: Equipamento): Saida {
@@ -734,6 +736,8 @@ const REDE_PC: ConsoleFn = (t, e, cmd, args) => {
       return rodarTraceroute(t, e, args);
     case 'dhcp':
       return pedirDhcp(t.mundo, e.nome).linhas;
+    case 'grupo':
+      return comandoGrupo(e, args);
     case 'arp':
       return mostraArp(e);
     case 'rotas':
@@ -1036,7 +1040,7 @@ const CONSOLE_ROTEADOR: ConsoleFn = (t, e, cmd, args) => {
     case 'login':
       return ['Já está dentro.'];
     case 'mostra':
-      if (args[0] && ['rotas', 'interfaces', 'nat', 'dhcp', 'arp'].includes(args[0])) return REDE_ROTEADOR(t, e, 'mostra', args)!;
+      if (args[0] && ['rotas', 'interfaces', 'nat', 'dhcp', 'arp', 'ospf', 'lsdb', 'rip', 'bgp', 'mpls', 'igmp'].includes(args[0])) return REDE_ROTEADOR(t, e, 'mostra', args)!;
       if (args[0] === 'startup') return ['--- configuração de inicialização (gravada) ---', ...s.startup.map((l: string) => '  ' + l), `  senha ${s.senha ? '*****' : '(nenhuma)'}`, `registro de inicialização: ${s.inicio}`];
       return ['--- configuração em execução (memória) ---', ...(s.running.length ? s.running.map((l: string) => '  ' + l) : ['  (vazia)']), `  senha ${s.senhaRunning ? '*****' : '(nenhuma)'}`, `registro de inicialização: ${s.inicio}`];
     case 'copiar':
@@ -1115,7 +1119,7 @@ const REDE_ROTEADOR: ConsoleFn = (t, e, cmd, args) => {
           return l;
         }
       }
-      return null;
+      return comandosRoteamento(t.mundo, e, 'mostra', args);
     case 'ip': {
       const p = porta(e, args[0]);
       if (!p) return [`ip <porta> <endereço/prefixo>. Portas: ${e.portas.map((x) => x.nome).join(', ')}.`];
@@ -1203,7 +1207,7 @@ const REDE_ROTEADOR: ConsoleFn = (t, e, cmd, args) => {
     case 'tracert':
       return rodarTraceroute(t, e, args);
   }
-  return calculadora(cmd, args);
+  return comandosRoteamento(t.mundo, e, cmd, args) ?? calculadora(cmd, args);
 };
 
 const CONSOLE_MODEM: ConsoleFn = (_t, e, cmd, args) => {
@@ -1442,11 +1446,11 @@ function discarPpp(m: Mundo, e: Equipamento): string[] {
 const CONSOLE_GENERICO: ConsoleFn = (t, e, cmd) => (cmd === 'mostra' ? mostraInterfaces(t, e) : null);
 
 const CONSOLES: Partial<Record<Equipamento['tipo'], { fn: ConsoleFn; ajuda: string[]; rede?: string[] }>> = {
-  pc: { fn: CONSOLE_PC, ajuda: ['ip [endereço/prefixo]', 'mostra', 'ping <ip> [quantidade]', 'capturar', 'vazao [equipamento]'], rede: ['gateway <ip|nenhum>', 'ping <ip> [quantidade] [tamanho] [df]', 'traceroute <ip> [máximo]', 'dhcp', 'mostra rotas | mostra arp', 'mtu [bytes]', 'ip6 <endereço/prefixo>', 'ping6 <endereço> [quantidade]', 'subrede <endereço/prefixo> [novo prefixo]', 'agregar <prefixo> <prefixo> ...', 'ipv6 <endereço>', 'eui64 <mac>'] },
+  pc: { fn: CONSOLE_PC, ajuda: ['ip [endereço/prefixo]', 'mostra', 'ping <ip> [quantidade]', 'capturar', 'vazao [equipamento]'], rede: ['gateway <ip|nenhum>', 'ping <ip> [quantidade] [tamanho] [df]', 'traceroute <ip> [máximo]', 'dhcp', 'mostra rotas | mostra arp', 'mtu [bytes]', 'ip6 <endereço/prefixo>', 'ping6 <endereço> [quantidade]', 'subrede <endereço/prefixo> [novo prefixo]', 'agregar <prefixo> <prefixo> ...', 'ipv6 <endereço>', 'eui64 <mac>', 'grupo <entrar|sair> <grupo multicast>'] },
   switch: { fn: CONSOLE_SWITCH, ajuda: ['mostra', 'mostra mac', 'mostra stp', 'mostra vlan', 'limpa mac', 'stp <on|off>', 'prioridade <n>', 'vlan <porta> <id>', 'tronco <porta> <lista|nao>'] },
   hub: { fn: CONSOLE_HUB, ajuda: ['mostra'] },
   canal: { fn: CONSOLE_CANAL, ajuda: ['mostra', 'protocolo <aloha|aloha-slotted|csma-np|csma-1p|csma-cd|csma-ca|bitmap|token>', 'carga <G>', 'estacoes <n>', 'atraso <a>', 'rts-cts <sim|nao>', 'ocultas <sim|nao>', 'simular'] },
-  roteador: { fn: CONSOLE_ROTEADOR, ajuda: ['login <senha>', 'mostra [startup]', 'copiar startup running', 'senha <nova>', 'salvar', 'inicio <normal|ignorar-config>', 'interromper (só durante o boot)'], rede: ['ip <porta> <endereço/prefixo|nenhum>', 'rota <prefixo> <próximo salto>', 'sem-rota <prefixo>', 'mostra rotas | interfaces | arp | nat | dhcp', 'nat <internas> <externa> | nat desliga', 'dhcp <porta> <primeiro> <último> [gw <ip>] [dns <ip>] [tempo <s>]', 'sem-dhcp', 'mtu <porta> <bytes>', 'ping <ip> [quantidade] [tamanho] [df]', 'traceroute <ip> [máximo]', 'subrede | agregar | ipv6 | eui64'] },
+  roteador: { fn: CONSOLE_ROTEADOR, ajuda: ['login <senha>', 'mostra [startup]', 'copiar startup running', 'senha <nova>', 'salvar', 'inicio <normal|ignorar-config>', 'interromper (só durante o boot)'], rede: ['ip <porta> <endereço/prefixo|nenhum>', 'rota <prefixo> <próximo salto>', 'sem-rota <prefixo>', 'mostra rotas | interfaces | arp | nat | dhcp', 'nat <internas> <externa> | nat desliga', 'dhcp <porta> <primeiro> <último> [gw <ip>] [dns <ip>] [tempo <s>]', 'sem-dhcp', 'mtu <porta> <bytes>', 'ping <ip> [quantidade] [tamanho] [df]', 'traceroute <ip> [máximo]', 'subrede | agregar | ipv6 | eui64', 'ospf <on|off> | ospf custo <porta> <n> | ospf area <porta> <n>', 'rip <on|off> | rip horizonte <on|off|envenenado>', 'rodar-protocolos [rodadas]', 'mostra ospf | lsdb | rip | bgp | mpls | igmp', 'derrubar <porta> | levantar <porta>', 'dijkstra [destino] | arvore <destino> | inundar <sem-controle|saltos|sequencia> [k]', 'difusao | multicast <grupo> | anycast <ip>', 'regiao <nome> | hierarquia', 'mpls lsp <prefixo> <roteador> ... | mpls enviar <ip> | mpls limpa', 'bgp as <n> | bgp vizinho <ip> <AS> <cliente|par|provedor> | bgp anunciar <prefixo> | bgp retirar <prefixo> | bgp off'] },
   modem: { fn: CONSOLE_MODEM, ajuda: ['mostra', 'taxa-simbolos <baud>', 'modulacao <bpsk|qpsk|qam16|qam64|qam256>', 'treinar'] },
   mux: { fn: CONSOLE_MUX, ajuda: ['mostra', 'slot <lista> <enquadramento|sinalizacao|voz|dados|livre>'] },
   radio: { fn: CONSOLE_RADIO, ajuda: ['mostra'] },
@@ -1512,6 +1516,8 @@ export class Terminal {
     const [cmdBruto, ...args] = texto.split(/\s+/);
     const cmd = cmdBruto!.toLowerCase();
     if (cmd === '?' || cmd === 'ajuda') return this.ajuda();
+    // OSPF e BGP se recalculam sozinhos a cada comando (o mundo pode ter mudado no anterior); o RIP anda em rodadas.
+    if (temProtocolos(this.mundo)) recalcularProtocolos(this.mundo);
     if (this.contexto) {
       if (cmd === 'sair' || cmd === 'exit') {
         const nome = this.contexto;

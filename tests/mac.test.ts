@@ -55,7 +55,7 @@ describe('acesso múltiplo', () => {
     expect(dez.intervalos).toBeGreaterThan(duas.intervalos);
     expect(recuoExponencial(10, rngSemente(7))).toEqual(dez);
   });
-  it('mapa de bits e bastão não colidem e têm as eficiências do livro', () => {
+  it('mapa de bits e bastão não colidem e têm as eficiências clássicas', () => {
     expect(eficienciaBitmap(8, 1000, 'baixa')).toBeCloseTo(1000 / 1008, 9);
     expect(eficienciaBitmap(8, 1000, 'alta')).toBeCloseTo(1000 / 1001, 9);
     const volta = tempoVoltaToken(10, 0.1, 24, 1000);

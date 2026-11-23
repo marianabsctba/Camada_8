@@ -66,6 +66,8 @@ export interface Porta {
   tronco?: number[];
   /** Maior pacote IP (cabeçalho incluído) que sai por esta porta. Padrão: 1500, o do Ethernet. */
   mtu?: number;
+  /** Porta derrubada de propósito ("derrubar"): o enlace dela cai, como cabo cortado, até "levantar". */
+  desligada?: boolean;
 }
 
 export interface Antena {

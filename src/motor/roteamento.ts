@@ -109,10 +109,26 @@ export interface Rota {
   destino: Cidr;
   via?: number;
   porta?: string;
-  origem: 'conectada' | 'estática' | 'padrão';
+  origem: 'conectada' | 'estática' | 'padrão' | 'bgp' | 'ospf' | 'rip';
   /** Rota estática cujo próximo salto não está em nenhuma rede conectada não serve para nada. */
   valida: boolean;
+  /** Métrica do protocolo que aprendeu a rota (custo OSPF, saltos do RIP, tamanho do caminho de AS no BGP). */
+  metrica?: number;
+  /** Detalhe para mostrar: área OSPF, intra ou entre áreas, caminho de AS. */
+  nota?: string;
 }
+
+/** Rota aprendida por protocolo, guardada em s.rotasDinamicas pelos protocolos (protocolos.ts). */
+export interface RotaDinamica {
+  destino: string;
+  via: string;
+  origem: 'bgp' | 'ospf' | 'rip';
+  metrica: number;
+  nota?: string;
+}
+
+/** Distância administrativa: quando dois jeitos de aprender dão o mesmo prefixo, vence o de menor número. */
+export const DISTANCIA_ADMIN: Record<Rota['origem'], number> = { conectada: 0, estática: 1, padrão: 1, bgp: 20, ospf: 110, rip: 120 };
 
 /** Tabela de rotas: as conectadas saem das interfaces; as estáticas e a padrão (0.0.0.0/0) vêm da configuração. */
 export function rotasDe(e: Equipamento): Rota[] {
@@ -126,6 +142,17 @@ export function rotasDe(e: Equipamento): Rota[] {
     if (!d || via === null) continue;
     const saida = intfs.filter((i) => pertence(via, i.cidr)).sort((a, b) => b.cidr.prefixo - a.cidr.prefixo)[0];
     r.push({ destino: { endereco: enderecoRede(d), prefixo: d.prefixo }, via, porta: saida?.porta, origem: d.prefixo === 0 ? 'padrão' : 'estática', valida: !!saida });
+  }
+  // Aprendidas por protocolo: entram só se ninguém de distância administrativa menor já tem o mesmo prefixo.
+  const dinamicas = [...((e.s.rotasDinamicas as RotaDinamica[] | undefined) ?? [])].sort((a, b) => DISTANCIA_ADMIN[a.origem] - DISTANCIA_ADMIN[b.origem]);
+  for (const s of dinamicas) {
+    const d = lerCidr(s.destino);
+    const via = lerIp(s.via);
+    if (!d || via === null) continue;
+    const destino = { endereco: enderecoRede(d), prefixo: d.prefixo };
+    if (r.some((x) => x.destino.endereco === destino.endereco && x.destino.prefixo === destino.prefixo)) continue;
+    const saida = intfs.filter((i) => pertence(via, i.cidr)).sort((a, b) => b.cidr.prefixo - a.cidr.prefixo)[0];
+    r.push({ destino, via, porta: saida?.porta, origem: s.origem, valida: !!saida, metrica: s.metrica, nota: s.nota });
   }
   return r;
 }
