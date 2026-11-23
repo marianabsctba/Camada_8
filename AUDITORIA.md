@@ -2,7 +2,7 @@
 
 Cada subseção do currículo de referência (8 capítulos) e o dia do jogo que a ensina. A ordem oficial dos dias está em `src/conteudo/curriculo.ts`.
 
-Legenda: **287 subseções**: 90 com dia pronto, 188 com dia planejado, 9 resumos de capítulo. 181 subseções dividem o dia com outras. Os atos 0 e 1 (capítulos 1 e 2) estão completos.
+Legenda: **287 subseções**: 129 com dia pronto, 149 com dia planejado, 9 resumos de capítulo. 181 subseções dividem o dia com outras. Os atos 0 a 3 (capítulos 1 a 4) estão completos.
 
 ## Correções feitas nesta auditoria
 
@@ -14,7 +14,8 @@ Legenda: **287 subseções**: 90 com dia pronto, 188 com dia planejado, 9 resumo
 
 ## Ainda falta
 
-- Escrever os dias planejados: 188 subseções esperam o seu dia.
+- Escrever os dias planejados: 149 subseções esperam o seu dia.
+- Reforçar a arquitetura do 802.11 (4.4.1) no dia Canal lotado.
 - Subseções agrupadas podem ganhar um dia só delas quando o conteúdo pedir.
 
 ## Capítulo 1
@@ -113,10 +114,10 @@ Legenda: **287 subseções**: 90 com dia pronto, 188 com dia planejado, 9 resumo
 
 | Subseção | Dia | Situação |
 |---|---|---|
-| 3.1.1 | 43: O que o enlace promete | planejada |
+| 3.1.1 | 43: O que o enlace promete | pronta e fiel |
 | 3.1.2 | 44: Onde começa o quadro; 45: O byte que é flag; 46: Cinco uns | pronta e fiel |
-| 3.1.3 | 47: Erro e fluxo | planejada |
-| 3.1.4 | 47: Erro e fluxo | planejada |
+| 3.1.3 | 47: Erro e fluxo | pronta e fiel |
+| 3.1.4 | 47: Erro e fluxo | pronta e fiel |
 | 3.2.1 | 48: Mão única | pronta e fiel |
 | 3.2.2 | 49: Paridade não basta; 50: Divisão por polinômio | pronta e fiel |
 | 3.3.1 | 51: Pare e espere; 52: O ACK que sumiu | pronta e fiel, agrupada |
@@ -125,50 +126,50 @@ Legenda: **287 subseções**: 90 com dia pronto, 188 com dia planejado, 9 resumo
 | 3.4.1 | 53: Encher o cano; 54: Janela de oito; 55: Só o que se perdeu | pronta e fiel |
 | 3.4.2 | 53: Encher o cano; 54: Janela de oito; 55: Só o que se perdeu | pronta e fiel |
 | 3.5.1 | 56: PPP no último quilômetro | pronta e fiel |
-| 3.5.2 | 57: O enlace do ADSL e do cabo | planejada |
-| 3.5.3 | 57: O enlace do ADSL e do cabo | planejada |
+| 3.5.2 | 57: O enlace do ADSL e do cabo | pronta e fiel |
+| 3.5.3 | 57: O enlace do ADSL e do cabo | pronta e fiel |
 | 3.6 | (nenhum) | resumo |
 
 ## Capítulo 4
 
 | Subseção | Dia | Situação |
 |---|---|---|
-| 4.1.1 | 58: Um canal para muitos | planejada |
-| 4.1.2 | 58: Um canal para muitos | planejada |
-| 4.2.1 | 59: ALOHA | planejada |
-| 4.2.2 | 60: Escutar antes de falar | planejada |
-| 4.2.3 | 61: Sem colisão | planejada |
-| 4.2.4 | 61: Sem colisão | planejada |
-| 4.2.5 | 62: O terminal escondido | planejada |
-| 4.3.1 | 63: Ethernet clássica | planejada |
-| 4.3.2 | 63: Ethernet clássica | planejada |
-| 4.3.3 | 64: Desempenho da Ethernet | planejada |
-| 4.3.4 | 65: Hub ou switch | planejada |
-| 4.3.5 | 66: De 100 mega a 100 giga | planejada, agrupada |
-| 4.3.6 | 66: De 100 mega a 100 giga | planejada, agrupada |
-| 4.3.7 | 66: De 100 mega a 100 giga | planejada, agrupada |
-| 4.3.8 | 66: De 100 mega a 100 giga | planejada, agrupada |
-| 4.3.9 | 66: De 100 mega a 100 giga | planejada, agrupada |
-| 4.4.1 | 67: Canal lotado | pronta e fiel |
-| 4.4.2 | 67: Canal lotado | pronta e fiel |
-| 4.4.3 | 68: Pedir a vez no ar | planejada |
-| 4.4.4 | 69: Associar e autenticar | planejada |
-| 4.4.5 | 69: Associar e autenticar | planejada |
-| 4.5.1 | 70: Bluetooth | planejada, agrupada |
-| 4.5.2 | 70: Bluetooth | planejada, agrupada |
-| 4.5.3 | 70: Bluetooth | planejada, agrupada |
-| 4.5.4 | 70: Bluetooth | planejada, agrupada |
-| 4.5.5 | 70: Bluetooth | planejada, agrupada |
-| 4.5.6 | 70: Bluetooth | planejada, agrupada |
-| 4.5.7 | 70: Bluetooth | planejada, agrupada |
-| 4.6.1 | 71: DOCSIS por dentro | planejada, agrupada |
-| 4.6.2 | 71: DOCSIS por dentro | planejada, agrupada |
-| 4.6.3 | 71: DOCSIS por dentro | planejada, agrupada |
-| 4.7.1 | 72: A ponte que aprende | planejada |
-| 4.7.2 | 72: A ponte que aprende | planejada |
-| 4.7.3 | 73: Matando o laço | planejada |
-| 4.7.4 | 74: Quem é de qual camada | planejada |
-| 4.7.5 | 75: VLANs | planejada |
+| 4.1.1 | 58: Um canal para muitos | pronta e fiel |
+| 4.1.2 | 58: Um canal para muitos | pronta e fiel |
+| 4.2.1 | 59: ALOHA | pronta e fiel |
+| 4.2.2 | 60: Escutar antes de falar | pronta e fiel |
+| 4.2.3 | 61: Sem colisão | pronta e fiel |
+| 4.2.4 | 61: Sem colisão | pronta e fiel |
+| 4.2.5 | 62: O terminal escondido | pronta e fiel |
+| 4.3.1 | 63: Ethernet clássica | pronta e fiel |
+| 4.3.2 | 63: Ethernet clássica | pronta e fiel |
+| 4.3.3 | 64: Desempenho da Ethernet | pronta e fiel |
+| 4.3.4 | 65: Hub ou switch | pronta e fiel |
+| 4.3.5 | 66: De 100 mega a 100 giga | pronta e fiel, agrupada |
+| 4.3.6 | 66: De 100 mega a 100 giga | pronta e fiel, agrupada |
+| 4.3.7 | 66: De 100 mega a 100 giga | pronta e fiel, agrupada |
+| 4.3.8 | 66: De 100 mega a 100 giga | pronta e fiel, agrupada |
+| 4.3.9 | 66: De 100 mega a 100 giga | pronta e fiel, agrupada |
+| 4.4.1 | 67: Canal lotado | pronta, parcial: cobre a camada física do Wi-Fi (canais); a arquitetura do 802.11 ainda pede reforço |
+| 4.4.2 | 67: Canal lotado | pronta, parcial: cobre a camada física do Wi-Fi (canais); a arquitetura do 802.11 ainda pede reforço |
+| 4.4.3 | 68: Pedir a vez no ar | pronta e fiel |
+| 4.4.4 | 69: Associar e autenticar | pronta e fiel |
+| 4.4.5 | 69: Associar e autenticar | pronta e fiel |
+| 4.5.1 | 70: Bluetooth | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
+| 4.5.2 | 70: Bluetooth | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
+| 4.5.3 | 70: Bluetooth | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
+| 4.5.4 | 70: Bluetooth | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
+| 4.5.5 | 70: Bluetooth | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
+| 4.5.6 | 70: Bluetooth | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
+| 4.5.7 | 70: Bluetooth | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
+| 4.6.1 | 71: DOCSIS por dentro | pronta e fiel, agrupada |
+| 4.6.2 | 71: DOCSIS por dentro | pronta e fiel, agrupada |
+| 4.6.3 | 71: DOCSIS por dentro | pronta e fiel, agrupada |
+| 4.7.1 | 72: A ponte que aprende | pronta e fiel |
+| 4.7.2 | 72: A ponte que aprende | pronta e fiel |
+| 4.7.3 | 73: Matando o laço | pronta e fiel |
+| 4.7.4 | 74: Quem é de qual camada | pronta e fiel |
+| 4.7.5 | 75: VLANs | pronta e fiel |
 | 4.8 | (nenhum) | resumo |
 
 ## Capítulo 5
