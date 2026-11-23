@@ -36,6 +36,8 @@ import {
   type Fragmento,
 } from './ip';
 import { ipTexto, lerCidr, lerIp, type Cidr } from './util';
+import { decidir, fluxosDe, temFluxos, prefixoQueContem, instalarRegra, type DecisaoFluxo } from './sdn';
+import { byteServico, nomeDscp } from './qos';
 
 export interface OpcoesPing {
   /** Bytes de dados do ICMP (o ping comum manda 56). */
@@ -274,6 +276,8 @@ export interface Pacote {
   icmp: { tipo: number; codigo: number; id: number; seq: number; mtu?: number };
   /** Mensagem de erro ICMP: não se gera erro sobre erro. */
   erro?: boolean;
+  /** Byte de serviço diferenciado (DSCP nos 6 bits de cima, ECN nos 2 de baixo). Ausente: 0, nunca mexido. */
+  tos?: number;
 }
 
 export interface Viagem {
@@ -319,6 +323,116 @@ function erroIcmp(m: Mundo, v: Viagem, r: Equipamento, entrada: string | undefin
   return v;
 }
 
+/* ---------- Serviços diferenciados e tabela de fluxo (só agem quando configurados) ---------- */
+
+/** Regra de marcação na borda: pacote cuja origem (ou destino) está no prefixo ganha a classe. */
+export interface MarcaDscp {
+  prefixo: string;
+  dscp: number;
+  campo: 'origem' | 'destino';
+}
+
+export function marcasDscp(e: Equipamento): MarcaDscp[] {
+  return (e.s.dscp as MarcaDscp[] | undefined) ?? [];
+}
+
+/** Marcação na borda (serviços diferenciados): o roteador classifica e escreve o DSCP no cabeçalho. */
+function marcarDscp(e: Equipamento, p: Pacote, v: Viagem): void {
+  const lista = marcasDscp(e);
+  if (!lista.length) return;
+  for (const campo of ['origem', 'destino'] as const) {
+    const pref = prefixoQueContem(lista.filter((x) => x.campo === campo).map((x) => x.prefixo), campo === 'origem' ? p.origem : p.destino);
+    if (!pref) continue;
+    const marca = lista.find((x) => x.campo === campo && x.prefixo === pref)!;
+    p.tos = byteServico(marca.dscp, (p.tos ?? 0) & 3);
+    v.eventos.push(`${e.nome} marca o pacote com DSCP ${marca.dscp} (${nomeDscp(marca.dscp)}): ${campo} em ${pref}`);
+    return;
+  }
+}
+
+/** Próximo salto saindo por uma porta escolhida pela regra: o próprio destino, se é da rede da porta, ou o roteador do outro lado. */
+function proximoNaPorta(m: Mundo, e: Equipamento, porta: string, destino: number): number | null {
+  const intf = interfacesL3(e).find((i) => i.porta === porta);
+  if (!intf) return null;
+  if (pertence(destino, intf.cidr)) return destino;
+  for (const x of m.equipamentos.values()) {
+    if (x.nome === e.nome || !roteadorLigado(x)) continue;
+    for (const i of interfacesL3(x)) if (i.cidr.prefixo === intf.cidr.prefixo && enderecoRede(i.cidr) === enderecoRede(intf.cidr)) return i.cidr.endereco;
+  }
+  return null;
+}
+
+/**
+ * Plano de dados com SDN: a tabela de fluxo decide antes da tabela de rotas. Devolve a rota que a regra mandou
+ * usar, null para seguir a tabela de rotas (regra "normal" ou nenhuma regra casou) ou "descartado".
+ * "controlador": o pacote sobe ao controlador, que responde com a visão central da rede e instala uma regra nova.
+ */
+function consultarFluxos(m: Mundo, e: Equipamento, p: Pacote, entrada: string | undefined, v: Viagem): Rota | null | 'descartado' {
+  const d: DecisaoFluxo = decidir(fluxosDe(e), p, entrada);
+  if (!d.regra) return null;
+  if (d.novoTos !== undefined) {
+    p.tos = d.novoTos;
+    v.eventos.push(`${e.nome} (regra ${d.regra.id}) reescreve o DSCP para ${d.novoTos >> 2}`);
+  }
+  if (d.novoDestino !== undefined) {
+    v.eventos.push(`${e.nome} (regra ${d.regra.id}) reescreve o destino de ${ipTexto(p.destino)} para ${ipTexto(d.novoDestino)}`);
+    p.destino = d.novoDestino;
+  }
+  let porta = d.porta;
+  if (d.destino === 'descartar') {
+    v.onde = e.nome;
+    v.falha = `${e.nome} descartou o pacote: a regra ${d.regra.id} da tabela de fluxo manda descartar.`;
+    return 'descartado';
+  }
+  if (d.destino === 'controlador') {
+    const sdn = (m.flags.sdn ??= {}) as { controlador?: boolean; packetIn?: number; visao?: Record<string, Record<string, string>> };
+    sdn.packetIn = (sdn.packetIn ?? 0) + 1;
+    const visao = sdn.controlador ? (sdn.visao?.[e.nome] ?? {}) : {};
+    const pref = prefixoQueContem(Object.keys(visao), p.destino);
+    if (!sdn.controlador || !pref) {
+      v.onde = e.nome;
+      v.falha = sdn.controlador ? `${e.nome} mandou o pacote ao controlador, que não conhece caminho para ${ipTexto(p.destino)}. Descartado.` : `${e.nome} mandou o pacote ao controlador, mas o controlador está desligado. Ninguém respondeu, pacote descartado.`;
+      return 'descartado';
+    }
+    porta = visao[pref]!;
+    instalarRegra(e, d.regra.prioridade + 1, { destino: pref }, [{ tipo: 'porta', porta }], 'reativa');
+    v.eventos.push(`${e.nome} manda o pacote ao controlador (packet-in); o controlador responde "porta ${porta}" e instala a regra para ${pref}`);
+  }
+  if (!porta) return null;
+  const via = proximoNaPorta(m, e, porta, p.destino);
+  if (via === null) {
+    v.onde = e.nome;
+    v.falha = `${e.nome}: a regra ${d.regra.id} manda sair pela ${porta}, mas do outro lado não há ninguém que leve a ${ipTexto(p.destino)}.`;
+    return 'descartado';
+  }
+  v.eventos.push(`${e.nome} encaminha pela ${porta} por causa da regra ${d.regra.id} da tabela de fluxo, sem olhar a tabela de rotas`);
+  return { destino: { endereco: p.destino, prefixo: 32 }, via: via === p.destino ? undefined : via, porta, origem: 'estática', valida: true };
+}
+
+/** Switch com tabela de fluxo: conta, descarta ou reescreve; encaminhar por outra porta que não a do caminho é recusado. */
+function fluxoNoSwitch(m: Mundo, sw: Equipamento, p: Pacote, entrada: string, saida: string | undefined, v: Viagem): boolean {
+  const d = decidir(fluxosDe(sw), p, entrada);
+  if (!d.regra) return true;
+  if (d.novoTos !== undefined) p.tos = d.novoTos;
+  if (d.destino === 'descartar') {
+    v.falha = `${sw.nome} descartou o quadro: a regra ${d.regra.id} da tabela de fluxo manda descartar.`;
+    return false;
+  }
+  if (d.destino === 'controlador') {
+    const sdn = (m.flags.sdn ??= {}) as { controlador?: boolean; packetIn?: number };
+    sdn.packetIn = (sdn.packetIn ?? 0) + 1;
+    if (!sdn.controlador) {
+      v.falha = `${sw.nome} mandou o quadro ao controlador, mas o controlador está desligado.`;
+      return false;
+    }
+  }
+  if (d.destino === 'porta' && saida && d.porta !== saida) {
+    v.falha = `${sw.nome}: a regra ${d.regra.id} manda sair pela ${d.porta}, mas o próximo salto está pela ${saida}. O quadro se perdeu.`;
+    return false;
+  }
+  return true;
+}
+
 /**
  * Leva um pacote de "inicio" até o destino, salto a salto. Em cada roteador: decrementa o TTL
  * (zero vira ICMP "tempo esgotado"), escolhe a rota pelo prefixo mais longo (sem rota vira "rede inalcançável"),
@@ -354,7 +468,14 @@ export function viajar(m: Mundo, inicio: string, p0: Pacote): Viagem {
       v.roteadores.push({ nome: atual.nome, ip: ipEnt });
       v.tempo += ATRASO_ROTEADOR;
     }
-    const rota = escolherRota(atual, p.destino);
+    if (atual.s.dscp && ehRoteador(atual)) marcarDscp(atual, p, v);
+    let rota: Rota | null = null;
+    if (temFluxos(atual)) {
+      const r = consultarFluxos(m, atual, p, entrada, v);
+      if (r === 'descartado') return v;
+      rota = r;
+    }
+    rota ??= escolherRota(atual, p.destino);
     if (!rota || !rota.porta) {
       if (passo === 0) {
         v.falha = atual.s.gateway || ehRoteador(atual) ? `Sem rota para ${ipTexto(p.destino)} na minha tabela.` : `${ipTexto(p.destino)} está fora da minha rede e eu não tenho gateway. Mando pra onde, pro além?`;
@@ -400,9 +521,18 @@ export function viajar(m: Mundo, inicio: string, p0: Pacote): Viagem {
     }
     // Atravessa os switches do segmento.
     const bits = p.fragmentos.reduce((s, f) => s + (f.dados + CABECALHO_IPV4 + SOBRA_ETHERNET) * 8, 0);
-    for (const s of viz.saltos) {
+    for (let k = 0; k < viz.saltos.length; k++) {
+      const s = viz.saltos[k]!;
       const quem = m.equipamentos.get(s.para)!;
       const portaRx = acharPorta(m, s.cabo.a.equip === s.para ? s.cabo.a : s.cabo.b);
+      if (quem.tipo === 'switch' && temFluxos(quem)) {
+        const prox = viz.saltos[k + 1];
+        const saida = prox ? (prox.cabo.a.equip === quem.nome ? prox.cabo.a.porta : prox.cabo.b.porta) : undefined;
+        if (!fluxoNoSwitch(m, quem, p, portaRx.nome, saida, v)) {
+          v.onde = quem.nome;
+          return v;
+        }
+      }
       v.tempo += bits / (s.estado.velocidade * 1e6) + s.estado.atrasoS + (ENCAMINHAR[quem.tipo] ?? 0);
       if (m.rng() < fer(s.estado.ber, bits)) {
         portaRx.contadores.crc++;
@@ -506,7 +636,7 @@ export function pingRoteado(m: Mundo, deNome: string, ip: number, n = 4, o: Opco
     const { ida, volta } = s;
     if (seq === 1) {
       r.roteadores = ida.roteadores.map((x) => x.nome);
-      r.linhas.push(...ida.eventos.filter((x) => x.includes('fragmenta') || x.includes('NAT')));
+      r.linhas.push(...ida.eventos.filter((x) => x.includes('fragmenta') || x.includes('NAT') || x.includes('DSCP') || x.includes('regra') || x.includes('controlador')));
     }
     if (ida.falha && !ida.entregue && !ida.icmpErro) {
       if (ida.semArp !== undefined) {
@@ -538,7 +668,8 @@ export function pingRoteado(m: Mundo, deNome: string, ip: number, n = 4, o: Opco
     }
     // Chegou: a captura é feita no destino, com o TTL que sobrou.
     const alvo = m.equipamentos.get(ida.onde)!;
-    const h = montarCabecalho({ tamanhoTotal: ida.pacote.tamanho, identificacao: ida.pacote.identificacao, df: ida.pacote.df, ttl: ida.pacote.ttl, protocolo: 1, origem: ida.pacote.origem, destino: ida.pacote.destino });
+    const h = montarCabecalho({ tamanhoTotal: ida.pacote.tamanho, identificacao: ida.pacote.identificacao, df: ida.pacote.df, ttl: ida.pacote.ttl, protocolo: 1, origem: ida.pacote.origem, destino: ida.pacote.destino, tos: ida.pacote.tos });
+    const tos = ida.pacote.tos;
     m.ultimaCaptura = {
       eth: { origem: ida.ultimoMac || de.mac, destino: alvo.mac, etherType: 0x0800 },
       ip: { origem: ida.pacote.origem, destino: ida.pacote.destino, ttl: ida.pacote.ttl, protocolo: 1, tamanho: ida.pacote.tamanho },
@@ -552,6 +683,7 @@ export function pingRoteado(m: Mundo, deNome: string, ip: number, n = 4, o: Opco
         roteadores: ida.roteadores.map((x) => x.nome),
         fragmentos: ida.pacote.fragmentos.map((f) => ({ deslocamento: f.deslocamento, dados: f.dados, mf: f.mf })),
         dados,
+        ...(tos !== undefined ? { servico: { byte: tos, dscp: tos >> 2, ecn: tos & 3, classe: nomeDscp(tos >> 2) } } : {}),
       },
     };
     if (s.rtt !== undefined) {

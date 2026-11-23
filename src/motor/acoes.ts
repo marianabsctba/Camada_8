@@ -9,6 +9,7 @@ import { caboNaPorta, TRANSCEPTORES, type Cabo, type Equipamento, type Mundo } f
 import { ipTexto } from './util';
 import { enlaceLocal } from './ip';
 import { interfacesL3, temCamadaRede } from './roteamento';
+import { temQos } from './cliQos';
 
 export interface Opcao {
   valor: string;
@@ -152,7 +153,63 @@ function acoesRedeRoteador(m: Mundo, e: Equipamento): Acao[] {
     { ...subrede(ctx), id: 'rot-subrede' },
   );
   a.push(...acoesProtocolos(m, e, portas));
+  if (temQos(m)) a.push(...acoesQos(m, e, portas));
   return a;
+}
+
+/** Congestionamento, QoS e SDN no roteador. Só aparecem quando o mundo usa QoS (m.flags.qos ou algo configurado). */
+function acoesQos(m: Mundo, e: Equipamento, portas: Opcao[]): Acao[] {
+  const ctx = e.nome;
+  const filas = (e.s.fila ?? {}) as Record<string, { buffer?: number }>;
+  const p0 = Object.keys(filas)[0] ?? portas.find((p) => !p.rotulo.includes('sem IP'))?.valor ?? portas[0]?.valor ?? '';
+  const campoPorta = escolha('porta', 'Porta', portas, p0);
+  const onOff = (nome: string, rotulo: string) => escolha(nome, rotulo, [op('on', 'ligado'), op('off', 'desligado')]);
+  const roteadores = [...m.equipamentos.values()].filter((x) => x.tipo === 'roteador' || x.tipo === 'switch').map((x) => op(x.nome));
+  const classes = ['EF', 'AF41', 'AF31', 'AF21', 'AF11', 'CS1', 'BE'].map((c) => op(c));
+  return [
+    { id: 'qos-requisitos', rotulo: 'Requisitos de cada aplicação', ajuda: 'O quanto e-mail, web, vídeo sob demanda, voz e videoconferência sofrem com falta de banda, atraso, jitter e perda.', contexto: ctx, comandos: () => ['qos requisitos'] },
+    { id: 'fila-ver', rotulo: 'Ver as filas de saída', ajuda: 'Buffer, técnica de descarte e fontes de tráfego de cada porta.', contexto: ctx, comandos: () => ['mostra fila'] },
+    { id: 'fila-buffer', rotulo: 'Tamanho do buffer de uma porta', ajuda: 'Quantos pacotes podem esperar na fila de saída. Pouco buffer perde rajadas; buffer demais segura o pacote tanto tempo que ele chega inútil.', contexto: ctx, campos: [campoPorta, num('n', 'Buffer', 'pacotes', String(filas[p0]?.buffer ?? 64))], comandos: (v) => [`fila ${v.porta} buffer ${v.n || 64}`, 'mostra fila'] },
+    { id: 'fila-red', rotulo: 'Ligar o RED', ajuda: 'Descarte aleatório antecipado: com a média da fila entre o mínimo e o máximo, descarta alguns pacotes ao acaso, avisando as origens antes de o buffer encher.', contexto: ctx, campos: [campoPorta, num('min', 'Limiar mínimo', 'pacotes', '5'), num('max', 'Limiar máximo', 'pacotes', '15')], comandos: (v) => [`fila ${v.porta} red ${v.min || 5} ${v.max || 15}`, 'mostra fila'] },
+    { id: 'fila-ecn', rotulo: 'Marcação ECN', ajuda: 'Em vez de descartar, o roteador marca os 2 bits de congestionamento do cabeçalho IP. O destino devolve o aviso e a origem vai mais devagar, sem perder o pacote.', contexto: ctx, campos: [campoPorta, onOff('v', 'ECN')], comandos: (v) => [`fila ${v.porta} ecn ${v.v}`, 'mostra fila'] },
+    { id: 'fila-choke', rotulo: 'Choke packet (aviso para a origem)', ajuda: 'Com a fila passando de 3/4 do buffer, o roteador manda um aviso direto para quem está enviando, que reduz a taxa.', contexto: ctx, campos: [campoPorta, onOff('v', 'Choke packet')], comandos: (v) => [`fila ${v.porta} choke ${v.v}`, 'mostra fila'] },
+    { id: 'fila-descarte', rotulo: 'Descarte de carga', ajuda: 'Com o buffer cheio, joga fora o pacote menos importante da fila para caber um mais importante.', contexto: ctx, campos: [campoPorta, onOff('v', 'Descarte de carga')], comandos: (v) => [`fila ${v.porta} descarte ${v.v}`, 'mostra fila'] },
+    { id: 'fila-admissao', rotulo: 'Controle de admissão', ajuda: 'Fluxo novo só entra se a soma das taxas couber na fração escolhida da capacidade. Quem não cabe é recusado antes de atrapalhar os outros.', contexto: ctx, campos: [campoPorta, { nome: 'pct', rotulo: 'Limite (% da capacidade, ou off)', tipo: 'texto', padrao: '80' }], comandos: (v) => [`fila ${v.porta} admissao ${v.pct || 'off'}`, 'mostra fila'] },
+    {
+      id: 'fila-fonte',
+      rotulo: 'Fonte de tráfego numa porta',
+      ajuda: 'Quem manda tráfego por esta porta: taxa média, tamanho do pacote, rajada (quantos chegam juntos), importância (para o descarte de carga) e classe DSCP.',
+      contexto: ctx,
+      campos: [campoPorta, { nome: 'nome', rotulo: 'Nome', tipo: 'texto', padrao: 'video' }, num('mbps', 'Taxa', 'Mb/s', '40'), num('tamanho', 'Tamanho do pacote', 'bytes', '1000'), num('rajada', 'Rajada', 'pacotes', '1'), num('imp', 'Importância', undefined, '1'), escolha('classe', 'Classe', classes, 'BE')],
+      comandos: (v) => [`fila ${v.porta} fonte ${v.nome || 'fonte'} ${v.mbps || 10} tamanho=${v.tamanho || 1000} rajada=${v.rajada || 1} importancia=${v.imp || 1} classe=${v.classe || 'BE'}`, 'mostra fila'],
+    },
+    { id: 'fila-simular', rotulo: 'Simular a fila com uma carga', ajuda: 'Roda a porta pacote a pacote com chegadas aleatórias e mostra atraso médio, jitter, ocupação e perdas. Carga é a fração da capacidade: 0,5 é metade, 1,2 é 20 % a mais do que cabe.', contexto: ctx, campos: [campoPorta, { nome: 'carga', rotulo: 'Carga', tipo: 'texto', padrao: '0,9' }], comandos: (v) => [`fila simular ${v.carga || '0,9'} ${v.porta}`] },
+    { id: 'fila-curva', rotulo: 'Curva carga × atraso', ajuda: 'A mesma porta com cargas de 10 % a 110 %. Perto de 100 % o atraso explode.', contexto: ctx, campos: [campoPorta], comandos: (v) => [`fila curva ${v.porta}`] },
+    { id: 'fila-buffers', rotulo: 'Buffer pequeno × buffer grande', ajuda: 'Com a porta sobrecarregada, compara buffers de 8 a 4096 pacotes: quanto se perde e quanto se espera.', contexto: ctx, campos: [campoPorta, { nome: 'carga', rotulo: 'Carga', tipo: 'texto', padrao: '1,2' }], comandos: (v) => [`fila buffers ${v.carga || '1,2'} ${v.porta}`] },
+    {
+      id: 'balde',
+      rotulo: 'Balde furado ou balde de fichas',
+      ajuda: 'Modelagem de tráfego. Balde furado: sai sempre na taxa R. Balde de fichas: guarda até B de fichas, deixa a rajada passar no pico M por S = B / (M - R) e depois limita a R.',
+      contexto: ctx,
+      campos: [escolha('tipo', 'Balde', [op('fichas', 'balde de fichas'), op('furado', 'balde furado')]), num('taxa', 'Taxa R', 'Mb/s', '200'), num('b', 'Profundidade B', 'kB', '9600'), num('pico', 'Pico M', 'Mb/s', '1000'), num('rajada', 'Rajada', 'kB', '30000'), { nome: 'espera', rotulo: 'Espera (kB, "descartar" ou vazio)', tipo: 'texto', padrao: '' }],
+      comandos: (v) => [`balde ${v.tipo} ${v.taxa || 200} ${v.b || 9600} ${v.pico || 1000} ${v.rajada || 30000}${v.espera ? ` ${v.espera}` : ''}`],
+    },
+    { id: 'escalonar', rotulo: 'Escalonamento de pacotes', ajuda: 'FIFO atende por ordem de chegada; prioridade estrita sempre atende a classe mais alta; WFQ divide a banda pelos pesos. Usa as fontes da porta ou voz, vídeo e dados.', contexto: ctx, campos: [escolha('d', 'Disciplina', [op('wfq', 'WFQ (justo ponderado)'), op('prioridade', 'prioridade estrita'), op('fifo', 'FIFO')]), { nome: 'pesos', rotulo: 'Pesos (WFQ), como 3,2,1', tipo: 'texto', padrao: '' }], comandos: (v) => [`escalonar ${v.d}${v.pesos ? ` ${v.pesos}` : ''}`] },
+    { id: 'dscp', rotulo: 'Marcar classe DSCP na borda', ajuda: 'Serviços diferenciados: o roteador da borda escreve a classe no campo "serviço diferenciado" do cabeçalho IPv4; os do meio só leem e tratam cada classe do seu jeito. EF é para voz; AF tem quatro classes com três níveis de descarte.', contexto: ctx, campos: [{ nome: 'prefixo', rotulo: 'Prefixo de origem', tipo: 'texto', padrao: Object.values((e.s.interfaces ?? {}) as Record<string, string>)[0] ?? '192.0.2.0/24' }, escolha('classe', 'Classe', classes)], comandos: (v) => [`dscp ${v.prefixo} ${v.classe}`, 'mostra qos'] },
+    { id: 'rsvp', rotulo: 'Reservar banda (RSVP)', ajuda: 'Serviços integrados: a reserva vai salto a salto até o destino; cada roteador confere se cabe (até 75 % da porta) e guarda estado para o fluxo. Se um não aceita, a reserva toda é desfeita.', contexto: ctx, campos: [campoDestino(m, e), num('mbps', 'Banda', 'Mb/s', '10')], comandos: (v) => [`rsvp ${v.destino} ${v.mbps || 10}`, 'mostra qos'] },
+    { id: 'sdn-controlador', rotulo: 'Ligar o controlador SDN', ajuda: 'O controlador central junta a visão da rede e calcula os caminhos (plano de controle). Os equipamentos só seguem as regras da tabela de fluxo (plano de dados).', contexto: ctx, campos: [escolha('v', 'Controlador', [op('on', 'ligado'), op('off', 'desligado')], m.flags.sdn?.controlador ? 'off' : 'on')], comandos: (v) => [`sdn controlador ${v.v}`, 'sdn ver'] },
+    {
+      id: 'sdn-regra',
+      rotulo: 'Instalar regra de fluxo',
+      ajuda: 'Casamento por campos (destino, origem, proto, dscp, entrada; * casa tudo) e ação (porta:<p>, descartar, controlador, normal, dscp=<classe>, destino=<ip>, juntas com "+"). Prioridade maior vence. A regra decide antes da tabela de rotas.',
+      contexto: ctx,
+      campos: [num('prio', 'Prioridade', undefined, '100'), { nome: 'casa', rotulo: 'Casamento', tipo: 'texto', padrao: 'destino=203.0.113.0/24' }, { nome: 'acao', rotulo: 'Ação', tipo: 'texto', padrao: portas[1] ? `porta:${portas[1].valor}` : 'descartar' }, escolha('em', 'Em', roteadores, e.nome)],
+      comandos: (v) => [`sdn regra ${v.prio || 100} ${v.casa || '*'} ${v.acao || 'normal'} em ${v.em || e.nome}`, 'sdn ver'],
+    },
+    { id: 'sdn-ver', rotulo: 'Ver o controlador e as tabelas de fluxo', ajuda: 'A visão central da rede, os caminhos calculados pelo controlador e a tabela de fluxo de cada equipamento, com os contadores de cada regra.', contexto: ctx, comandos: () => ['sdn ver'] },
+    { id: 'sdn-telemetria', rotulo: 'Telemetria (contadores por regra)', ajuda: 'O controlador consulta os contadores de pacotes e bytes de cada regra e de cada porta, em todos os equipamentos.', contexto: ctx, comandos: () => ['sdn telemetria'] },
+    { id: 'sdn-apagar', rotulo: 'Esvaziar a tabela de fluxo', ajuda: 'Apaga as regras deste equipamento: o tráfego volta a seguir só a tabela de rotas.', contexto: ctx, comandos: () => ['sdn apagar tudo', 'sdn ver'] },
+  ];
 }
 
 /** Protocolos de roteamento, algoritmos e queda de enlace no roteador. */
@@ -317,6 +374,13 @@ function acoesConsole(m: Mundo, e: Equipamento): Acao[] {
         { id: 'vlan', rotulo: 'Pôr uma porta numa VLAN', ajuda: 'Porta de acesso: o que está ligado nela entra nessa VLAN. Hosts em VLANs diferentes não se falam sem roteador.', contexto: ctx, campos: [escolha('porta', 'Porta', portas), num('id', 'VLAN', undefined, '10')], comandos: (v) => [`vlan ${v.porta} ${v.id}`, 'mostra vlan'] },
         { id: 'tronco', rotulo: 'Fazer uma porta de tronco', ajuda: 'Tronco leva várias VLANs no mesmo cabo, cada quadro com sua etiqueta. Liste as VLANs permitidas (ex.: 1,10,20). "nao" volta a porta para acesso.', contexto: ctx, campos: [escolha('porta', 'Porta', portas), { nome: 'lista', rotulo: 'VLANs permitidas', tipo: 'texto', padrao: '1,10,20' }], comandos: (v) => [`tronco ${v.porta} ${v.lista}`, 'mostra vlan'] },
       );
+      if (temQos(m)) {
+        a.push(
+          { id: 'sw-fluxos', rotulo: 'Ver a tabela de fluxo', ajuda: 'As regras que o controlador SDN instalou neste switch, com os contadores de cada uma.', contexto: ctx, comandos: () => ['mostra fluxos'] },
+          { id: 'sw-sdn-regra', rotulo: 'Instalar regra de fluxo no switch', ajuda: 'O controlador instala a regra; o switch só casa e obedece. Aqui valem descartar, reescrever o DSCP e contar; mandar por outra porta que não a do caminho perde o quadro.', contexto: ctx, campos: [num('prio', 'Prioridade', undefined, '100'), { nome: 'casa', rotulo: 'Casamento', tipo: 'texto', padrao: 'proto=icmp' }, { nome: 'acao', rotulo: 'Ação', tipo: 'texto', padrao: 'normal' }], comandos: (v) => [`sdn regra ${v.prio || 100} ${v.casa || '*'} ${v.acao || 'normal'}`, 'mostra fluxos'] },
+          { id: 'sw-sdn-telemetria', rotulo: 'Telemetria do controlador', ajuda: 'O controlador consulta os contadores de todas as regras e portas.', contexto: ctx, comandos: () => ['sdn telemetria'] },
+        );
+      }
       break;
     }
     case 'hub':

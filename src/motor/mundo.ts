@@ -148,6 +148,8 @@ export interface Captura {
     roteadores: string[];
     fragmentos: { deslocamento: number; dados: number; mf: boolean }[];
     dados: number;
+    /** Byte "serviço diferenciado" do IPv4, só quando alguém no caminho mexeu nele (marcação DSCP ou regra SDN). */
+    servico?: { byte: number; dscp: number; ecn: number; classe: string };
   };
 }
 

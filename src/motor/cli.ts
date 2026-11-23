@@ -11,6 +11,8 @@ import { amostraDaLinha, hex, transmitir, type ConfigEnlace } from './enlace';
 import { fmt, ipTexto, lerCidr, lerIp, lerNumero, rngSemente, type Cidr } from './util';
 import { abreviarIpv6, agregar, dividir, ehDocumentacao, ehEnlaceLocal, ehPrivado, enderecoBroadcast, enderecoEui64, enderecoRede, enlaceLocal, eui64, expandirIpv6, infoSubrede, pertence, prefixoIpv6, quantidadeHosts, superrede, textoCidr } from './ip';
 import { comandoGrupo, comandosRoteamento } from './cliRotas';
+import { comandosQos, temQos } from './cliQos';
+import { NOMES_ECN } from './qos';
 import { recalcularProtocolos, temProtocolos } from './protocolos';
 import { configurarDhcp, configurarNat, interfacesL3, ipv6De, MTU_PADRAO, nat, pedirDhcp, ping6, rotasDe, temCamadaRede, textoTempo, traceroute, type OpcoesPing, type Rota, type ServidorDhcp } from './roteamento';
 
@@ -709,6 +711,7 @@ function linhasCaptura(cap: Captura): Saida {
     `  TTL: saiu com ${d.ttlSaida} e chegou com ${cap.ip.ttl}; ${d.roteadores.length ? `${d.roteadores.length} roteador(es) no caminho: ${d.roteadores.join(', ')}` : 'nenhum roteador no caminho'}`,
   );
   if (d.roteadores.length) l.push('  O MAC de origem é o do último roteador: o quadro é refeito a cada salto, o pacote IP segue (com TTL e checksum novos).');
+  if (d.servico) l.push(`  serviço diferenciado 0x${d.servico.byte.toString(16).padStart(2, '0')}: DSCP ${d.servico.dscp} (${d.servico.classe}), ECN ${NOMES_ECN[d.servico.ecn]}`);
   if (d.fragmentos.length > 1) {
     l.push(`  chegou em ${d.fragmentos.length} fragmentos, mesma identificação, remontados no destino:`);
     for (const f of d.fragmentos) l.push(`    deslocamento ${String(f.deslocamento).padStart(4)} (byte ${f.deslocamento * 8}), ${f.dados} bytes de dados, MF ${f.mf ? 1 : 0}`);
@@ -882,6 +885,7 @@ const CONSOLE_SWITCH: ConsoleFn = (t, e, cmd, args) => {
       if (args[0] === 'mac') return mostraMac(e);
       if (args[0] === 'stp') return mostraStp(t, e);
       if (args[0] === 'vlan') return mostraVlan(e);
+      if (args[0] === 'fluxos') return comandosQos(m, e, 'mostra', args)!;
       const linhas = [`${e.modelo}`];
       if (emTempestade(m, e.nome)) linhas.push('CPU: 100 %. Tempestade de broadcast: os mesmos quadros girando no laço, cada volta duplicando. Os contadores não param de subir.');
       return [...linhas, ...mostraInterfaces(t, e)];
@@ -928,7 +932,7 @@ const CONSOLE_SWITCH: ConsoleFn = (t, e, cmd, args) => {
       return [`${p.nome} agora é tronco 802.1Q com as VLANs ${textoLista(lista)}. Cada quadro leva uma etiqueta de 4 bytes dizendo de que VLAN é${lista.includes(1) ? ', menos a 1, que é a nativa e vai sem etiqueta' : ''}.`];
     }
   }
-  return null;
+  return comandosQos(m, e, cmd, args);
 };
 
 const CONSOLE_HUB: ConsoleFn = (t, e, cmd, args) => {
@@ -1040,7 +1044,7 @@ const CONSOLE_ROTEADOR: ConsoleFn = (t, e, cmd, args) => {
     case 'login':
       return ['Já está dentro.'];
     case 'mostra':
-      if (args[0] && ['rotas', 'interfaces', 'nat', 'dhcp', 'arp', 'ospf', 'lsdb', 'rip', 'bgp', 'mpls', 'igmp'].includes(args[0])) return REDE_ROTEADOR(t, e, 'mostra', args)!;
+      if (args[0] && ['rotas', 'interfaces', 'nat', 'dhcp', 'arp', 'ospf', 'lsdb', 'rip', 'bgp', 'mpls', 'igmp', 'fila', 'qos', 'fluxos'].includes(args[0])) return REDE_ROTEADOR(t, e, 'mostra', args)!;
       if (args[0] === 'startup') return ['--- configuração de inicialização (gravada) ---', ...s.startup.map((l: string) => '  ' + l), `  senha ${s.senha ? '*****' : '(nenhuma)'}`, `registro de inicialização: ${s.inicio}`];
       return ['--- configuração em execução (memória) ---', ...(s.running.length ? s.running.map((l: string) => '  ' + l) : ['  (vazia)']), `  senha ${s.senhaRunning ? '*****' : '(nenhuma)'}`, `registro de inicialização: ${s.inicio}`];
     case 'copiar':
@@ -1119,7 +1123,7 @@ const REDE_ROTEADOR: ConsoleFn = (t, e, cmd, args) => {
           return l;
         }
       }
-      return comandosRoteamento(t.mundo, e, 'mostra', args);
+      return comandosRoteamento(t.mundo, e, 'mostra', args) ?? comandosQos(t.mundo, e, 'mostra', args);
     case 'ip': {
       const p = porta(e, args[0]);
       if (!p) return [`ip <porta> <endereço/prefixo>. Portas: ${e.portas.map((x) => x.nome).join(', ')}.`];
@@ -1207,7 +1211,7 @@ const REDE_ROTEADOR: ConsoleFn = (t, e, cmd, args) => {
     case 'tracert':
       return rodarTraceroute(t, e, args);
   }
-  return comandosRoteamento(t.mundo, e, cmd, args) ?? calculadora(cmd, args);
+  return comandosRoteamento(t.mundo, e, cmd, args) ?? comandosQos(t.mundo, e, cmd, args) ?? calculadora(cmd, args);
 };
 
 const CONSOLE_MODEM: ConsoleFn = (_t, e, cmd, args) => {
@@ -1445,6 +1449,20 @@ function discarPpp(m: Mundo, e: Equipamento): string[] {
 
 const CONSOLE_GENERICO: ConsoleFn = (t, e, cmd) => (cmd === 'mostra' ? mostraInterfaces(t, e) : null);
 
+/** Comandos de congestionamento, QoS e SDN: aparecem na ajuda quando o mundo usa QoS (temQos). */
+const AJUDA_QOS: Partial<Record<Equipamento['tipo'], string[]>> = {
+  roteador: [
+    'fila <porta> buffer <n> | red <mín> <máx> [pmáx] | red off | ecn <on|off> | choke <on|off> | descarte <on|off> | admissao <%|off> | capacidade <Mb/s>',
+    'fila <porta> fonte <nome> <Mb/s> [tamanho=] [rajada=] [importancia=] [classe=] | fila <porta> sem-fonte <nome|todas>',
+    'fila simular <carga> [porta] | fila curva [porta] | fila buffers [carga] [porta] | mostra fila',
+    'balde <fichas|furado> <taxa Mb/s> <profundidade kB> [pico Mb/s] [rajada kB] [espera kB|descartar]',
+    'escalonar <fifo|prioridade|wfq> [pesos] [porta]',
+    'qos requisitos | mostra qos | dscp [<prefixo> <classe> [origem|destino]] | dscp limpa | rsvp <ip> <Mb/s> | rsvp limpa',
+    'sdn controlador <on|off> | sdn regra <prioridade> <casamento> <ação> [em <equip>] | sdn apagar <id|tudo> | sdn ver | sdn telemetria | mostra fluxos',
+  ],
+  switch: ['sdn regra <prioridade> <casamento> <ação> | sdn apagar <id|tudo> | sdn ver | sdn telemetria | mostra fluxos'],
+};
+
 const CONSOLES: Partial<Record<Equipamento['tipo'], { fn: ConsoleFn; ajuda: string[]; rede?: string[] }>> = {
   pc: { fn: CONSOLE_PC, ajuda: ['ip [endereço/prefixo]', 'mostra', 'ping <ip> [quantidade]', 'capturar', 'vazao [equipamento]'], rede: ['gateway <ip|nenhum>', 'ping <ip> [quantidade] [tamanho] [df]', 'traceroute <ip> [máximo]', 'dhcp', 'mostra rotas | mostra arp', 'mtu [bytes]', 'ip6 <endereço/prefixo>', 'ping6 <endereço> [quantidade]', 'subrede <endereço/prefixo> [novo prefixo]', 'agregar <prefixo> <prefixo> ...', 'ipv6 <endereço>', 'eui64 <mac>', 'grupo <entrar|sair> <grupo multicast>'] },
   switch: { fn: CONSOLE_SWITCH, ajuda: ['mostra', 'mostra mac', 'mostra stp', 'mostra vlan', 'limpa mac', 'stp <on|off>', 'prioridade <n>', 'vlan <porta> <id>', 'tronco <porta> <lista|nao>'] },
@@ -1484,7 +1502,8 @@ export class Terminal {
       const e = this.mundo.equipamentos.get(this.contexto)!;
       const c: { ajuda: string[]; rede?: string[] } = CONSOLES[e.tipo] ?? { ajuda: ['mostra'] };
       const rede = c.rede && temCamadaRede(this.mundo) ? ['camada de rede:', ...c.rede.map((a) => '  ' + a)] : [];
-      return [`Console de ${e.nome} (${e.modelo}):`, ...c.ajuda.map((a) => '  ' + a), ...rede.map((a) => '  ' + a), '  sair'];
+      const qos = AJUDA_QOS[e.tipo] && temQos(this.mundo) ? ['congestionamento, QoS e SDN:', ...AJUDA_QOS[e.tipo]!.map((a) => '  ' + a)] : [];
+      return [`Console de ${e.nome} (${e.modelo}):`, ...c.ajuda.map((a) => '  ' + a), ...rede.map((a) => '  ' + a), ...qos.map((a) => '  ' + a), '  sair'];
     }
     const grupos: [Comando['grupo'], string][] = [
       ['geral', 'GERAIS'],
