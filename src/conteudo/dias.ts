@@ -7,12 +7,17 @@ import { ATO0A } from './ato0a';
 import { ATO0B } from './ato0b';
 import { ATO0C } from './ato0c';
 import { ATO0D } from './ato0d';
+import { ATO1A } from './ato1a';
+import { ATO1B } from './ato1b';
+import { ATO1C } from './ato1c';
+import { ATO1D } from './ato1d';
+import { ATO1E } from './ato1e';
 import { CURRICULO } from './curriculo';
 import { EXTRAS } from './extras';
 import { PASSOS } from './passos';
 import type { Dia } from './tipos';
 
-const ORIGINAIS = new Map([...ATO0, ...ATO1, ...ATO2, ...ATO0A, ...ATO0B, ...ATO0C, ...ATO0D].map((d) => [d.numero, d]));
+const ORIGINAIS = new Map([...ATO0, ...ATO1, ...ATO2, ...ATO0A, ...ATO0B, ...ATO0C, ...ATO0D, ...ATO1A, ...ATO1B, ...ATO1C, ...ATO1D, ...ATO1E].map((d) => [d.numero, d]));
 
 export const DIAS: Dia[] = CURRICULO.filter((e) => e.ref !== undefined && ORIGINAIS.has(e.ref)).map((e) => {
   const d = ORIGINAIS.get(e.ref!)!;

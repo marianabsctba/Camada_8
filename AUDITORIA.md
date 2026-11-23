@@ -2,7 +2,7 @@
 
 Cada subseção do currículo de referência (8 capítulos) e o dia do jogo que a ensina. A ordem oficial dos dias está em `src/conteudo/curriculo.ts`.
 
-Legenda: **287 subseções**: 63 com dia pronto, 215 com dia planejado, 9 resumos de capítulo. 181 subseções dividem o dia com outras. O ato 0 (capítulo 1) está completo.
+Legenda: **287 subseções**: 90 com dia pronto, 188 com dia planejado, 9 resumos de capítulo. 181 subseções dividem o dia com outras. Os atos 0 e 1 (capítulos 1 e 2) estão completos.
 
 ## Correções feitas nesta auditoria
 
@@ -14,7 +14,7 @@ Legenda: **287 subseções**: 63 com dia pronto, 215 com dia planejado, 9 resumo
 
 ## Ainda falta
 
-- Escrever os dias planejados: 215 subseções esperam o seu dia.
+- Escrever os dias planejados: 188 subseções esperam o seu dia.
 - Subseções agrupadas podem ganhar um dia só delas quando o conteúdo pedir.
 
 ## Capítulo 1
@@ -67,34 +67,34 @@ Legenda: **287 subseções**: 63 com dia pronto, 215 com dia planejado, 9 resumo
 
 | Subseção | Dia | Situação |
 |---|---|---|
-| 2.1.1 | 15: A caminhonete cheia de discos | planejada |
+| 2.1.1 | 15: A caminhonete cheia de discos | pronta e fiel |
 | 2.1.2 | 16: Crimpa direito; 17: Cruzado ou direto; 18: 100 metros e um palmo; 19: Cat errado; 20: O elevador | pronta e fiel, com prática de campo além do conteúdo da seção |
-| 2.1.3 | 21: Cabo coaxial | planejada |
-| 2.1.4 | 22: Internet pela tomada | planejada |
+| 2.1.3 | 21: Cabo coaxial | pronta e fiel |
+| 2.1.4 | 22: Internet pela tomada | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto |
 | 2.1.5 | 23: Amarelo com aqua; 24: Orçamento de potência; 25: Retroescavadeira | pronta e fiel; pronta e fiel, com prática de campo além do conteúdo da seção |
-| 2.2.1 | 26: O espectro eletromagnético | planejada |
-| 2.2.2 | 27: Espalhar para não brigar | planejada, agrupada |
-| 2.2.3 | 27: Espalhar para não brigar | planejada, agrupada |
-| 2.2.4 | 27: Espalhar para não brigar | planejada, agrupada |
+| 2.2.1 | 26: O espectro eletromagnético | pronta e fiel |
+| 2.2.2 | 27: Espalhar para não brigar | pronta e fiel, agrupada |
+| 2.2.3 | 27: Espalhar para não brigar | pronta e fiel, agrupada |
+| 2.2.4 | 27: Espalhar para não brigar | pronta e fiel, agrupada |
 | 2.3.1 | 28: Rádio no morro | pronta e fiel |
 | 2.3.2 | 28: Rádio no morro | pronta e fiel |
-| 2.3.3 | 29: Luz pelo ar | planejada |
-| 2.3.4 | 29: Luz pelo ar | planejada |
-| 2.4.1 | 30: Por que o sinal se deforma | planejada |
+| 2.3.3 | 29: Luz pelo ar | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto |
+| 2.3.4 | 29: Luz pelo ar | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto |
+| 2.4.1 | 30: Por que o sinal se deforma | pronta e fiel |
 | 2.4.2 | 31: Nyquist manda lembranças | pronta e fiel |
-| 2.4.3 | 32: Constelações | planejada |
-| 2.4.4 | 33: Dividir o meio | planejada |
-| 2.5.1 | 34: A linha do telefone | planejada |
-| 2.5.2 | 34: A linha do telefone | planejada |
+| 2.4.3 | 32: Constelações | pronta e fiel |
+| 2.4.4 | 33: Dividir o meio | pronta e fiel |
+| 2.5.1 | 34: A linha do telefone | pronta e fiel |
+| 2.5.2 | 34: A linha do telefone | pronta e fiel |
 | 2.5.3 | 35: O E1 da prefeitura | pronta e fiel |
-| 2.5.4 | 36: Circuito ou pacote | planejada |
-| 2.6.1 | 37: A célula | planejada, agrupada |
-| 2.6.2 | 37: A célula | planejada, agrupada |
-| 2.6.3 | 37: A célula | planejada, agrupada |
-| 2.6.4 | 37: A célula | planejada, agrupada |
-| 2.6.5 | 38: Do 3G ao 5G | planejada, agrupada |
-| 2.6.6 | 38: Do 3G ao 5G | planejada, agrupada |
-| 2.6.7 | 38: Do 3G ao 5G | planejada, agrupada |
+| 2.5.4 | 36: Circuito ou pacote | pronta e fiel |
+| 2.6.1 | 37: A célula | pronta e fiel, agrupada |
+| 2.6.2 | 37: A célula | pronta e fiel, agrupada |
+| 2.6.3 | 37: A célula | pronta e fiel, agrupada |
+| 2.6.4 | 37: A célula | pronta e fiel, agrupada |
+| 2.6.5 | 38: Do 3G ao 5G | pronta e fiel, agrupada |
+| 2.6.6 | 38: Do 3G ao 5G | pronta e fiel, agrupada |
+| 2.6.7 | 38: Do 3G ao 5G | pronta e fiel, agrupada |
 | 2.7.1 | 39: DOCSIS na rua | pronta e fiel, agrupada |
 | 2.7.2 | 39: DOCSIS na rua | pronta e fiel, agrupada |
 | 2.7.3 | 39: DOCSIS na rua | pronta e fiel, agrupada |
@@ -102,11 +102,11 @@ Legenda: **287 subseções**: 63 com dia pronto, 215 com dia planejado, 9 resumo
 | 2.8.1 | 40: Satélite e paciência | pronta e fiel, agrupada |
 | 2.8.2 | 40: Satélite e paciência | pronta e fiel, agrupada |
 | 2.8.3 | 40: Satélite e paciência | pronta e fiel, agrupada |
-| 2.9.1 | 41: Qual acesso para quem | planejada |
-| 2.9.2 | 41: Qual acesso para quem | planejada |
-| 2.10.1 | 42: Política na camada física | planejada, agrupada |
-| 2.10.2 | 42: Política na camada física | planejada, agrupada |
-| 2.10.3 | 42: Política na camada física | planejada, agrupada |
+| 2.9.1 | 41: Qual acesso para quem | pronta e fiel |
+| 2.9.2 | 41: Qual acesso para quem | pronta e fiel |
+| 2.10.1 | 42: Política na camada física | pronta e fiel, agrupada |
+| 2.10.2 | 42: Política na camada física | pronta e fiel, agrupada |
+| 2.10.3 | 42: Política na camada física | pronta e fiel, agrupada |
 | 2.11 | (nenhum) | resumo |
 
 ## Capítulo 3

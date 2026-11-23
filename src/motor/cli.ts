@@ -715,7 +715,7 @@ const CONSOLE_MODEM: ConsoleFn = (_t, e, cmd, args) => {
     case 'mostra': {
       const r = avaliarModem(s);
       return [
-        `Linha: banda útil ${s.bandaHz} Hz (de 300 a 3400 Hz), SNR ${s.snrDb} dB`,
+        `Linha: banda útil ${s.bandaHz} Hz${s.bandaHz === 3100 ? " (de 300 a 3400 Hz)" : ""}, SNR ${s.snrDb} dB`,
         `Configuração: ${s.baud} Bd, ${s.modulacao.toUpperCase()} (${BITS_POR_SIMBOLO[s.modulacao]} bits por símbolo)`,
         `Taxa pretendida: ${fmt(r.taxa / 1000, 1)} kb/s`,
         r.ok ? 'Estado: SINCRONIZADO' : 'Estado: SEM SINCRONISMO',
