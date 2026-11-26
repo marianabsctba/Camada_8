@@ -10,6 +10,7 @@ import { ipTexto } from './util';
 import { enlaceLocal } from './ip';
 import { interfacesL3, temCamadaRede } from './roteamento';
 import { temQos } from './cliQos';
+import { acoesTransporte, temTransporte } from './cliTransporte';
 
 export interface Opcao {
   valor: string;
@@ -278,6 +279,7 @@ function acoesConsole(m: Mundo, e: Equipamento): Acao[] {
         { id: 'capturar', rotulo: 'Ver o último quadro capturado', ajuda: 'Mostra o último pedido de eco que chegou ao destino, camada por camada: Ethernet, IPv4 e ICMP.', contexto: ctx, comandos: () => ['capturar'] },
       );
       if (temCamadaRede(m)) a.push(...acoesRedePc(m, e));
+      if (temTransporte(m)) a.push(...acoesTransporte(m, e));
       if (m.flags.servidorTeste) a.push({ id: 'vazao', rotulo: 'Medir vazão', ajuda: 'Teste de vazão TCP até o servidor de teste. Mostra o resultado em Mb/s, MB/s e MiB/s.', contexto: ctx, comandos: () => ['vazao'] });
       a.push(mostra);
       break;

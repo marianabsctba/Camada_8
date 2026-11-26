@@ -12,6 +12,7 @@ import { fmt, ipTexto, lerCidr, lerIp, lerNumero, rngSemente, type Cidr } from '
 import { abreviarIpv6, agregar, dividir, ehDocumentacao, ehEnlaceLocal, ehPrivado, enderecoBroadcast, enderecoEui64, enderecoRede, enlaceLocal, eui64, expandirIpv6, infoSubrede, pertence, prefixoIpv6, quantidadeHosts, superrede, textoCidr } from './ip';
 import { comandoGrupo, comandosRoteamento } from './cliRotas';
 import { comandosQos, temQos } from './cliQos';
+import { AJUDA_TRANSPORTE, comandosTransporte, temTransporte } from './cliTransporte';
 import { NOMES_ECN } from './qos';
 import { recalcularProtocolos, temProtocolos } from './protocolos';
 import { configurarDhcp, configurarNat, interfacesL3, ipv6De, MTU_PADRAO, nat, pedirDhcp, ping6, rotasDe, temCamadaRede, textoTempo, traceroute, type OpcoesPing, type Rota, type ServidorDhcp } from './roteamento';
@@ -804,7 +805,7 @@ const CONSOLE_PC: ConsoleFn = (t, e, cmd, args) => {
       return [`Teste de vazão TCP até ${alvo}:`, ...v.linhas.map((l) => '  ' + l), `RESULTADO: ${fmt(v.mbps, 2)} Mb/s = ${fmt(v.mbps / 8, 2)} MB/s = ${fmt((v.mbps * 1e6) / 8 / 1048576, 2)} MiB/s`];
     }
   }
-  return REDE_PC(t, e, cmd, args);
+  return REDE_PC(t, e, cmd, args) ?? comandosTransporte(t.mundo, e, cmd, args);
 };
 
 /** Lista de VLANs como "1,10-20,30". Devolve null se algo estiver fora de 1 a 4094. */
@@ -1503,7 +1504,8 @@ export class Terminal {
       const c: { ajuda: string[]; rede?: string[] } = CONSOLES[e.tipo] ?? { ajuda: ['mostra'] };
       const rede = c.rede && temCamadaRede(this.mundo) ? ['camada de rede:', ...c.rede.map((a) => '  ' + a)] : [];
       const qos = AJUDA_QOS[e.tipo] && temQos(this.mundo) ? ['congestionamento, QoS e SDN:', ...AJUDA_QOS[e.tipo]!.map((a) => '  ' + a)] : [];
-      return [`Console de ${e.nome} (${e.modelo}):`, ...c.ajuda.map((a) => '  ' + a), ...rede.map((a) => '  ' + a), ...qos.map((a) => '  ' + a), '  sair'];
+      const transp = e.tipo === 'pc' && temTransporte(this.mundo) ? ['camada de transporte:', ...AJUDA_TRANSPORTE.map((a) => '  ' + a)] : [];
+      return [`Console de ${e.nome} (${e.modelo}):`, ...c.ajuda.map((a) => '  ' + a), ...rede.map((a) => '  ' + a), ...qos.map((a) => '  ' + a), ...transp.map((a) => '  ' + a), '  sair'];
     }
     const grupos: [Comando['grupo'], string][] = [
       ['geral', 'GERAIS'],

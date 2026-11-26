@@ -295,6 +295,8 @@ export interface Viagem {
   semArp?: number;
   perdido?: boolean;
   icmpErro?: { de: number; nome: string; tipo: number; codigo: number; mtu?: number; viagem: Viagem };
+  /** Cada trecho de enlace atravessado (de quem sai, por qual porta): a camada de transporte acha o gargalo por aqui. */
+  trechos?: { de: string; porta: string; mbps: number; atrasoS: number; ber: number }[];
 }
 
 function clonar(p: Pacote): Pacote {
@@ -542,6 +544,15 @@ export function viajar(m: Mundo, inicio: string, p0: Pacote): Viagem {
       }
       portaRx.contadores.rx++;
       aprenderNoSalto(m, s, atual.mac, viz.e.mac);
+    }
+    if (viz.saltos.length) {
+      (v.trechos ??= []).push({
+        de: atual.nome,
+        porta: rota.porta,
+        mbps: Math.min(...viz.saltos.map((s) => s.estado.velocidade)),
+        atrasoS: viz.saltos.reduce((t, s) => t + s.estado.atrasoS + (ENCAMINHAR[m.equipamentos.get(s.para)!.tipo] ?? 0), 0),
+        ber: viz.saltos.reduce((t, s) => t + s.estado.ber, 0),
+      });
     }
     v.ultimoMac = atual.mac;
     entrada = viz.porta;
