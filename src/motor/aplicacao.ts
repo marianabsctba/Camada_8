@@ -1476,7 +1476,7 @@ export class Navegador {
     const mapa = servidores instanceof Map ? servidores : new Map(Object.entries(servidores));
     const servidor = mapa.get(u.nome);
     const passos: string[] = [];
-    const chave = `${u.nome}${u.caminho}${u.consultaBruta ? '?' + u.consultaBruta : ''}`;
+    const chave = `${u.esquema}://${u.nome}${u.caminho}${u.consultaBruta ? '?' + u.consultaBruta : ''}`;
     const terceiro = site !== undefined && site !== u.nome;
     const salvo = this.cache.get(chave);
     if (salvo && agora - salvo.recebida < salvo.maxAge) {

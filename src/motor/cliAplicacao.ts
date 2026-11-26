@@ -695,7 +695,7 @@ function cmdCorreioEnviar(m: Mundo, e: Equipamento, args: string[], seguro: bool
       }
       const d2 = dialogoSmtp({ cliente: nomeCorreio(srv), servidor: x.valor.replace(/\.$/, ''), de: conta.endereco, para: [para], mensagem: serializarMensagem(msg), aceita: (end) => aceitaCaixa(t.srv!, end) });
       registrar(m, srv, t, 'tcp', 25, d2.linhas.map((y) => `${y.quem}: ${y.texto}`).join('\n'), d2.linhas.map((y) => `${y.quem}: ${y.texto}`).join('\n'), false, `SMTP entre servidores para ${para}`);
-      linhas.push(...d2.linhas.filter((y) => y.quem === 'C' ? /^(EHLO|MAIL|RCPT|DATA|QUIT)/.test(y.texto) : true).slice(0, 12).map((y) => `  ${y.quem}: ${y.texto}`));
+      linhas.push(...d2.linhas.filter((y) => y.quem === 'C' ? /^(EHLO|MAIL|RCPT|DATA|QUIT)/.test(y.texto) : true).slice(0, 20).map((y) => `  ${y.quem}: ${y.texto}`));
       tentativas.push({ mx: x.valor, ip: a.ip, prioridade: x.prioridade, resultado: d2.entregue ? 'entregue' : 'recusado' });
       if (d2.entregue) {
         entregue = true;
@@ -913,13 +913,13 @@ function cmdServico(m: Mundo, e: Equipamento, args: string[]): Saida {
           if (!resto[0]) return ['servico dns zona <zona> [nome do servidor]'];
           d.zona = normalizarNome(resto[0]);
           if (resto[1]) d.nome = normalizarNome(resto[1]);
-          return fim([`${e.nome} agora é autoritativo para ${d.zona}. A zona mãe ganha a delegação (NS e cola) sozinha.`]);
+          return fim([`${e.nome} agora é autoritativo para ${String(d.zona).replace(/\.$/, '')}. A zona mãe ganha a delegação (NS e cola) sozinha.`]);
         case 'registro': {
           const [nome, t, valor, ttl, pri] = resto;
           const tp = (t ?? '').toUpperCase() as TipoRegistro;
           if (!nome || !TIPOS.includes(tp) || !valor) return ['servico dns registro <nome> <A|AAAA|NS|MX|CNAME|TXT|PTR> <valor> [ttl] [prioridade do MX]'];
           (d.registros ??= []).push({ nome, tipo: tp, valor, ttl: ttl ? Number(ttl) : undefined, prioridade: pri ? Number(pri) : tp === 'MX' ? 10 : undefined });
-          return fim([`Registro ${nome} ${tp} ${valor} na zona ${d.zona ?? '(ainda sem zona)'}.`]);
+          return fim([`Registro ${nome} ${tp} ${valor} na zona ${d.zona ? d.zona.replace(/\.$/, '') : '(ainda sem zona)'}.`]);
         }
         case 'recursivo':
         case 'validar':
@@ -1138,6 +1138,7 @@ export function acoesAplicacao(m: Mundo, e: Equipamento): Acao[] {
     { id: 'ap-servico-https', rotulo: 'Ligar HTTPS', ajuda: 'Certificado na porta 443. Escolha um problema para ver o aviso do navegador: vencido, autoassinado, de outro nome ou revogado.', contexto: ctx, campos: [escolha('tipo', 'Certificado', TIPOS_CERTIFICADO.map((x) => op(x, { valido: 'válido', vencido: 'vencido', autoassinado: 'autoassinado', 'nome-errado': 'de outro nome', revogado: 'revogado' }[x])))], comandos: (v) => [`servico web https ${v.tipo}`] },
     { id: 'ap-servico-correio', rotulo: 'Servir correio de um domínio', ajuda: 'SMTP na 25, submissão na 587, IMAP na 143, POP3 na 110. Para receber de outros servidores, o domínio precisa de MX no DNS.', contexto: ctx, campos: [texto('dominio', 'Domínio', s?.correio?.dominio ?? 'loja.exemplo'), texto('caixas', 'Caixas (vazio: qualquer uma)', '')], comandos: (v) => [`servico correio ${v.dominio || 'loja.exemplo'}${v.caixas ? ` ${v.caixas.replace(/\s+/g, '')}` : ''}`] },
     { id: 'ap-servico-streaming', rotulo: 'Servir um vídeo', ajuda: 'Um vídeo com taxa (kb/s) e duração. Quem assistir recebe na banda do caminho.', contexto: ctx, campos: [texto('nome', 'Nome', 'video'), numero('taxa', 'Taxa', 'kb/s', '4000'), numero('dur', 'Duração', 's', '60')], comandos: (v) => [`servico streaming ${v.nome || 'video'} ${v.taxa || 4000} ${v.dur || 60}`] },
+    { id: 'ap-servico-cdn', rotulo: 'Contratar uma CDN', ajuda: 'A cidade da origem e as cidades das bordas, separadas por vírgula. O resolvedor de cada cidade passa a mandar quem assiste para a borda mais próxima.', contexto: ctx, campos: [texto('origem', 'Origem', 'São Paulo'), texto('bordas', 'Bordas', 'Curitiba, Recife, Manaus, Porto Alegre')], comandos: (v) => [`servico cdn ${v.origem || 'São Paulo'}, ${v.bordas || 'Curitiba, Recife, Manaus, Porto Alegre'}`] },
   ];
   return a;
 }

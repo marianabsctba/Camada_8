@@ -159,9 +159,24 @@ export const ATOS: Ato[] = [
     ],
     marco: 'O enlace até a cidade vizinha liga: Fim de Linha conversa com o mundo pela primeira vez.',
   },
-  { numero: 3, nome: 'O Bairro', tema: 'Subcamada MAC', lugar: 'o prédio, a escola e a praça', abertura: ['Muita gente quer usar o mesmo meio ao mesmo tempo.'], marco: 'O bairro inteiro acende, com Wi-Fi na praça.' },
-  { numero: 4, nome: 'A Cidade', tema: 'Camada de rede', lugar: 'o data center municipal', abertura: ['Os bairros precisam se enxergar, e a cidade precisa de rota para fora.'], marco: 'Todos os bairros se enxergam, e a cidade tem rota para o mundo.' },
-  { numero: 5, nome: 'A Conversa', tema: 'Camada de transporte', lugar: 'a sala dos servidores', abertura: ['As conexões precisam ser rápidas, justas e confiáveis.'], marco: 'Videochamada estável no hospital.' },
-  { numero: 6, nome: 'O Show', tema: 'Camada de aplicação', lugar: 'o estádio no dia da final', abertura: ['A cidade inteira vai assistir à final ao vivo.'], marco: 'Fim de Linha inteira assiste ao jogo ao vivo.' },
-  { numero: 7, nome: 'O Cerco', tema: 'Segurança', lugar: 'o centro de operações, à noite', abertura: ['Agora que a cidade importa, alguém quer derrubá-la.'], marco: 'Fim de Linha vira ponto de troca de tráfego.' },
+  { numero: 3, nome: 'O Bairro', tema: 'Subcamada MAC', lugar: 'o prédio, a escola e a praça', abertura: [
+      'O enlace funciona entre dois pontos. Só que no prédio, na escola e na praça todo mundo fala pelo mesmo cabo ou pelo mesmo ar, e ao mesmo tempo.',
+      'Neste ato você aprende quem fala quando: ALOHA, CSMA, Ethernet, Wi-Fi, Bluetooth, switches e VLANs, até o bairro inteiro dividir o meio sem briga.',
+    ], marco: 'O bairro inteiro acende, com Wi-Fi na praça.' },
+  { numero: 4, nome: 'A Cidade', tema: 'Camada de rede', lugar: 'o data center municipal', abertura: [
+      'Cada bairro virou uma ilha que funciona muito bem sozinha. Agora os bairros precisam se enxergar, e a cidade precisa de rota para fora.',
+      'Neste ato, no data center municipal, você aprende endereços IP, roteamento, congestionamento, qualidade de serviço e como as redes da internet combinam quem leva o tráfego de quem.',
+    ], marco: 'Todos os bairros se enxergam, e a cidade tem rota para o mundo.' },
+  { numero: 5, nome: 'A Conversa', tema: 'Camada de transporte', lugar: 'a sala dos servidores', abertura: [
+      'Os pacotes chegam a qualquer canto. Mas um pacote não é uma conversa: chega fora de ordem, duplica, some.',
+      'Neste ato, na sala dos servidores, você aprende portas, UDP, TCP, temporizadores e controle de congestionamento, até a videochamada do hospital ficar estável.',
+    ], marco: 'Videochamada estável no hospital.' },
+  { numero: 6, nome: 'O Show', tema: 'Camada de aplicação', lugar: 'o estádio no dia da final', abertura: [
+      'A rede está pronta, e agora a cidade quer usá-la. O time de Fim de Linha chegou à final, e todo mundo vai assistir ao vivo.',
+      'Neste ato você aprende o que roda em cima de tudo: nomes, correio, a teia, streaming, entrega de conteúdo e redes de par em par.',
+    ], marco: 'Fim de Linha inteira assiste ao jogo ao vivo.' },
+  { numero: 7, nome: 'O Cerco', tema: 'Segurança', lugar: 'o centro de operações, à noite', abertura: [
+      'Fim de Linha virou caminho de tráfego, e isso chama atenção. À noite, o centro de operações começa a ver varreduras, quadros forjados e pedidos demais.',
+      'Neste ato você aprende ataques e defesas: firewall, detecção de intrusão, cifras, chave pública, certificados, VPN, Wi-Fi seguro e TLS. Tudo no laboratório da própria cidade, para entender e defender.',
+    ], marco: 'Fim de Linha vira ponto de troca de tráfego.' },
 ];
