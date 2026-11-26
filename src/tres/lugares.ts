@@ -83,7 +83,9 @@ export type Extra =
   | { tipo: 'calha'; x: number; z: number; y: number; comprimento: number; eixo: 'x' | 'z'; cor: string }
   | { tipo: 'monitores'; lista: { x: number; y: number; z: number; giro: number; tela: Tela }[] }
   | { tipo: 'teloes'; z: number; x: number; y: number }
-  | { tipo: 'estadio' };
+  | { tipo: 'estadio' }
+  /** Luz de lâmpada à noite sem custo de luz real: halo, cone no ar e poça no chão. */
+  | { tipo: 'brilhos'; lista: { pos: V3; cor: string; halo: number; cone?: number; poca?: number; forcaPoca?: number; chao?: number }[] };
 
 /** Conteúdo desenhado nas telas dos monitores. */
 export type Tela = 'campo' | 'placar' | 'grafico' | 'alertas' | 'mapa' | 'terminal';
@@ -123,7 +125,8 @@ export interface Lugar {
 
 const PI = Math.PI;
 const ALMOX: Obstaculo = [2.2, 3, -2, -0.8];
-const MESA_METAL = { arq: 'metal_office_desk', altura: 0.76, giro: PI / 2, passo: 1.6 };
+// passo = comprimento real do tampo, para as mesas se encostarem sem se atravessar
+const MESA_METAL = { arq: 'metal_office_desk', altura: 0.76, giro: PI / 2, passo: 1.94 };
 const MESA_MADEIRA = { arq: 'painted_wooden_table', altura: 0.76, giro: PI / 2, passo: 1.9 };
 const QUATRO: Parede[] = [{ lado: 'fundo' }, { lado: 'frente' }, { lado: 'esq' }, { lado: 'dir' }];
 
@@ -155,8 +158,8 @@ const galpao: Lugar = {
     { arq: 'cardboard_box_01', pos: [2.55, -0.4], giro: 0.3, altura: 0.32 },
     { arq: 'industrial_storage_cart', pos: [2.3, 1.2], giro: -PI / 2, altura: 0.9 },
     { arq: 'metal_toolbox', pos: [2.3, 0.9, 1.2], giro: -1.2, altura: 0.2 },
-    { arq: 'plastic_monobloc_chair_01', pos: [-1.7, -0.6], giro: -PI / 2, altura: 0.82 },
-    { arq: 'metal_trash_can', pos: [-2.6, 2.4], altura: 0.45, detalhe: true },
+    { arq: 'plastic_monobloc_chair_01', pos: [-1.55, -0.6], giro: -PI / 2, altura: 0.82 },
+    { arq: 'metal_trash_can', pos: [-0.9, 2.6], altura: 0.45, detalhe: true },
     { arq: 'plastic_crate_01', pos: [1.7, -2.6], giro: 0.2, altura: 0.3, detalhe: true },
     { arq: 'fire_alarm', pos: [-1.2, 2.2, 2.95], altura: 0.12, giro: PI },
     { arq: 'security_camera_01', pos: [2.75, 2.5, -2.75], altura: 0.18, giro: PI * 0.75 },
@@ -185,7 +188,7 @@ const rua: Lugar = {
   luzes: [
     // luminária de vapor de sódio na parede, sobre a área de trabalho
     { tipo: 'foco', cor: '#ffb563', forca: 26, pos: [0.6, 3.25, -2.45], alvo: [-0.4, 0, 0.2], angulo: 1.05, alcance: 14, sombra: true },
-    { tipo: 'ponto', cor: '#dfe8ff', forca: 2.2, pos: [-2.6, 2.6, 0.4], alcance: 6 },
+    { tipo: 'ponto', cor: '#dfe8ff', forca: 1.4, pos: [-2.6, 2.6, 0.4], alcance: 6 },
     { tipo: 'ponto', cor: '#ffc27a', forca: 18, pos: [6.5, 3.6, 5.2], alcance: 16 },
     { tipo: 'ponto', cor: '#ffc27a', forca: 14, pos: [-7.5, 3.6, 5.2], alcance: 16 },
   ],
@@ -202,11 +205,11 @@ const rua: Lugar = {
     { arq: 'metal_toolbox', pos: [2.35, 0.9, 1.0], giro: -1.3, altura: 0.2 },
     { arq: 'plastic_crate_01', pos: [2.55, -0.35], giro: 0.4, altura: 0.3 },
     { arq: 'cardboard_box_01', pos: [2.55, 0.9, -1.4], giro: 0.2, altura: 0.25, detalhe: true },
-    { arq: 'plastic_monobloc_chair_01', pos: [-1.7, -0.6], giro: -PI / 2, altura: 0.82 },
+    { arq: 'plastic_monobloc_chair_01', pos: [-1.55, -0.6], giro: -PI / 2, altura: 0.82 },
     { arq: 'concrete_road_barrier', pos: [1.25, 2.6], giro: 0.05, altura: 0.82 },
     { arq: 'exterior_aircon_unit', parte: 'exterior_aircon_unit', pos: [-1.6, 2.35, -2.8], altura: 0.62 },
-    { arq: 'power_box_01', pos: [-2.85, 1.15, 2.2], altura: 0.5, giro: PI / 2 },
-    { arq: 'fire_hydrant', pos: [4.7, 4.1], altura: 0.8, detalhe: true },
+    { arq: 'power_box_01', pos: [-2.85, 1.5, 2.2], altura: 0.5, giro: PI / 2 },
+    { arq: 'fire_hydrant', parte: 'fire_hydrant_aged', pos: [4.7, 4.1], altura: 0.8, detalhe: true },
     // alambrado nos dois lados abertos do pátio
     ...[-2, 0, 2].map((z) => ({ arq: 'modular_chainlink_fence', parte: 'modular_chainlink_fence_double', pos: [3.1, z] as [number, number], giro: PI / 2, largura: 2 })),
     ...[-2, 0, 2].map((x) => ({ arq: 'modular_chainlink_fence', parte: 'modular_chainlink_fence_double', pos: [x, 3.1] as [number, number], largura: 2 })),
@@ -232,6 +235,16 @@ const rua: Lugar = {
     },
     // cabo de descida do poste até o gabinete no muro
     { tipo: 'fios', queda: 0.6, pontos: [[6, 6.2, 11.2], [1.1, 3.95, -2.95]] },
+    // vapor de sódio: halo laranja, cone na névoa da noite e a poça no asfalto
+    {
+      tipo: 'brilhos',
+      lista: [
+        { pos: [6.5, 3.28, 5.2], cor: '#ffb257', halo: 1.5, cone: 2.2, poca: 4.2, forcaPoca: 0.55, chao: -0.15 },
+        { pos: [-7.5, 3.28, 5.2], cor: '#ffb257', halo: 1.5, cone: 2.2, poca: 4.2, forcaPoca: 0.55, chao: -0.15 },
+        { pos: [0.6, 3.2, -2.4], cor: '#ffc27a', halo: 1.3, poca: 2.2, forcaPoca: 0.22 },
+        { pos: [-2.62, 2.42, 0.4], cor: '#e6eeff', halo: 0.9 },
+      ],
+    },
     { tipo: 'torre', pos: [16, 30], altura: 34 },
   ],
   texturasExtras: ['asphalt_02', 'concrete_pavement'],
@@ -270,7 +283,7 @@ const central: Lugar = {
     { arq: 'desk_lamp_arm_01', pos: [-1.65, 1.05, 2.66], giro: PI * 0.8, altura: 0.5 },
     { arq: 'painted_wooden_cabinet_02', pos: [-1.45, -2.64], altura: 2.3 },
     { arq: 'vintage_telephone_wall_clock', pos: [-0.35, 1.8, -2.9], altura: 0.42 },
-    { arq: 'dining_chair_02', pos: [-1.7, -0.6], giro: -PI / 2, altura: 0.95 },
+    { arq: 'dining_chair_02', pos: [-1.55, -0.6], giro: -PI / 2, altura: 0.95 },
     { arq: 'korean_fire_extinguisher_01', pos: [1.55, -2.85], altura: 0.6, detalhe: true },
     { arq: 'binder_notebook', pos: [-1.05, 1.05, 2.82], giro: 0.3, largura: 0.4, detalhe: true },
   ],
@@ -330,13 +343,13 @@ const escola: Lugar = {
       ]),
     ),
     { arq: 'standing_chalkboard_01', pos: [2.35, -2.5], giro: -PI / 4, altura: 1.5 },
-    { arq: 'projector_screen', pos: [-1.45, 2.55], giro: PI, altura: 1.8, detalhe: true },
+    { arq: 'projector_screen', pos: [-1.2, 2.55], giro: PI, altura: 1.8, detalhe: true },
     { arq: 'wall_clock', pos: [-1.15, 2.45, -2.97], altura: 0.3 },
     { arq: 'potted_plant_01', pos: [-0.25, 2.65], altura: 1.1, detalhe: true },
-    { arq: 'plastic_monobloc_chair_01', pos: [-1.75, -0.6], giro: -PI / 2, altura: 0.82 },
+    { arq: 'plastic_monobloc_chair_01', pos: [-1.55, -0.6], giro: -PI / 2, altura: 0.82 },
     { arq: 'korean_fire_extinguisher_01', pos: [0.55, 2.86], giro: PI, altura: 0.6, detalhe: true },
   ],
-  obstaculos: [ALMOX, [0.5, 2.5, 0.5, 2.7], [1.85, 2.85, -2.95, -2.05], [-2.05, -0.85, 2.15, 3]],
+  obstaculos: [ALMOX, [0.5, 2.5, 0.5, 2.7], [1.85, 2.85, -2.95, -2.05], [-1.8, -0.6, 2.15, 3]],
   extras: [
     { tipo: 'quadro', lado: 'fundo', c: -1.15, y: 0.95, larg: 1.8, alt: 1.1 },
     { tipo: 'ceu', topo: '#3d7fd6', horizonte: '#cfe4f7', baixo: '#b9b3a3', estrelas: 0 },
@@ -378,7 +391,7 @@ const datacenter: Lugar = {
   moveis: [
     { arq: 'steel_frame_shelves_02', pos: [2.62, -1.4], giro: -PI / 2, altura: 1.9, almox: true },
     { arq: 'plastic_crate_01', pos: [2.62, 0.62, -1.4], giro: -PI / 2, altura: 0.22, detalhe: true },
-    { arq: 'plastic_monobloc_chair_01', pos: [-1.7, -0.6], giro: -PI / 2, altura: 0.82 },
+    { arq: 'plastic_monobloc_chair_01', pos: [-1.55, -0.6], giro: -PI / 2, altura: 0.82 },
     { arq: 'korean_fire_extinguisher_01', pos: [1.6, -2.85], altura: 0.6 },
     { arq: 'security_camera_01', pos: [2.75, 2.65, -2.75], altura: 0.18, giro: PI * 0.75 },
     { arq: 'fire_alarm', pos: [-1.2, 2.2, -2.97], altura: 0.12 },
@@ -426,7 +439,7 @@ const servidores: Lugar = {
     { arq: 'cardboard_box_01', pos: [2.62, 1.12, -1.25], giro: -0.3, altura: 0.25, detalhe: true },
     { arq: 'power_box_01', pos: [-1.5, 1.35, -2.82], altura: 0.55 },
     { arq: 'korean_fire_extinguisher_01', pos: [-0.7, 2.86], giro: PI, altura: 0.6 },
-    { arq: 'plastic_monobloc_chair_01', pos: [-1.7, -0.6], giro: -PI / 2, altura: 0.82 },
+    { arq: 'plastic_monobloc_chair_01', pos: [-1.55, -0.6], giro: -PI / 2, altura: 0.82 },
     { arq: 'security_camera_01', pos: [-2.75, 2.25, 2.75], altura: 0.18, giro: -PI * 0.25 },
     { arq: 'modular_airduct_rectangular_01', parte: 'modular_airduct_rectangular_01_single_01', pos: [1.7, 2.18, 1.5], giro: PI / 2, largura: 1.0 },
     { arq: 'modular_airduct_rectangular_01', parte: 'modular_airduct_rectangular_01_single_01', pos: [1.7, 2.18, 0.5], giro: PI / 2, largura: 1.0 },
@@ -476,7 +489,7 @@ const estadio: Lugar = {
     { arq: 'television_02', pos: [-1.2, 1.9, -2.9], altura: 0.5 },
     { arq: 'wall_clock', pos: [-0.3, 2.2, -2.97], altura: 0.3 },
     { arq: 'korean_fire_extinguisher_01', pos: [1.6, -2.85], altura: 0.6 },
-    { arq: 'GreenChair_01', pos: [-1.7, -0.6], giro: -PI / 2, altura: 0.95 },
+    { arq: 'GreenChair_01', pos: [-1.55, -0.6], giro: -PI / 2, altura: 0.95 },
   ],
   obstaculos: [ALMOX, [-1.65, 2.32, 2.05, 3]],
   extras: [
@@ -527,7 +540,7 @@ const soc: Lugar = {
     { arq: 'wall_clock', pos: [-0.6, 2.25, -2.97], altura: 0.3 },
     { arq: 'security_camera_01', pos: [2.75, 2.65, -2.75], altura: 0.18, giro: PI * 0.75 },
     { arq: 'korean_fire_extinguisher_01', pos: [1.6, -2.85], altura: 0.6 },
-    { arq: 'plastic_monobloc_chair_01', pos: [-1.95, -0.6], giro: -PI / 2, altura: 0.82, detalhe: true },
+    { arq: 'plastic_monobloc_chair_01', pos: [-1.55, -0.6], giro: -PI / 2, altura: 0.82, detalhe: true },
   ],
   obstaculos: [ALMOX, [-1.9, 2.1, 0.95, 1.95], [-2.1, -1.3, -3, -2.2]],
   inicio: [0.2, 0.4, 0.25],

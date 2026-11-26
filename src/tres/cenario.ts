@@ -46,6 +46,72 @@ function naParede(lado: Lado, c: number, y: number, d: number): V3 {
   return [3 - d, y, c];
 }
 
+/* ---------- luz barata para a noite: halo, cone e poça ---------- */
+
+/** Mancha radial (centro claro, borda transparente), para halo de lâmpada e poça de luz no chão. */
+function mancha(nucleo: number): THREE.CanvasTexture {
+  return canvas(128, 128, (c) => {
+    const gr = c.createRadialGradient(64, 64, 0, 64, 64, 64);
+    gr.addColorStop(0, 'rgba(255,255,255,1)');
+    gr.addColorStop(nucleo, 'rgba(255,255,255,0.55)');
+    gr.addColorStop(1, 'rgba(255,255,255,0)');
+    c.fillStyle = gr;
+    c.fillRect(0, 0, 128, 128);
+  });
+}
+
+/**
+ * Cone de luz no ar (poeira e umidade espalhando o facho): aditivo, mais forte perto da
+ * lâmpada e no meio do cone, some nas bordas. Não ilumina nada, só se vê.
+ */
+function cone(de: THREE.Vector3, ate: THREE.Vector3, raio: number, cor: string, forca: number): THREE.Mesh {
+  const dir = de.clone().sub(ate);
+  const alt = dir.length();
+  const geo = new THREE.ConeGeometry(raio, alt, 24, 1, true);
+  const mat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    uniforms: { cor: { value: new THREE.Color(cor) }, forca: { value: forca } },
+    vertexShader:
+      'varying float vy; varying vec3 vn; varying vec3 vv;' +
+      'void main(){ vy = uv.y; vec4 mv = modelViewMatrix * vec4(position, 1.0); vv = normalize(-mv.xyz); vn = normalize(normalMatrix * normal); gl_Position = projectionMatrix * mv; }',
+    fragmentShader:
+      'uniform vec3 cor; uniform float forca; varying float vy; varying vec3 vn; varying vec3 vv;' +
+      'void main(){ float borda = pow(abs(dot(vn, vv)), 2.0); float a = forca * pow(vy, 1.8) * borda; gl_FragColor = vec4(cor * a, 1.0); }',
+  });
+  const m = new THREE.Mesh(geo, mat);
+  // a ponta do ConeGeometry fica em +y: alinha +y com a direção de quem ilumina
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+  m.position.copy(de).lerp(ate, 0.5);
+  m.renderOrder = 2;
+  return m;
+}
+
+/** Halo, cone até o chão e poça de luz para cada lâmpada; no modo leve fica só halo e poça. */
+function brilhos(e: Extract<Extra, { tipo: 'brilhos' }>): Peca {
+  const g = new THREE.Group();
+  const tHalo = mancha(0.18);
+  const tPoca = mancha(0.35);
+  for (const b of e.lista) {
+    const [x, y, z] = b.pos;
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: tHalo, color: b.cor, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.9 }));
+    halo.scale.set(b.halo, b.halo, 1);
+    halo.position.set(x, y, z);
+    g.add(halo);
+    if (b.poca) {
+      const p = new THREE.Mesh(new THREE.PlaneGeometry(b.poca * 2, b.poca * 2), new THREE.MeshBasicMaterial({ map: tPoca, color: b.cor, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: b.forcaPoca ?? 0.35 }));
+      p.rotation.x = -Math.PI / 2;
+      p.position.set(x, (b.chao ?? 0) + 0.012, z);
+      p.renderOrder = 1;
+      g.add(p);
+    }
+    if (b.cone && !M.leve) g.add(cone(new THREE.Vector3(x, y - 0.1, z), new THREE.Vector3(x, b.chao ?? 0, z), b.cone, b.cor, 0.16));
+  }
+  return { grupo: g };
+}
+
 /* ---------- céu ---------- */
 
 function ceu(e: Extract<Extra, { tipo: 'ceu' }>): Peca {
@@ -227,6 +293,7 @@ function torre(e: Extract<Extra, { tipo: 'torre' }>): Peca {
   for (const y of [e.altura + 0.2, e.altura * 0.5]) {
     const b = new THREE.Mesh(bg, bal);
     b.position.set(tx, y, tz);
+    b.userData.vivo = true;
     g.add(b);
     luzes.push(b);
   }
@@ -448,6 +515,7 @@ function racks(e: Extract<Extra, { tipo: 'racks' }>): Peca {
   grade.wrapS = grade.wrapT = THREE.RepeatWrapping;
   grade.repeat.set(12, 40);
   const porta = new THREE.MeshStandardMaterial({ map: grade, transparent: true, metalness: 0.6, roughness: 0.4, depthWrite: false });
+  porta.userData.juntavel = true;
   const portaGeo = new THREE.PlaneGeometry(0.56, 1.98);
   e.lista.forEach((p, i) => {
     const r = modelo.clone();
@@ -765,6 +833,28 @@ function estadio(): Peca {
       c.strokeRect(x, 332 - 195, 160, 390);
       c.strokeRect(lado ? 1024 - mx - 54 : mx, 332 - 88, 54, 176);
     }
+    // luz cozida dos refletores: o centro bem iluminado, cantos mais escuros e uma poça
+    // de cada torre, com as quatro sombras fracas cruzadas de quem tem luz de todo lado
+    c.globalCompositeOperation = 'multiply';
+    const vinheta = c.createRadialGradient(512, 332, 120, 512, 332, 640);
+    vinheta.addColorStop(0, '#ffffff');
+    vinheta.addColorStop(1, '#5a6258');
+    c.fillStyle = vinheta;
+    c.fillRect(0, 0, 1024, 664);
+    c.globalCompositeOperation = 'screen';
+    for (const [px, py] of [
+      [300, 200],
+      [724, 200],
+      [300, 464],
+      [724, 464],
+    ] as const) {
+      const p = c.createRadialGradient(px, py, 10, px, py, 330);
+      p.addColorStop(0, 'rgba(255,250,228,0.28)');
+      p.addColorStop(1, 'rgba(255,250,228,0)');
+      c.fillStyle = p;
+      c.fillRect(0, 0, 1024, 664);
+    }
+    c.globalCompositeOperation = 'source-over';
   });
   const campo = new THREE.Mesh(new THREE.PlaneGeometry(115, 76), new THREE.MeshBasicMaterial({ map: gramado, color: '#e6f2e2' }));
   campo.rotation.x = -Math.PI / 2;
@@ -856,9 +946,11 @@ function estadio(): Peca {
     s.scale.set(26, 26, 1);
     s.position.copy(p.position);
     g.add(s);
+    // o facho de cada torre até o meio do campo, na umidade da noite
+    if (!M.leve) g.add(cone(p.position.clone(), new THREE.Vector3(x * 0.35, yCampo, z < 60 ? 42 : 78), 26, '#fff6dc', 0.05));
   }
-  // céu de noite clareado pela luz do estádio
-  g.add(ceu({ tipo: 'ceu', topo: '#04060c', horizonte: '#26324a', baixo: '#101318', estrelas: 0 }).grupo);
+  // céu de noite clareado pela luz do estádio, com as poucas estrelas que vencem o clarão
+  g.add(ceu({ tipo: 'ceu', topo: '#04060c', horizonte: '#2c3a55', baixo: '#101318', estrelas: 120 }).grupo);
   // a face externa da cabine, logo abaixo da janela
   const fachada = new THREE.Mesh(new THREE.PlaneGeometry(14, 6), new THREE.MeshStandardMaterial({ color: '#30353c', roughness: 0.9 }));
   fachada.position.set(0.3, -3, 3.12);
@@ -902,5 +994,7 @@ export function montarExtra(e: Extra): Peca {
       return teloes(e);
     case 'estadio':
       return estadio();
+    case 'brilhos':
+      return brilhos(e);
   }
 }

@@ -28,9 +28,18 @@ export function posicionar(x: number, z: number, yaw: number) {
   J.pitch = -0.08;
 }
 
+let toqueAnterior: AbortController | null = null;
+
+/** Aperta e solta uma tecla de mentira: os botões de toque reaproveitam os atalhos do teclado. */
+function tecla(code: string, key: string) {
+  dispatchEvent(new KeyboardEvent('keydown', { code, key }));
+  dispatchEvent(new KeyboardEvent('keyup', { code, key }));
+}
+
 export function iniciarControles(canvas: HTMLCanvasElement, camada: HTMLElement) {
   canvasRef = canvas;
-  J.toque = matchMedia('(pointer: coarse)').matches;
+  J.toque = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+  ligarToque(camada);
   if (iniciado) {
     M.atualizar.add(atualizar);
     return;
@@ -51,6 +60,26 @@ export function iniciarControles(canvas: HTMLCanvasElement, camada: HTMLElement)
     if (!J.livre || document.pointerLockElement !== canvas) return;
     girar(e.movementX * 0.0022, e.movementY * 0.0022);
   });
+  M.atualizar.add(atualizar);
+}
+
+/**
+ * Controles de toque da camada (o palco do dia): joystick virtual no lado esquerdo, arrastar
+ * no direito para olhar e o botão de ação, que vale o E. Cada dia tem palco novo, então os
+ * ouvintes do palco anterior saem.
+ */
+function ligarToque(camada: HTMLElement) {
+  toqueAnterior?.abort();
+  const ctl = new AbortController();
+  toqueAnterior = ctl;
+  const sinal = { signal: ctl.signal };
+  const acao = document.createElement('button');
+  acao.type = 'button';
+  acao.className = 'toque-acao';
+  acao.setAttribute('aria-label', 'Usar o que está na mira (tecla E)');
+  acao.textContent = 'E';
+  acao.addEventListener('click', () => tecla('KeyE', 'e'), sinal);
+  camada.append(acao);
 
   const base = document.createElement('div');
   base.className = 'joy';
@@ -68,7 +97,7 @@ export function iniciarControles(canvas: HTMLCanvasElement, camada: HTMLElement)
   camada.addEventListener('touchstart', (e) => {
     if (!J.livre) return;
     for (const t of Array.from(e.changedTouches)) {
-      if ((t.target as HTMLElement).closest('button, .painel, .hud-topo')) continue;
+      if ((t.target as HTMLElement).closest('button, a, input, select, summary, details, .painel, .hud-topo, .hud-guia, .lado, .aviso-leve')) continue;
       if (t.clientX < innerWidth * 0.45 && idJoy === null) {
         idJoy = t.identifier;
         ox = t.clientX;
@@ -82,7 +111,7 @@ export function iniciarControles(canvas: HTMLCanvasElement, camada: HTMLElement)
         ly = t.clientY;
       }
     }
-  }, { passive: true });
+  }, { passive: true, ...sinal });
   camada.addEventListener('touchmove', (e) => {
     for (const t of Array.from(e.changedTouches)) {
       if (t.identifier === idJoy) {
@@ -99,16 +128,15 @@ export function iniciarControles(canvas: HTMLCanvasElement, camada: HTMLElement)
         ly = t.clientY;
       }
     }
-  }, { passive: true });
+  }, { passive: true, ...sinal });
   const fim = (e: TouchEvent) => {
     for (const t of Array.from(e.changedTouches)) {
       if (t.identifier === idJoy) { idJoy = null; J.joy.x = J.joy.y = 0; pino.style.transform = ''; base.classList.remove('ativo'); }
       if (t.identifier === idOlhar) idOlhar = null;
     }
   };
-  camada.addEventListener('touchend', fim);
-  camada.addEventListener('touchcancel', fim);
-  M.atualizar.add(atualizar);
+  camada.addEventListener('touchend', fim, sinal);
+  camada.addEventListener('touchcancel', fim, sinal);
 }
 
 function girar(dx: number, dy: number) {
@@ -156,7 +184,8 @@ function atualizar(dt: number, t: number) {
     }
     const alvo = J.agachado ? 0.95 : OLHO;
     J.olho += (alvo - J.olho) * Math.min(1, dt * 8);
-    if (n > 0.05) J.olho += Math.sin(t * 9) * 0.012;
+    // balanço da cabeça ao andar, que some com "menos movimento" no sistema
+    if (n > 0.05 && !M.calmo) J.olho += Math.sin(t * 9) * 0.012;
   }
   M.camera.position.set(J.pos.x, J.olho, J.pos.z);
   euler.set(J.pitch, J.yaw, 0);

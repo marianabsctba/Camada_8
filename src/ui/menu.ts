@@ -3,6 +3,7 @@
 import type { Acao, Campo } from '../motor/acoes';
 import { padroes } from '../motor/acoes';
 import { CORES } from '../motor/fisico';
+import { tocar } from '../som/som';
 
 export interface Feito {
   comando: string;
@@ -171,6 +172,7 @@ export function abrirMenu(o: OpcoesMenu): () => void {
       if (fazer.hasAttribute('disabled')) return;
       const antes = o.acoes().map((x) => x.id).join();
       const resultado = o.executar(a, valores);
+      tocar('acao');
       const depois = o.acoes();
       // a próxima ação provável: a sugerida pela própria ação, ou a primeira se o menu mudou
       const sugerida = a.proxima && depois.some((x) => x.id === a.proxima) ? a.proxima : depois.map((x) => x.id).join() !== antes && depois[0] ? depois[0].id : a.id;

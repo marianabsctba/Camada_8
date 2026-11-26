@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { avaliar } from '../motor/fisico';
 import { caboNaPorta, type Cabo, type Equipamento, type Mundo } from '../motor/mundo';
 import { ipTexto } from '../motor/util';
+import { juntarEstaticos } from './juntar';
 
 const U = 0.0445; // uma unidade de rack
 const LARG = 0.44; // largura útil de 19"
@@ -49,6 +50,8 @@ const LED = {
   apagado: ledMat('#000000', 0),
   azul: ledMat('#4a8cff', 1.6),
 };
+// materiais do módulo valem para todos os dias: a limpeza da sala não os libera
+for (const m of [...Object.values(MAT), ...Object.values(LED)]) m.userData.fixo = true;
 
 /* ---------- textura do painel frontal ---------- */
 
@@ -214,9 +217,13 @@ function aparelhoRack(e: Equipamento, alturaU: number): Montado {
   sfp.forEach((p, i) => pos.push({ x: 0.19 - (sfp.length - 1 - i) * 0.02, y: 0, fibra: true, nome: p.nome }));
   const frente = painel(e, LARG, h, pos);
   const lados = MAT.chassi;
-  const corpo = new THREE.Mesh(new THREE.BoxGeometry(LARG, h, PROF), [lados, lados, lados, lados, frente, lados]);
+  // caixa de um material só e a frente como placa: duas chamadas de desenho, não seis
+  const corpo = new THREE.Mesh(new THREE.BoxGeometry(LARG, h, PROF), lados);
   corpo.castShadow = true;
   g.add(corpo);
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(LARG, h), frente);
+  face.position.z = PROF / 2 + 0.0005;
+  g.add(face);
   // orelhas de fixação
   for (const sx of [-1, 1]) {
     const orelha = new THREE.Mesh(new THREE.BoxGeometry(0.022, h, 0.003), MAT.trilho);
@@ -239,20 +246,47 @@ function aparelhoRack(e: Equipamento, alturaU: number): Montado {
   return { grupo: g, portas, leds };
 }
 
-function pcBancada(e: Equipamento, tela: string[]): Montado {
+/**
+ * PC da bancada. No jeito normal, torre ao lado do monitor; "compacto" (bancada cheia) é o
+ * gabinete deitado com o monitor de 4:3 em cima, como nos escritórios antigos.
+ */
+function pcBancada(e: Equipamento, tela: string[], compacto = false): Montado {
   const g = new THREE.Group();
-  // gabinete torre
-  const torre = new THREE.Group();
-  const gab = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.42, 0.42), MAT.plasticoEscuro);
-  gab.position.y = 0.21;
-  gab.castShadow = true;
-  torre.add(gab);
-  const frente = painel(e, 0.19, 0.42, [{ x: 0, y: -0.15, fibra: false, nome: 'eth0' }]);
-  const face = new THREE.Mesh(new THREE.PlaneGeometry(0.19, 0.42), frente);
-  face.position.set(0, 0.21, 0.211);
-  torre.add(face);
-  torre.position.set(-0.32, 0, 0);
-  g.add(torre);
+  let porta: THREE.Vector3;
+  let ledPos: THREE.Vector3;
+  let monY = 0;
+  let monW = 0.5;
+  let monH = 0.3;
+  if (compacto) {
+    const gab = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.1, 0.34), MAT.plasticoEscuro);
+    gab.position.set(0, 0.05, -0.02);
+    gab.castShadow = true;
+    g.add(gab);
+    const frente = painel(e, 0.42, 0.1, [{ x: -0.15, y: -0.01, fibra: false, nome: 'eth0' }]);
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.1), frente);
+    face.position.set(0, 0.05, 0.151);
+    g.add(face);
+    porta = new THREE.Vector3(-0.15, 0.04, 0.155);
+    ledPos = new THREE.Vector3(-0.144, 0.054, 0.152);
+    monY = 0.1;
+    monW = 0.4;
+    monH = 0.3;
+  } else {
+    // gabinete torre
+    const torre = new THREE.Group();
+    const gab = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.42, 0.42), MAT.plasticoEscuro);
+    gab.position.y = 0.21;
+    gab.castShadow = true;
+    torre.add(gab);
+    const frente = painel(e, 0.19, 0.42, [{ x: 0, y: -0.15, fibra: false, nome: 'eth0' }]);
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(0.19, 0.42), frente);
+    face.position.set(0, 0.21, 0.211);
+    torre.add(face);
+    torre.position.set(-0.32, 0, 0);
+    g.add(torre);
+    porta = new THREE.Vector3(-0.32, 0.06, 0.215);
+    ledPos = new THREE.Vector3(-0.3, 0.075, 0.212);
+  }
   // monitor
   const mon = new THREE.Group();
   const base = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.1, 0.012, 24), MAT.plasticoEscuro);
@@ -260,7 +294,7 @@ function pcBancada(e: Equipamento, tela: string[]): Montado {
   const haste = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.16, 0.02), MAT.plasticoEscuro);
   haste.position.set(0, 0.085, -0.02);
   mon.add(haste);
-  const moldura = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.3, 0.025), MAT.plasticoEscuro);
+  const moldura = new THREE.Mesh(new THREE.BoxGeometry(monW, monH, 0.025), MAT.plasticoEscuro);
   moldura.position.set(0, 0.3, 0);
   moldura.castShadow = true;
   mon.add(moldura);
@@ -275,18 +309,18 @@ function pcBancada(e: Equipamento, tela: string[]): Montado {
   tela.forEach((l, i) => gc.fillText(l, 24, 50 + i * 38));
   const tt = new THREE.CanvasTexture(c);
   tt.colorSpace = THREE.SRGBColorSpace;
-  const telaMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.47, 0.27), new THREE.MeshStandardMaterial({ map: tt, emissive: '#ffffff', emissiveMap: tt, emissiveIntensity: 0.55, roughness: 0.25 }));
+  const telaMesh = new THREE.Mesh(new THREE.PlaneGeometry(monW - 0.03, monH - 0.03), new THREE.MeshStandardMaterial({ map: tt, emissive: '#ffffff', emissiveMap: tt, emissiveIntensity: 0.55, roughness: 0.25 }));
   telaMesh.position.set(0, 0.3, 0.0131);
   mon.add(telaMesh);
-  mon.position.set(0.05, 0, -0.08);
+  mon.position.set(compacto ? 0 : 0.05, monY, -0.08);
   g.add(mon);
   // teclado
-  const teclado = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.018, 0.14), MAT.plasticoEscuro);
-  teclado.position.set(0.05, 0.009, 0.16);
+  const teclado = new THREE.Mesh(new THREE.BoxGeometry(compacto ? 0.38 : 0.42, 0.018, 0.14), MAT.plasticoEscuro);
+  teclado.position.set(compacto ? 0 : 0.05, 0.009, compacto ? 0.25 : 0.16);
   g.add(teclado);
-  const portas = new Map<string, PortaPos>([['eth0', { pos: new THREE.Vector3(-0.32, 0.06, 0.215), normal: new THREE.Vector3(0, 0, 1) }]]);
+  const portas = new Map<string, PortaPos>([['eth0', { pos: porta, normal: new THREE.Vector3(0, 0, 1) }]]);
   const led = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.004, 0.002), LED.apagado);
-  led.position.set(-0.30, 0.075, 0.212);
+  led.position.copy(ledPos);
   g.add(led);
   return { grupo: g, portas, leds: new Map([['eth0', led]]) };
 }
@@ -300,10 +334,13 @@ function caixinha(e: Equipamento): Montado {
   const pos = e.portas.map((p, i) => ({ x: 0.04 + i * 0.03 - (e.portas.length - 1) * 0.015, y: e.tipo === 'radio' ? -0.08 : -0.004, fibra: false, nome: p.nome }));
   const frente = painel(e, w, h, pos, claro ? 'claro' : 'escuro');
   const lado = claro ? MAT.plastico : MAT.plasticoEscuro;
-  const corpo = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), [lado, lado, lado, lado, frente, lado]);
+  const corpo = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), lado);
   corpo.position.y = h / 2;
   corpo.castShadow = true;
   g.add(corpo);
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(w, h), frente);
+  face.position.set(0, h / 2, d / 2 + 0.0005);
+  g.add(face);
   if (e.tipo === 'ap' || e.tipo === 'cablemodem') {
     for (const sx of [-1, 1]) {
       const a = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.008, 0.17, 10), MAT.antena);
@@ -350,20 +387,84 @@ function corDoCabo(c: Cabo, m: Mundo): string {
   return '#4a8cff';
 }
 
+/** Borda da frente das mesas da bancada: as duas mesas usadas têm 0,9 m de fundo, encostadas na parede. */
+const BORDA = BANCADA.x + 0.5;
+/** Casca grossa e invisível em volta do cabo: a mira acerta sem precisar de pontaria de cirurgião. */
+const MIRA_CABO = new THREE.MeshBasicMaterial({ visible: false });
+MIRA_CABO.userData.fixo = true;
+const materiaisCabo = new Map<string, THREE.MeshStandardMaterial>();
+function matCabo(cor: string) {
+  let m = materiaisCabo.get(cor);
+  if (!m) {
+    m = new THREE.MeshStandardMaterial({ color: cor, roughness: 0.55 });
+    m.userData.fixo = true;
+    materiaisCabo.set(cor, m);
+  }
+  return m;
+}
+
+/**
+ * Caminho de uma ponta até o chão: na bancada, o cabo deita no tampo, passa pela borda da
+ * mesa e desce; no rack, desce pela frente do rack. Sem atravessar móvel.
+ */
+function descida(p: PortaPos, g: number): THREE.Vector3[] {
+  const s = p.pos.clone().addScaledVector(p.normal, 0.09);
+  if (p.pos.x < BANCADA.x + 0.4 && p.pos.y > MESA_Y - 0.05) {
+    const y = MESA_Y + g + 0.002;
+    return [p.pos.clone(), s, new THREE.Vector3(s.x + 0.05, y, s.z), new THREE.Vector3(BORDA - 0.03, y, s.z), new THREE.Vector3(BORDA + 0.015, y - 0.004, s.z), new THREE.Vector3(BORDA + 0.04, MESA_Y - 0.07, s.z), new THREE.Vector3(BORDA + 0.07, Math.max(g, MESA_Y * 0.35), s.z), new THREE.Vector3(BORDA + 0.13, g, s.z)];
+  }
+  return [p.pos.clone(), s, new THREE.Vector3(s.x, s.y - 0.12, s.z + 0.02), new THREE.Vector3(s.x, Math.max(g, s.y * 0.3), s.z + 0.06), new THREE.Vector3(s.x, g, s.z + 0.14)];
+}
+
+/** A spline passa um pouco do ponto nas curvas fechadas: esta versão nunca entra no piso. */
+class AcimaDoPiso extends THREE.Curve<THREE.Vector3> {
+  base: THREE.Curve<THREE.Vector3>;
+  piso: number;
+  constructor(base: THREE.Curve<THREE.Vector3>, piso: number) {
+    super();
+    this.base = base;
+    this.piso = piso;
+  }
+  override getPoint(t: number, alvo = new THREE.Vector3()) {
+    this.base.getPoint(t, alvo);
+    alvo.y = Math.max(alvo.y, this.piso);
+    return alvo;
+  }
+}
+
 function tuboCabo(a: PortaPos, b: PortaPos, cor: string, grosso: number): THREE.Mesh {
-  const pa = a.pos.clone();
-  const pb = b.pos.clone();
-  const sa = pa.clone().addScaledVector(a.normal, 0.09);
-  const sb = pb.clone().addScaledVector(b.normal, 0.09);
-  const dist = pa.distanceTo(pb);
-  const fundo = Math.max(0.05, Math.min(pa.y, pb.y) - 0.15 - dist * 0.12);
-  const meio = sa.clone().lerp(sb, 0.5);
-  meio.y = fundo;
-  const pontos = [pa, sa, sa.clone().lerp(meio, 0.5).setY((sa.y + fundo) / 2 - 0.05), meio, sb.clone().lerp(meio, 0.5).setY((sb.y + fundo) / 2 - 0.05), sb, pb];
-  const curva = new THREE.CatmullRomCurve3(pontos, false, 'centripetal');
-  const geo = new THREE.TubeGeometry(curva, 80, grosso, 8, false);
-  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: cor, roughness: 0.55 }));
+  const noRack = (p: PortaPos) => !(p.pos.x < BANCADA.x + 0.4 && p.pos.y > MESA_Y - 0.05);
+  let pontos: THREE.Vector3[];
+  let meio: THREE.Vector3;
+  if (noRack(a) && noRack(b)) {
+    // patch cord de um aparelho a outro no mesmo rack: faz uma barriga na frente do rack
+    const pa = a.pos.clone();
+    const pb = b.pos.clone();
+    const sa = pa.clone().addScaledVector(a.normal, 0.09);
+    const sb = pb.clone().addScaledVector(b.normal, 0.09);
+    const fundo = Math.max(0.05, Math.min(pa.y, pb.y) - 0.15 - pa.distanceTo(pb) * 0.12);
+    meio = sa.clone().lerp(sb, 0.5).setY(fundo);
+    meio.z += 0.06;
+    pontos = [pa, sa, sa.clone().lerp(meio, 0.5).setY((sa.y + fundo) / 2 - 0.05), meio, sb.clone().lerp(meio, 0.5).setY((sb.y + fundo) / 2 - 0.05), sb, pb];
+  } else {
+    // pelo chão, de uma descida até a outra
+    const ida = descida(a, grosso);
+    const volta = descida(b, grosso).reverse();
+    const fa = ida[ida.length - 1]!;
+    const fb = volta[0]!;
+    const chao: THREE.Vector3[] = [];
+    const n = Math.max(1, Math.round(fa.distanceTo(fb) / 0.6));
+    for (let k = 1; k < n; k++) chao.push(fa.clone().lerp(fb, k / n));
+    meio = fa.clone().lerp(fb, 0.5);
+    pontos = [...ida, ...chao, ...volta];
+  }
+  const spline = new THREE.CatmullRomCurve3(pontos, false, 'centripetal');
+  const curva = new AcimaDoPiso(spline, grosso);
+  const segs = Math.min(200, Math.round(30 + spline.getLength() * 24));
+  const mesh = new THREE.Mesh(new THREE.TubeGeometry(curva, segs, grosso, 6, false), matCabo(cor));
   mesh.castShadow = true;
+  mesh.add(new THREE.Mesh(new THREE.TubeGeometry(curva, Math.round(segs / 3), 0.03, 4, false), MIRA_CABO));
+  mesh.userData.meio = meio;
   return mesh;
 }
 
@@ -385,7 +486,47 @@ export interface Cena3d {
   obstaculos: [number, number, number, number][];
 }
 
+/** Trecho de parede da esquerda que as mesas podem ocupar (z), sem encostar nas paredes. */
+export const TRECHO_BANCADA: [number, number] = [-1.95, 2.85];
+
+/** Quanto cada aparelho de mesa ocupa ao longo da bancada: [para trás, para a frente] do centro. */
+function ocupa(e: Equipamento, compacto: boolean): [number, number] {
+  if (e.tipo === 'pc') return compacto ? [0.23, 0.23] : [0.3, 0.415];
+  if (e.tipo === 'terminal-sat') return [0.18, 0.18];
+  const w = e.tipo === 'radio' ? 0.24 : 0.26;
+  return [w / 2 + 0.02, w / 2 + 0.02];
+}
+
+/**
+ * Onde fica cada aparelho de mesa. Com folga, PCs de torre e espaço largo; com a bancada
+ * cheia, PCs compactos e o espaço que sobrar dividido por igual. Nunca passa do trecho.
+ */
+export function layoutBancada(m: Mundo): { z: number[]; compacto: boolean; ini: number; fim: number } {
+  const itens = [...m.equipamentos.values()].filter((e) => !NO_RACK.has(e.tipo));
+  const [S, E] = TRECHO_BANCADA;
+  const arrumar = (compacto: boolean, folga: number) => {
+    const z: number[] = [];
+    let cursor = S;
+    for (const e of itens) {
+      const [tras, frente] = ocupa(e, compacto);
+      const c = cursor + tras;
+      z.push(c);
+      cursor = c + frente + folga;
+    }
+    return { z, fim: cursor - folga };
+  };
+  for (const folga of [0.3, 0.12]) {
+    const r = arrumar(false, folga);
+    if (r.fim <= E) return { z: r.z, compacto: false, ini: S, fim: Math.max(r.fim, S + 0.8) };
+  }
+  const justo = arrumar(true, 0);
+  const folga = itens.length > 1 ? Math.max(0, Math.min(0.3, (E - justo.fim) / (itens.length - 1))) : 0;
+  const r = arrumar(true, folga);
+  return { z: r.z, compacto: true, ini: S, fim: r.fim };
+}
+
 export function montarEquipamentos(m: Mundo, notas: string[]): Cena3d {
+  const banc = layoutBancada(m);
   const raiz = new THREE.Group();
   const alvos: THREE.Object3D[] = [];
   const piscar: THREE.Mesh[] = [];
@@ -413,8 +554,8 @@ export function montarEquipamentos(m: Mundo, notas: string[]): Cena3d {
       montado.grupo.position.set(RACK.x, 0.1 + (uAtual + alturaU / 2) * U, RACK.z + 0.4 - PROF / 2 - 0.09 + 0.003);
       uAtual -= 1; // uma unidade livre entre aparelhos, para os cabos respirarem
     } else {
-      montado = e.tipo === 'pc' ? pcBancada(e, telaDoPc(e)) : caixinha(e);
-      montado.grupo.position.set(BANCADA.x, MESA_Y, BANCADA.z0 + slot * BANCADA.passo);
+      montado = e.tipo === 'pc' ? pcBancada(e, telaDoPc(e), banc.compacto) : caixinha(e);
+      montado.grupo.position.set(BANCADA.x, MESA_Y, banc.z[slot]!);
       montado.grupo.rotation.y = Math.PI / 2;
       slot++;
     }
@@ -450,15 +591,20 @@ export function montarEquipamentos(m: Mundo, notas: string[]): Cena3d {
       if (!c) continue;
       const est = avaliar(m, c);
       led.material = est.up ? LED.verde : LED.ambar;
-      if (est.up && est.ber > 1e-9) piscar.push(led);
-      if (!est.up) piscar.push(led);
+      if ((est.up && est.ber > 1e-9) || !est.up) {
+        piscar.push(led);
+        led.userData.vivo = true;
+      }
     }
   }
+  // cada aparelho vira poucas malhas (uma por material), menos os LEDs que piscam
+  for (const mt of montados.values()) juntarEstaticos(mt.grupo);
+  juntarEstaticos(rack);
 
   // obstáculos para colisão: rack e bancada
   const obstaculos: [number, number, number, number][] = [
     [RACK.x - 0.32, RACK.x + 0.32, RACK.z - 0.42, RACK.z + 0.42],
-    [BANCADA.x - 0.4, BANCADA.x + 0.4, BANCADA.z0 - 0.5, BANCADA.z0 + Math.max(1, slot) * BANCADA.passo],
+    [BANCADA.x - 0.4, BANCADA.x + 0.4, banc.ini - 0.1, banc.fim + 0.1],
   ];
   return { raiz, alvos, piscar, obstaculos };
 }

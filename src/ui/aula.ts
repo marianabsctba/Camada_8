@@ -2,6 +2,7 @@
 
 import type { Aula, Visual } from '../conteudo/tipos';
 import { T568A, T568B } from '../motor/fisico';
+import { tocar } from '../som/som';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, string> = {}, ...filhos: (Node | string)[]) {
   const e = document.createElement(tag);
@@ -314,6 +315,7 @@ export function abrirAula(raiz: HTMLElement, titulo: string, aula: Aula, termina
       const b = el('button', { class: 'opcao' }, o);
       b.addEventListener('click', () => {
         for (const x of opcoes) x.classList.remove('errada');
+        tocar(k === q.certa ? 'certo' : 'errado');
         if (k === q.certa) {
           b.classList.add('certa');
           for (const x of opcoes) x.setAttribute('disabled', '');

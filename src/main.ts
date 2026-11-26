@@ -8,6 +8,7 @@ import { Terminal } from './motor/cli';
 import { abrirPasso } from './ui/passo';
 import { abrirAula } from './ui/aula';
 import { abrirMenu } from './ui/menu';
+import { avisoDesempenho, botaoLeve } from './ui/leve';
 import { contarConectados, desenharMapa, lugarDaLuz, nomeDoLugar } from './ui/mapa';
 import { CURRICULO, type EntradaCurriculo } from './conteudo/curriculo';
 import type { Dia } from './conteudo/tipos';
@@ -16,6 +17,8 @@ import { iniciarControles, J, soltarMouse } from './tres/jogador';
 import { esperarCarga } from './tres/glb';
 import { iniciar3d, M, pausar3d } from './tres/motor3d';
 import { alvoNaMira, atualizarEquipamentos, destacar, montarSala, preCarregarLugar } from './tres/sala';
+import { ambiente, iniciarSom, somDosComandos, tocar } from './som/som';
+import { montarBotaoSom } from './som/botao';
 
 const CHAVE = 'camada8.v2';
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -77,6 +80,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string,
 /* ---------- Capa ---------- */
 
 function capa() {
+  ambiente(null);
   const cores = ['var(--laranja)', 'var(--verde)', 'var(--azul)', 'var(--marrom)'];
   const patch = el('div', { class: 'patch', 'aria-hidden': 'true' });
   for (let i = 0; i < 48; i++) {
@@ -126,6 +130,7 @@ function abrirDia(numero: number) {
   const dia = DIAS.find((d) => d.numero === numero)!;
   const term = new Terminal(dia.montar(), dia);
   const passos = dia.passos ?? [];
+  ambiente(dia.ato);
   let idx = 0;
   let janelaAberta = false;
 
@@ -227,6 +232,7 @@ function abrirDia(numero: number) {
       classe,
       executar: (escolhas) => {
         const r = executarPasso(term, dia, p, escolhas);
+        somDosComandos(r.feito);
         for (const f of r.feito) {
           escrever([`${f.prompt} ${f.comando}`], 'cmd');
           escrever(f.saida);
@@ -271,8 +277,9 @@ function abrirDia(numero: number) {
     const carregando = el('div', { class: 'carregando' }, el('div', { class: 'carregando-leds' }, ...Array.from({ length: 8 }, () => el('i'))), el('p', {}, 'Acendendo as luzes da sala técnica...'));
     lado.classList.add('gaveta-esq');
     lado.hidden = true;
-    palco.append(el('div', { class: 'hud-topo' }, titulo, bPainel), hudGuia, mira, rotuloAlvo, ajuda, lado, carregando);
+    palco.append(el('div', { class: 'hud-topo' }, titulo, botaoLeve(), bPainel), hudGuia, mira, rotuloAlvo, ajuda, lado, carregando);
     app.replaceChildren(palco);
+    avisoDesempenho(palco);
     const canvas = iniciar3d(palco);
     canvas.style.opacity = '0';
     montarSala(term.mundo, [`Dia ${dia.numero}`, dia.titulo, 'Siga a seta laranja'], dia.ato);
@@ -282,7 +289,7 @@ function abrirDia(numero: number) {
     liberarFn = () => {
       J.livre = lado.hidden && !janelaAberta;
     };
-    (window as unknown as { __c8: unknown }).__c8 = { J, fazerPasso };
+    (window as unknown as { __c8: unknown }).__c8 = { J, fazerPasso, term };
     void esperarCarga().then(() => {
       canvas.style.transition = 'opacity 0.5s';
       canvas.style.opacity = '1';
@@ -362,6 +369,7 @@ function diaDaEntrada(e: EntradaCurriculo): Dia | undefined {
 
 function mapaTela(recente?: number) {
   sairDo3d();
+  ambiente(null);
   const prox = proximaEntrada();
   const { lugares, casas } = contarConectados(resolvidos);
   const atoAtual = prox?.ato ?? 7;
@@ -408,6 +416,7 @@ function mapaTela(recente?: number) {
 
 function aberturaAto(n: number, depois: () => void) {
   const ato = ATOS[n]!;
+  tocar('abertura');
   const seguir = el('button', { class: 'botao' }, 'Começar o ato');
   seguir.addEventListener('click', () => {
     if (!atosAbertos.includes(n)) atosAbertos = [...atosAbertos, n];
@@ -421,6 +430,7 @@ function aberturaAto(n: number, depois: () => void) {
 
 function iniciarDia(dia: Dia) {
   sairDo3d();
+  ambiente(null);
   const temAula = !!dia.aula;
   const seguir = el('button', { class: 'botao' }, temAula ? 'Assistir à aula' : 'Ir para a prática');
   const pular = el('button', { class: 'botao fantasma' }, 'Pular para a prática');
@@ -460,6 +470,8 @@ function depoisDaPratica(dia: Dia) {
 
 function fechamento(dia: Dia) {
   sairDo3d();
+  ambiente(null);
+  tocar('fimDia');
   if (!resolvidos.includes(dia.numero)) resolvidos = [...resolvidos, dia.numero];
   gravarEstado();
   const doAto = CURRICULO.filter((e) => e.ato === dia.ato && jogavel(e));
@@ -491,6 +503,7 @@ function abrirDesafio(dia: Dia) {
   const des = dia.desafio!;
   const diaD: Dia = { ...dia, chamado: des.carta, perguntas: des.perguntas ?? [], objetivo: des.objetivo, dicas: des.dicas, passos: [] };
   const term = new Terminal(des.montar(), diaD);
+  ambiente(dia.ato);
   let dicas = 0;
   let menuAberto = false;
   let terminou = false;
@@ -511,6 +524,7 @@ function abrirDesafio(dia: Dia) {
       classe,
       executar: (a, v) => {
         const f = executarAcao(term, a, v);
+        somDosComandos(f);
         if (modo === '3d') atualizarEquipamentos(term.mundo);
         desenhar();
         return f;
@@ -538,7 +552,10 @@ function abrirDesafio(dia: Dia) {
       const f = el('form', { class: 'pergunta' + (certa ? ' certa' : resp !== undefined ? ' errada' : '') }, el('p', {}, p.texto), el('div', { class: 'linha-botoes' }, entrada, el('button', { class: 'botao mini', type: 'submit' }, 'Responder')));
       f.addEventListener('submit', (ev) => {
         ev.preventDefault();
-        if (entrada.value.trim()) term.executar(`responder ${p.id} ${entrada.value.trim()}`);
+        if (entrada.value.trim()) {
+          term.executar(`responder ${p.id} ${entrada.value.trim()}`);
+          tocar(p.confere(term.mundo.respostas[p.id] ?? '', term.mundo) ? 'certo' : 'errado');
+        }
         desenhar();
       });
       return f;
@@ -580,8 +597,9 @@ function abrirDesafio(dia: Dia) {
   const mira = el('div', { class: 'mira', 'aria-hidden': 'true' });
   const rotuloAlvo = el('div', { class: 'hud-alvo', hidden: '' });
   const carregando = el('div', { class: 'carregando' }, el('div', { class: 'carregando-leds' }, ...Array.from({ length: 8 }, () => el('i'))), el('p', {}, 'Preparando o desafio...'));
-  palco.append(el('div', { class: 'hud-topo' }, el('div', { class: 'hud-titulo' }, `Desafio do dia ${dia.numero}: ${dia.titulo}`)), painel, mira, rotuloAlvo, el('div', { class: 'hud-dicas' }, 'Clique na cena para olhar · WASD anda · E mostra o que dá para fazer · Esc solta o mouse'), carregando);
+  palco.append(el('div', { class: 'hud-topo' }, el('div', { class: 'hud-titulo' }, `Desafio do dia ${dia.numero}: ${dia.titulo}`), botaoLeve()), painel, mira, rotuloAlvo, el('div', { class: 'hud-dicas' }, 'Clique na cena para olhar · WASD anda · E mostra o que dá para fazer · Esc solta o mouse'), carregando);
   app.replaceChildren(palco);
+  avisoDesempenho(palco);
   const canvas = iniciar3d(palco);
   canvas.style.opacity = '0';
   montarSala(term.mundo, ['Desafio', dia.titulo, 'Sem seta hoje'], dia.ato);
@@ -613,5 +631,7 @@ function abrirDesafio(dia: Dia) {
   desenhar();
 }
 
+iniciarSom();
+montarBotaoSom();
 preCarregarLugar(proximaEntrada()?.ato ?? 0);
 capa();

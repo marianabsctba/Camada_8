@@ -4,6 +4,7 @@ import type { ResultadoPasso } from '../conteudo/guia';
 import type { Passo } from '../conteudo/tipos';
 import type { Campo } from '../motor/acoes';
 import { campoCores } from './menu';
+import { tocar } from '../som/som';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, string> = {}, ...filhos: (Node | string)[]) {
   const e = document.createElement(tag);
@@ -121,6 +122,7 @@ export function abrirPasso(o: OpcoesPasso): void {
 
   const rodar = (escolhas: Record<string, string>) => {
     const r = o.executar(escolhas);
+    tocar(r.ok === true ? 'certo' : 'errado');
     if (r.ok === true) {
       const seguir = el('button', { class: 'botao' }, 'Continuar');
       seguir.addEventListener('click', () => {

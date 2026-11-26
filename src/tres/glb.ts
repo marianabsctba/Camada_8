@@ -43,6 +43,20 @@ function carregar(arquivo: string): Promise<THREE.Object3D | null> {
           if (m.isMesh) {
             m.castShadow = true;
             m.receiveShadow = true;
+            // geometria e material ficam no cache entre um dia e outro: a limpeza da sala não os libera
+            m.geometry.userData.fixo = true;
+            for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
+              mat.userData.fixo = true;
+              // vidro com transmissão obriga o three a desenhar a cena inteira duas vezes por
+              // quadro (passo de transmissão); um vidro transparente comum custa quase nada
+              const fis = mat as THREE.MeshPhysicalMaterial;
+              if (fis.isMeshPhysicalMaterial && fis.transmission > 0) {
+                fis.transmission = 0;
+                fis.transparent = true;
+                fis.opacity = Math.min(fis.opacity, 0.3);
+                fis.depthWrite = false;
+              }
+            }
           }
         });
         return g.scene;

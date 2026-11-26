@@ -27,5 +27,6 @@ TypeScript, Vite e Three.js, publicado no GitHub Pages.
 ## Créditos
 
 - Móveis, objetos e texturas dos lugares em 3D (galpão, rua, central telefônica, escola, data center, sala dos servidores, cabine do estádio e centro de operações): [Poly Haven](https://polyhaven.com/), licença [CC0](https://polyhaven.com/license), convertidos para GLB com Draco e texturas WebP. Ficam em `public/ambiente`.
+- Som: todo sintetizado no navegador com a Web Audio API (osciladores, ruído filtrado e envelopes), em `src/som`. Não há arquivo de áudio de terceiros. O botão no canto de baixo à direita liga e desliga, ajusta o volume e tem o modo só efeitos.
 
 Powered by Mariana BS.

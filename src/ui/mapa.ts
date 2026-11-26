@@ -1,6 +1,7 @@
 // Mapa de Fim de Linha à noite: cada dia resolvido acende um pedaço da cidade.
 
 import { CURRICULO, type EntradaCurriculo } from '../conteudo/curriculo';
+import { tocar } from '../som/som';
 
 interface Marco {
   x: number;
@@ -197,6 +198,8 @@ export function desenharMapa(o: OpcoesMapa): SVGSVGElement {
     });
     svg.append(alvo);
   }
+  // o pedaço da cidade que acabou de ganhar internet acende com som, junto da animação
+  if (recentes.size) setTimeout(() => tocar('mapa'), 250);
   return svg;
 }
 
