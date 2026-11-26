@@ -2,19 +2,18 @@
 
 Cada subseção do currículo de referência (8 capítulos) e o dia do jogo que a ensina. A ordem oficial dos dias está em `src/conteudo/curriculo.ts`.
 
-Legenda: **287 subseções**: 170 com dia pronto, 108 com dia planejado, 9 resumos de capítulo. 181 subseções dividem o dia com outras. Os atos 0 a 4 (capítulos 1 a 5) estão completos.
+Legenda: **287 subseções**: 278 com dia pronto, 9 resumos de capítulo. 181 subseções dividem o dia com outras. Os atos 0 a 7 (capítulos 1 a 8) estão completos.
 
 ## Correções feitas nesta auditoria
 
-- **Sem senha** (recuperar a senha do roteador pelo console) estava na subseção 1.8.3, que trata segurança como questão social. Virou o **prólogo** do jogo (dia 0): a chegada ao galpão com o roteador trancado. A 1.8.3 a 1.8.5 ganhou um dia próprio, planejado.
-- **Canal lotado** (canais do Wi-Fi em 2,4 GHz) estava na 2.2.1, que é o espectro eletromagnético em geral. Foi para a 4.4.1 e 4.4.2 (camada física do Wi-Fi), onde o assunto mora. A 2.2.1 ganhou um dia próprio, planejado.
-- **PPP no último quilômetro** cobria só a 3.5.1. A 3.5.2 e 3.5.3 (o enlace do ADSL e do cabo) ganharam um dia próprio, planejado.
+- **Sem senha** (recuperar a senha do roteador pelo console) estava na subseção 1.8.3, que trata segurança como questão social. Virou o **prólogo** do jogo (dia 0): a chegada ao galpão com o roteador trancado. A 1.8.3 a 1.8.5 ganhou um dia próprio.
+- **Canal lotado** (canais do Wi-Fi em 2,4 GHz) estava na 2.2.1, que é o espectro eletromagnético em geral. Foi para a 4.4.1 e 4.4.2 (camada física do Wi-Fi), onde o assunto mora. A 2.2.1 ganhou um dia próprio.
+- **PPP no último quilômetro** cobria só a 3.5.1. A 3.5.2 e 3.5.3 (o enlace do ADSL e do cabo) ganharam um dia próprio.
 - **Duas casas, um cabo** continua na 1.3.1 a 1.3.3: a aula ensina rede pessoal, local e doméstica, e a prática mostra o que define uma rede local (hosts que falam direto, sem roteador). Fica registrado que a prática adianta o endereçamento IP, aprofundado depois em 5.7.2.
 - Os dias de par trançado e de OTDR ensinam a seção e vão além dela com prática de campo (crimpagem, MDI-X, limite de 100 m, ruído, fusão). Isso é acréscimo, não troca de conteúdo.
 
 ## Ainda falta
 
-- Escrever os dias planejados: 108 subseções esperam o seu dia (atos 5, 6 e 7).
 - Reforçar a arquitetura do 802.11 (4.4.1) no dia Canal lotado.
 - Subseções agrupadas podem ganhar um dia só delas quando o conteúdo pedir.
 
@@ -223,124 +222,124 @@ Legenda: **287 subseções**: 170 com dia pronto, 108 com dia planejado, 9 resum
 
 | Subseção | Dia | Situação |
 |---|---|---|
-| 6.1.1 | 100: Soquetes | planejada, agrupada |
-| 6.1.2 | 100: Soquetes | planejada, agrupada |
-| 6.1.3 | 100: Soquetes | planejada, agrupada |
-| 6.1.4 | 100: Soquetes | planejada, agrupada |
-| 6.2.1 | 101: Aperto de mão | planejada, agrupada |
-| 6.2.2 | 101: Aperto de mão | planejada, agrupada |
-| 6.2.3 | 101: Aperto de mão | planejada, agrupada |
-| 6.2.4 | 102: Fluxo e falhas | planejada, agrupada |
-| 6.2.5 | 102: Fluxo e falhas | planejada, agrupada |
-| 6.2.6 | 102: Fluxo e falhas | planejada, agrupada |
-| 6.3.1 | 103: Dividir a banda com justiça | planejada, agrupada |
-| 6.3.2 | 103: Dividir a banda com justiça | planejada, agrupada |
-| 6.3.3 | 103: Dividir a banda com justiça | planejada, agrupada |
-| 6.4.1 | 104: UDP e tempo real | planejada, agrupada |
-| 6.4.2 | 104: UDP e tempo real | planejada, agrupada |
-| 6.4.3 | 104: UDP e tempo real | planejada, agrupada |
-| 6.5.1 | 105: TCP por dentro | planejada, agrupada |
-| 6.5.2 | 105: TCP por dentro | planejada, agrupada |
-| 6.5.3 | 105: TCP por dentro | planejada, agrupada |
-| 6.5.4 | 105: TCP por dentro | planejada, agrupada |
-| 6.5.5 | 105: TCP por dentro | planejada, agrupada |
-| 6.5.6 | 105: TCP por dentro | planejada, agrupada |
-| 6.5.7 | 106: Estados e janela do TCP | planejada |
-| 6.5.8 | 106: Estados e janela do TCP | planejada |
-| 6.5.9 | 107: Timers do TCP | planejada |
-| 6.5.10 | 108: Partida lenta e CUBIC | planejada |
-| 6.5.11 | 108: Partida lenta e CUBIC | planejada |
-| 6.6.1 | 109: QUIC e BBR | planejada, agrupada |
-| 6.6.2 | 109: QUIC e BBR | planejada, agrupada |
-| 6.6.3 | 109: QUIC e BBR | planejada, agrupada |
-| 6.7.1 | 110: Medir de verdade | planejada, agrupada |
-| 6.7.2 | 110: Medir de verdade | planejada, agrupada |
-| 6.7.3 | 110: Medir de verdade | planejada, agrupada |
-| 6.7.4 | 110: Medir de verdade | planejada, agrupada |
-| 6.7.5 | 110: Medir de verdade | planejada, agrupada |
-| 6.7.6 | 110: Medir de verdade | planejada, agrupada |
-| 6.7.7 | 110: Medir de verdade | planejada, agrupada |
-| 6.7.8 | 110: Medir de verdade | planejada, agrupada |
+| 6.1.1 | 100: Soquetes | pronta e fiel, agrupada |
+| 6.1.2 | 100: Soquetes | pronta e fiel, agrupada |
+| 6.1.3 | 100: Soquetes | pronta e fiel, agrupada |
+| 6.1.4 | 100: Soquetes | pronta e fiel, agrupada |
+| 6.2.1 | 101: Aperto de mão | pronta e fiel, agrupada |
+| 6.2.2 | 101: Aperto de mão | pronta e fiel, agrupada |
+| 6.2.3 | 101: Aperto de mão | pronta e fiel, agrupada |
+| 6.2.4 | 102: Fluxo e falhas | pronta e fiel, agrupada |
+| 6.2.5 | 102: Fluxo e falhas | pronta e fiel, agrupada |
+| 6.2.6 | 102: Fluxo e falhas | pronta e fiel, agrupada |
+| 6.3.1 | 103: Dividir a banda com justiça | pronta e fiel, agrupada |
+| 6.3.2 | 103: Dividir a banda com justiça | pronta e fiel, agrupada |
+| 6.3.3 | 103: Dividir a banda com justiça | pronta e fiel, agrupada |
+| 6.4.1 | 104: UDP e tempo real | pronta e fiel, agrupada |
+| 6.4.2 | 104: UDP e tempo real | pronta e fiel, agrupada |
+| 6.4.3 | 104: UDP e tempo real | pronta e fiel, agrupada |
+| 6.5.1 | 105: TCP por dentro | pronta e fiel, agrupada |
+| 6.5.2 | 105: TCP por dentro | pronta e fiel, agrupada |
+| 6.5.3 | 105: TCP por dentro | pronta e fiel, agrupada |
+| 6.5.4 | 105: TCP por dentro | pronta e fiel, agrupada |
+| 6.5.5 | 105: TCP por dentro | pronta e fiel, agrupada |
+| 6.5.6 | 105: TCP por dentro | pronta e fiel, agrupada |
+| 6.5.7 | 106: Estados e janela do TCP | pronta e fiel |
+| 6.5.8 | 106: Estados e janela do TCP | pronta e fiel |
+| 6.5.9 | 107: Timers do TCP | pronta e fiel |
+| 6.5.10 | 108: Partida lenta e CUBIC | pronta e fiel |
+| 6.5.11 | 108: Partida lenta e CUBIC | pronta e fiel |
+| 6.6.1 | 109: QUIC e BBR | pronta e fiel, agrupada |
+| 6.6.2 | 109: QUIC e BBR | pronta e fiel, agrupada |
+| 6.6.3 | 109: QUIC e BBR | pronta e fiel, agrupada |
+| 6.7.1 | 110: Medir de verdade | pronta e fiel, agrupada |
+| 6.7.2 | 110: Medir de verdade | pronta e fiel, agrupada |
+| 6.7.3 | 110: Medir de verdade | pronta e fiel, agrupada |
+| 6.7.4 | 110: Medir de verdade | pronta e fiel, agrupada |
+| 6.7.5 | 110: Medir de verdade | pronta e fiel, agrupada |
+| 6.7.6 | 110: Medir de verdade | pronta e fiel, agrupada |
+| 6.7.7 | 110: Medir de verdade | pronta e fiel, agrupada |
+| 6.7.8 | 110: Medir de verdade | pronta e fiel, agrupada |
 | 6.8 | (nenhum) | resumo |
 
 ## Capítulo 7
 
 | Subseção | Dia | Situação |
 |---|---|---|
-| 7.1.1 | 111: Nomes | planejada, agrupada |
-| 7.1.2 | 111: Nomes | planejada, agrupada |
-| 7.1.3 | 111: Nomes | planejada, agrupada |
-| 7.1.4 | 111: Nomes | planejada, agrupada |
-| 7.1.5 | 112: Resolver | planejada, agrupada |
-| 7.1.6 | 112: Resolver | planejada, agrupada |
-| 7.1.7 | 112: Resolver | planejada, agrupada |
-| 7.1.8 | 112: Resolver | planejada, agrupada |
-| 7.2.1 | 113: Correio | planejada, agrupada |
-| 7.2.2 | 113: Correio | planejada, agrupada |
-| 7.2.3 | 113: Correio | planejada, agrupada |
-| 7.2.4 | 113: Correio | planejada, agrupada |
-| 7.2.5 | 113: Correio | planejada, agrupada |
-| 7.3.1 | 114: A teia | planejada, agrupada |
-| 7.3.2 | 114: A teia | planejada, agrupada |
-| 7.3.3 | 114: A teia | planejada, agrupada |
-| 7.3.4 | 115: HTTP e HTTPS | planejada |
-| 7.3.5 | 115: HTTP e HTTPS | planejada |
-| 7.4.1 | 116: Ao vivo | planejada, agrupada |
-| 7.4.2 | 116: Ao vivo | planejada, agrupada |
-| 7.4.3 | 116: Ao vivo | planejada, agrupada |
-| 7.4.4 | 116: Ao vivo | planejada, agrupada |
-| 7.5.1 | 117: Perto de quem assiste | planejada, agrupada |
-| 7.5.2 | 117: Perto de quem assiste | planejada, agrupada |
-| 7.5.3 | 117: Perto de quem assiste | planejada, agrupada |
-| 7.5.4 | 118: De par em par | planejada |
-| 7.5.5 | 118: De par em par | planejada |
+| 7.1.1 | 111: Nomes | pronta e fiel, agrupada |
+| 7.1.2 | 111: Nomes | pronta e fiel, agrupada |
+| 7.1.3 | 111: Nomes | pronta e fiel, agrupada |
+| 7.1.4 | 111: Nomes | pronta e fiel, agrupada |
+| 7.1.5 | 112: Resolver | pronta e fiel, agrupada |
+| 7.1.6 | 112: Resolver | pronta e fiel, agrupada |
+| 7.1.7 | 112: Resolver | pronta e fiel, agrupada |
+| 7.1.8 | 112: Resolver | pronta e fiel, agrupada |
+| 7.2.1 | 113: Correio | pronta e fiel, agrupada |
+| 7.2.2 | 113: Correio | pronta e fiel, agrupada |
+| 7.2.3 | 113: Correio | pronta e fiel, agrupada |
+| 7.2.4 | 113: Correio | pronta e fiel, agrupada |
+| 7.2.5 | 113: Correio | pronta e fiel, agrupada |
+| 7.3.1 | 114: A teia | pronta e fiel, agrupada |
+| 7.3.2 | 114: A teia | pronta e fiel, agrupada |
+| 7.3.3 | 114: A teia | pronta e fiel, agrupada |
+| 7.3.4 | 115: HTTP e HTTPS | pronta e fiel |
+| 7.3.5 | 115: HTTP e HTTPS | pronta e fiel |
+| 7.4.1 | 116: Ao vivo | pronta e fiel, agrupada |
+| 7.4.2 | 116: Ao vivo | pronta e fiel, agrupada |
+| 7.4.3 | 116: Ao vivo | pronta e fiel, agrupada |
+| 7.4.4 | 116: Ao vivo | pronta e fiel, agrupada |
+| 7.5.1 | 117: Perto de quem assiste | pronta e fiel, agrupada |
+| 7.5.2 | 117: Perto de quem assiste | pronta e fiel, agrupada |
+| 7.5.3 | 117: Perto de quem assiste | pronta e fiel, agrupada |
+| 7.5.4 | 118: De par em par | pronta e fiel; a DHT do simulador usa distância XOR, e o texto ensina também o anel |
+| 7.5.5 | 118: De par em par | pronta e fiel; a DHT do simulador usa distância XOR, e o texto ensina também o anel |
 | 7.6 | (nenhum) | resumo |
 
 ## Capítulo 8
 
 | Subseção | Dia | Situação |
 |---|---|---|
-| 8.1.1 | 119: Anatomia de um ataque | planejada, agrupada |
-| 8.1.2 | 119: Anatomia de um ataque | planejada, agrupada |
-| 8.1.3 | 119: Anatomia de um ataque | planejada, agrupada |
-| 8.2.1 | 119: Anatomia de um ataque | planejada, agrupada |
-| 8.2.2 | 119: Anatomia de um ataque | planejada, agrupada |
-| 8.2.3 | 119: Anatomia de um ataque | planejada, agrupada |
-| 8.2.4 | 119: Anatomia de um ataque | planejada, agrupada |
-| 8.3.1 | 120: Firewall | planejada |
-| 8.3.2 | 120: Firewall | planejada |
-| 8.4.1 | 121: Segredos | planejada, agrupada |
-| 8.4.2 | 121: Segredos | planejada, agrupada |
-| 8.4.3 | 121: Segredos | planejada, agrupada |
-| 8.4.4 | 121: Segredos | planejada, agrupada |
-| 8.4.5 | 121: Segredos | planejada, agrupada |
-| 8.5.1 | 121: Segredos | planejada, agrupada |
-| 8.5.2 | 121: Segredos | planejada, agrupada |
-| 8.5.3 | 121: Segredos | planejada, agrupada |
-| 8.6.1 | 122: Chave pública e assinatura | planejada, agrupada |
-| 8.6.2 | 122: Chave pública e assinatura | planejada, agrupada |
-| 8.7.1 | 122: Chave pública e assinatura | planejada, agrupada |
-| 8.7.2 | 122: Chave pública e assinatura | planejada, agrupada |
-| 8.7.3 | 122: Chave pública e assinatura | planejada, agrupada |
-| 8.7.4 | 122: Chave pública e assinatura | planejada, agrupada |
-| 8.8.1 | 123: Certificados e autenticação | planejada, agrupada |
-| 8.8.2 | 123: Certificados e autenticação | planejada, agrupada |
-| 8.8.3 | 123: Certificados e autenticação | planejada, agrupada |
-| 8.9.1 | 123: Certificados e autenticação | planejada, agrupada |
-| 8.9.2 | 123: Certificados e autenticação | planejada, agrupada |
-| 8.9.3 | 123: Certificados e autenticação | planejada, agrupada |
-| 8.9.4 | 123: Certificados e autenticação | planejada, agrupada |
-| 8.9.5 | 123: Certificados e autenticação | planejada, agrupada |
-| 8.10.1 | 124: VPN e Wi-Fi seguro | planejada, agrupada |
-| 8.10.2 | 124: VPN e Wi-Fi seguro | planejada, agrupada |
-| 8.10.3 | 124: VPN e Wi-Fi seguro | planejada, agrupada |
-| 8.11.1 | 125: Correio e web seguros | planejada, agrupada |
-| 8.11.2 | 125: Correio e web seguros | planejada, agrupada |
-| 8.12.1 | 125: Correio e web seguros | planejada, agrupada |
-| 8.12.2 | 125: Correio e web seguros | planejada, agrupada |
-| 8.12.3 | 125: Correio e web seguros | planejada, agrupada |
-| 8.12.4 | 125: Correio e web seguros | planejada, agrupada |
-| 8.13.1 | 126: O ponto de troca | planejada, agrupada |
-| 8.13.2 | 126: O ponto de troca | planejada, agrupada |
-| 8.13.3 | 126: O ponto de troca | planejada, agrupada |
+| 8.1.1 | 119: Anatomia de um ataque | pronta e fiel, agrupada |
+| 8.1.2 | 119: Anatomia de um ataque | pronta e fiel, agrupada |
+| 8.1.3 | 119: Anatomia de um ataque | pronta e fiel, agrupada |
+| 8.2.1 | 119: Anatomia de um ataque | pronta e fiel, agrupada |
+| 8.2.2 | 119: Anatomia de um ataque | pronta e fiel, agrupada |
+| 8.2.3 | 119: Anatomia de um ataque | pronta e fiel, agrupada |
+| 8.2.4 | 119: Anatomia de um ataque | pronta e fiel, agrupada |
+| 8.3.1 | 120: Firewall | pronta e fiel |
+| 8.3.2 | 120: Firewall | pronta e fiel |
+| 8.4.1 | 121: Segredos | pronta e fiel, agrupada |
+| 8.4.2 | 121: Segredos | pronta e fiel, agrupada |
+| 8.4.3 | 121: Segredos | pronta e fiel, agrupada |
+| 8.4.4 | 121: Segredos | pronta e fiel, agrupada |
+| 8.4.5 | 121: Segredos | pronta e fiel, agrupada |
+| 8.5.1 | 121: Segredos | pronta e fiel, agrupada |
+| 8.5.2 | 121: Segredos | pronta e fiel, agrupada |
+| 8.5.3 | 121: Segredos | pronta e fiel, agrupada |
+| 8.6.1 | 122: Chave pública e assinatura | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.6.2 | 122: Chave pública e assinatura | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.7.1 | 122: Chave pública e assinatura | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.7.2 | 122: Chave pública e assinatura | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.7.3 | 122: Chave pública e assinatura | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.7.4 | 122: Chave pública e assinatura | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.8.1 | 123: Certificados e autenticação | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.8.2 | 123: Certificados e autenticação | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.8.3 | 123: Certificados e autenticação | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.9.1 | 123: Certificados e autenticação | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.9.2 | 123: Certificados e autenticação | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.9.3 | 123: Certificados e autenticação | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.9.4 | 123: Certificados e autenticação | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.9.5 | 123: Certificados e autenticação | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.10.1 | 124: VPN e Wi-Fi seguro | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.10.2 | 124: VPN e Wi-Fi seguro | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.10.3 | 124: VPN e Wi-Fi seguro | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.11.1 | 125: Correio e web seguros | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.11.2 | 125: Correio e web seguros | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.12.1 | 125: Correio e web seguros | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.12.2 | 125: Correio e web seguros | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.12.3 | 125: Correio e web seguros | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.12.4 | 125: Correio e web seguros | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
+| 8.13.1 | 126: O ponto de troca | pronta e fiel na aula; a prática imita a cebola com túneis encadeados, avisado no texto, agrupada |
+| 8.13.2 | 126: O ponto de troca | pronta e fiel na aula; a prática imita a cebola com túneis encadeados, avisado no texto, agrupada |
+| 8.13.3 | 126: O ponto de troca | pronta e fiel na aula; a prática imita a cebola com túneis encadeados, avisado no texto, agrupada |
 | 8.14 | (nenhum) | resumo |

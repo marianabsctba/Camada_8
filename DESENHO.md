@@ -233,3 +233,5 @@ Cada linha é uma seção (ou um grupo de subseções pequenas) e o dia em que e
 2. **Lugares em 3D**: um cenário por ato, começando pelo galpão e pela rua.
 3. **Completar os atos 0, 1 e 2** com os dias que faltam no mapa de cobertura.
 4. **Atos 3 a 7**, um de cada vez, cada um publicado quando ficar pronto.
+
+Situação: os passos 1, 3 e 4 estão feitos, com os 127 dias escritos. Falta o passo 2: hoje todos os atos usam a mesma sala.
