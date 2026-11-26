@@ -1,11 +1,11 @@
 // Dias do ato 7 (O Cerco), com prática guiada, aula e desafio no próprio dia.
-// Chave pública e assinatura (8.6 e 8.7), certificados e autenticação (8.8 e 8.9) e VPN com Wi-Fi seguro (8.10),
+// Chave pública (8.6), certificados (8.8) e VPN com Wi-Fi seguro (8.10),
 // no centro de operações de Fim de Linha, à noite.
 
 import { adicionar, aparelho, comutador, ligar, novoMundo, pc, roteador, type Mundo } from '../motor/mundo';
 import { lerCidr } from '../motor/util';
-import { buscarColisao, cifrarRsa, diffieHellman, gerarChavesRsa, homemNoMeio, sha256, sha256Bytes } from '../motor/cripto';
-import { associarWifi, DICIONARIO_PEQUENO, wifiDe } from '../motor/seguranca';
+import { cifrarRsa, deHex, gerarChavesRsa, paraHex, parX25519, x25519 } from '../motor/cripto';
+import { associarWifi, cadeiaDoServidor, DICIONARIO_PEQUENO, wifiDe } from '../motor/seguranca';
 import { historicoDe, SOBRA_ESP } from '../motor/filtro';
 import { item, numerica, pingOk, registroPing, todasRespondidas } from './comum';
 import type { Dia, ItemObjetivo, Passo, Pergunta } from './tipos';
@@ -30,20 +30,8 @@ function cripto(m: Mundo, op: string, f: (x: Registro) => boolean = () => true):
   return [...hist(m, 'cripto')].reverse().find((x) => x.op === op && f(x));
 }
 
-function contarBitsDiferentes(a: number[], b: number[]): number {
-  let n = 0;
-  for (let i = 0; i < a.length; i++) {
-    let x = (a[i]! ^ b[i]!) & 0xff;
-    while (x) {
-      n += x & 1;
-      x >>= 1;
-    }
-  }
-  return n;
-}
-
 /* ======================================================================
- * ref 123: Chave pública e assinatura (8.6 e 8.7)
+ * ref 123: Chave pública (8.6). As assinaturas e os resumos (8.7) estão em ato7d.ts.
  * ====================================================================== */
 
 const RSA_AULA = gerarChavesRsa(61n, 53n);
@@ -53,29 +41,18 @@ const C_AULA = cifrarRsa(MSG_AULA, RSA_AULA.publica).resultado;
 const RSA_DES = gerarChavesRsa(47n, 59n);
 const MSG_DES = 1234n;
 
-const ORDEM = 'Pague 100 a Lia';
-const ORDEM_FALSA = 'Pague 100 a Lua';
-const H_ORDEM = sha256(ORDEM);
-const H_FALSA = sha256(ORDEM_FALSA);
-const BITS_AVALANCHE = contarBitsDiferentes(sha256Bytes(ORDEM), sha256Bytes(ORDEM_FALSA));
+/** Vetor de teste do X25519 (RFC 7748, seção 6.1), calculado pelo motor. */
+const X_ALICE = parX25519(deHex('77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a'));
+const X_BOB = parX25519(deHex('5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb'));
+const X_SEGREDO_A = paraHex(x25519(X_ALICE.privada, X_BOB.publica));
+const X_SEGREDO_B = paraHex(x25519(X_BOB.privada, X_ALICE.publica));
+const curto = (h: string) => `${h.slice(0, 12)}...${h.slice(-6)}`;
 
-const CONTRATO = 'Entregar 40 sacos de cimento na escola';
-const CONTRATO_ALTERADO = 'Entregar 90 sacos de cimento na escola';
-const H_CONTRATO = sha256(CONTRATO);
-const H_CONTRATO_ALT = sha256(CONTRATO_ALTERADO);
-
-const COLISAO = buscarColisao(16);
+/** Dígitos decimais de um número de 2048 bits: piso de 2048 × log10(2), mais 1. */
+const DIGITOS_2048 = Math.floor(2048 * Math.log10(2)) + 1;
 
 function rsaFeito(m: Mundo, n: bigint): Registro | undefined {
   return cripto(m, 'rsa', (x) => x.n === String(n) && x.decifrado !== undefined && x.cifrado !== x.decifrado);
-}
-
-function resumoFeito(m: Mundo, h: string): boolean {
-  return !!cripto(m, 'sha256', (x) => x.resumo === h);
-}
-
-function assinaturaFeita(m: Mundo): Registro | undefined {
-  return cripto(m, 'assinar', (x) => x.confere === true && x.alteradaConfere === false);
 }
 
 function itemRsa(m: Mundo, n: bigint, texto: string): ItemObjetivo {
@@ -85,52 +62,49 @@ function itemRsa(m: Mundo, n: bigint, texto: string): ItemObjetivo {
 
 const d123: Pergunta[] = [
   numerica('1', `Com p = 61, q = 53 e e = ${RSA_AULA.e}, qual é o expoente privado d?`, Number(RSA_AULA.d), 0),
-  numerica('2', 'Um resumo de 256 bits resiste a cerca de 2 elevado a quanto em tentativas antes de aparecer uma colisão? (responda o expoente)', 128, 0),
+  numerica('2', 'Uma chave de curva elíptica de quantos bits dá a mesma segurança de um RSA de 3072 bits?', 256, 0),
 ];
 
 const d123D: Pergunta[] = [
   numerica('1', `Com p = 47, q = 59 e e = ${RSA_DES.e}, qual é o expoente privado d da cooperativa?`, Number(RSA_DES.d), 0),
-  numerica('2', 'O fornecedor usa um resumo de 40 bits. Com cerca de 2 elevado a quanto em tentativas alguém acha duas mensagens com o mesmo resumo? (responda o expoente)', 20, 0),
+  numerica('2', 'Quantos dígitos decimais tem um n de 2048 bits?', DIGITOS_2048, 0),
 ];
 
 const dia123: Dia = {
   numero: 123,
   ato: 7,
-  titulo: 'Chave pública e assinatura',
+  titulo: 'Chave pública',
   chamado: [
     'CHAMADO #0123',
-    `Às duas da manhã a cooperativa recebeu pela rede uma ordem de pagamento: "${ORDEM_FALSA}". A tesoureira jura que escreveu "${ORDEM}". Alguém mexeu no meio do caminho, e ninguém consegue provar quem escreveu o quê.`,
-    'O centro de operações quer um jeito de a tesouraria publicar uma chave que qualquer um use para conferir as ordens, sem nunca ter de entregar um segredo a ninguém.',
-    `Objetivo: montar um RSA pequeno com p = 61 e q = 53 e responder o d, resumir com SHA-256 as duas ordens que diferem numa letra, assinar uma ordem e conferir, e responder até onde um resumo de 256 bits aguenta o ataque do aniversário.`,
+    'A cooperativa quer receber pela rede as propostas de 40 fornecedores, cifradas. Com cifra simétrica, cada fornecedor precisaria combinar antes uma chave secreta com a tesouraria, em mãos, e a lista de 40 chaves guardada lá viraria o alvo preferido de quem ronda a cidade.',
+    'O centro de operações propõe outra coisa: a tesouraria publica uma chave que qualquer um usa para cifrar, e só ela consegue abrir o que foi cifrado.',
+    `Objetivo: montar um RSA pequeno com p = 61 e q = 53, cifrar e decifrar a mensagem ${MSG_AULA}, responder o d e responder quantos bits de curva elíptica dão a segurança de um RSA de 3072 bits.`,
   ],
   manual: {
-    titulo: 'Chave pública, resumo e assinatura',
+    titulo: 'Chave pública: RSA, tamanhos de verdade e curvas elípticas',
     texto: [
-      'Toda cifra simétrica tem um calcanhar: as duas pontas precisam da mesma chave, e essa chave precisa viajar por algum lugar antes de a conversa começar. Com 100 pessoas que querem falar duas a duas são 4950 chaves para entregar em mãos. A criptografia de chave pública resolve isso com um par: uma chave pública, que vai para quem quiser, e uma privada, que nunca sai de casa. O que uma cifra, só a outra decifra, e saber a pública não ajuda a descobrir a privada.',
-      `O RSA faz isso com aritmética. Escolha dois primos, p e q, e multiplique: n = p × q. Calcule φ(n) = (p - 1)(q - 1). Escolha e sem fator comum com φ(n) e ache d tal que e × d deixe resto 1 na divisão por φ(n). A chave pública é (n, e); a privada é (n, d). Cifrar é c = m^e mod n; decifrar é m = c^d mod n. Com p = 61 e q = 53: n = ${RSA_AULA.n}, φ(n) = ${RSA_AULA.phi}, e = ${RSA_AULA.e} e d = ${RSA_AULA.d}; a mensagem ${MSG_AULA} vira ${C_AULA} e volta a ${MSG_AULA}. Quem conhece só n precisaria fatorar n para chegar a φ(n) e a d, e para números de 600 dígitos ninguém sabe fazer isso em tempo útil. Aqui os primos da aula são pequenos de propósito (n de quatro dígitos se fatora de cabeça); no mundo real, e na chave da tesouraria, n tem 2048 bits, uns 617 dígitos, e = 65537 e os primos saem de um teste de primalidade (Miller-Rabin).`,
-      'O RSA não é o único. As curvas elípticas fazem a mesma mágica com pontos de uma curva sobre um corpo finito: o problema difícil é o logaritmo discreto na curva, e chaves de 256 bits dão a segurança que o RSA só alcança com mais de 3000. A cifra da mochila, uma das primeiras ideias de chave pública, escondia uma mochila fácil de resolver dentro de uma difícil, e acabou quebrada: é o lembrete de que "parece difícil" não é prova de nada. A chave pública é lenta, por isso na prática ela só combina uma chave de sessão, e quem cifra o grosso é uma cifra simétrica.',
-      'Assinar é provar quem escreveu e que nada mudou. Com chave simétrica, precisa de um árbitro em quem todos confiam: a tesoureira cifra a ordem com a chave que divide com o árbitro, o árbitro confere e repassa à cooperativa com o seu próprio selo e uma marca de tempo, e em caso de briga o árbitro testemunha. Com chave pública, ninguém no meio: a tesoureira aplica a chave privada, e qualquer um confere com a pública. Só quem tem a privada produziria aquilo, então ela nem pode negar depois.',
-      `Assinar o texto inteiro seria lento; assina-se o resumo. Uma função de resumo criptográfico, como o SHA-256, transforma qualquer entrada em 256 bits: é fácil de calcular, impossível de inverter na prática, e mudar uma letra muda cerca de metade dos bits (o efeito avalanche). Se o resumo da ordem recebida bate com o que a assinatura abre, a ordem é a mesma. O HMAC é o primo simétrico: o resumo com uma chave secreta misturada, para quem divide um segredo. E o ataque do aniversário diz quanto o resumo aguenta: com 23 pessoas numa sala, a chance de duas fazerem aniversário no mesmo dia já passa de metade. Achar duas mensagens com o mesmo resumo de n bits leva cerca de 2^(n/2) tentativas, não 2^n. O SHA-256 aguenta 2^128; um resumo de 64 bits, só 2^32, coisa de uma tarde.`,
+      'Toda cifra simétrica tem um calcanhar: as duas pontas precisam da mesma chave, e essa chave precisa viajar por algum lugar antes de a conversa começar. Com n pessoas que querem falar duas a duas, são n(n - 1)/2 chaves: 100 pessoas pedem 4950 chaves entregues em mãos. A criptografia de chave pública resolve isso com um par: uma chave pública, que vai para quem quiser, e uma privada, que nunca sai de casa. O que uma cifra, só a outra decifra, e saber a pública não ajuda a descobrir a privada. A ideia pede uma conta fácil num sentido e impossível no outro, a não ser para quem sabe um segredo: uma função de mão única com alçapão.',
+      `O RSA faz isso com aritmética. Escolha dois primos, p e q, e multiplique: n = p × q. Calcule φ(n) = (p - 1)(q - 1). Escolha e sem fator comum com φ(n) e ache d tal que e × d deixe resto 1 na divisão por φ(n) (o algoritmo de Euclides estendido faz isso). A chave pública é (n, e); a privada é (n, d). Cifrar é c = m^e mod n; decifrar é m = c^d mod n, e funciona porque m^(e × d) volta a ser m módulo n. Com p = 61 e q = 53: n = ${RSA_AULA.n}, φ(n) = ${RSA_AULA.phi}, e = ${RSA_AULA.e} e d = ${RSA_AULA.d}; a mensagem ${MSG_AULA} vira ${C_AULA} e volta a ${MSG_AULA}. Quem conhece só n e e precisaria fatorar n para chegar a φ(n) e daí a d.`,
+      `Tudo depende de fatorar ser difícil, e é por isso que os números da aula não protegem nada: ${RSA_AULA.n} se fatora de cabeça. Tentar todos os divisores até a raiz de n leva cerca de 2^(bits/2) divisões; o melhor algoritmo conhecido, o crivo geral de corpos de números, é muito mais rápido que isso e ainda assim cresce depressa demais. O maior RSA de desafio fatorado em público tinha 829 bits e consumiu milhares de anos de processador. No mundo real, n tem 2048 bits, uns ${DIGITOS_2048} dígitos decimais, com p e q de 1024 bits cada, sorteados e conferidos por um teste de primalidade (Miller-Rabin, com várias rodadas). O e quase sempre é 65537 = 2^16 + 1, que tem só dois bits 1: cifrar e conferir custam 17 multiplicações. Para os órgãos de padrão, RSA de 2048 bits equivale a 112 bits de segurança simétrica, e 3072 bits a 128. Duas ressalvas: o RSA de livro, como o da aula, é determinístico e maleável, então na prática a mensagem passa por um enchimento aleatório antes (OAEP, RFC 8017); e um computador quântico grande o bastante fatoraria n depressa, o que já move os padrões para algoritmos pós-quânticos, baseados em reticulados.`,
+      'O RSA não é o único. Uma das primeiras propostas de chave pública foi a cifra da mochila: escolher, numa lista de pesos, os que somam um total dado é difícil em geral e fácil para uma lista especial, que a chave privada esconde dentro da pública. Ela foi quebrada poucos anos depois, e ficou o lembrete de que "parece difícil" não é prova de nada. Quem tomou espaço foram as curvas elípticas: os pontos de uma curva y² = x³ + ax + b, com as contas feitas módulo um primo, formam um grupo em que somar pontos é fácil e desfazer a multiplicação de um ponto por um número (o logaritmo discreto na curva) é difícil. Como não se conhece atalho parecido com o crivo, as chaves ficam muito menores: 256 bits de curva dão a segurança de 3072 bits de RSA. O X25519 (RFC 7748) é a troca de chaves de Diffie-Hellman sobre uma dessas curvas, com chaves de 32 bytes, e é o que o TLS 1.3 negocia quase sempre.',
+      'Chave pública é lenta: uma exponenciação RSA de 2048 bits custa milhares de vezes mais que cifrar um bloco de AES. Por isso, na prática, ninguém cifra o grosso com ela. O par de chaves serve para combinar ou transportar uma chave de sessão (com RSA ou com X25519), e quem cifra a conversa inteira é uma cifra simétrica, como o AES-GCM. A mesma assimetria serve para provar autoria, aplicando a chave privada em vez da pública: é a assinatura, assunto da próxima noite.',
     ],
   },
   dicas: [
-    'As contas estão na tesouraria: "RSA pequeno", "Resumo SHA-256" e "Assinar e conferir".',
+    'A conta está na tesouraria: "RSA pequeno", com p = 61, q = 53 e a mensagem 65.',
     `O d sai na linha "d = ..." do RSA: é o número que, multiplicado por ${RSA_AULA.e}, deixa resto 1 na divisão por ${RSA_AULA.phi}.`,
-    'Para o aniversário, divida o número de bits do resumo por 2.',
+    'Para a curva elíptica, a tabela de equivalência dos órgãos de padrão: 128 bits de segurança pedem 3072 bits de RSA e o dobro de 128 bits de curva.',
   ],
   perguntas: d123,
   montar: () => mundoCooperativa(7123),
   objetivo: (m) => [
-    itemRsa(m, RSA_AULA.n, 'RSA com p = 61 e q = 53 (n = 3233), cifrando e decifrando de volta'),
-    item(`resumo SHA-256 de "${ORDEM}"`, resumoFeito(m, H_ORDEM), H_ORDEM.slice(0, 16) + '...'),
-    item(`resumo SHA-256 de "${ORDEM_FALSA}", que difere numa letra`, resumoFeito(m, H_FALSA), H_FALSA.slice(0, 16) + '...'),
-    item('uma ordem assinada com a chave privada, conferida com a pública, e a alterada recusada', !!assinaturaFeita(m), assinaturaFeita(m) ? `chave ${assinaturaFeita(m)!.idChave}` : 'ainda não assinada'),
+    itemRsa(m, RSA_AULA.n, `RSA com p = 61 e q = 53 (n = ${RSA_AULA.n}), cifrando e decifrando de volta`),
     ...todasRespondidas(m, d123),
   ],
   posMorte: [
-    `A ordem falsa caiu pelo resumo. "${ORDEM}" e "${ORDEM_FALSA}" diferem numa letra, e os resumos SHA-256 diferem em ${BITS_AVALANCHE} dos 256 bits. Quem mexeu no meio trocou a letra, mas não tinha como trocar a assinatura: ela só abre para o resumo certo com a chave pública da tesouraria, e produzir outra exigiria a chave privada, que nunca saiu da tesouraria.`,
-    `O RSA da aula é pequeno de propósito: com n = ${RSA_AULA.n}, qualquer um acha 61 × 53 e, daí, φ(n) = ${RSA_AULA.phi} e d = ${RSA_AULA.d}. A segurança inteira mora em fatorar ser difícil, por isso a chave que assinou a ordem da tesouraria tem 2048 bits: o resumo SHA-256 vai inteiro dentro de um bloco do tamanho de n (o enchimento do PKCS#1 v1.5), e só então é elevado a d. Mudou uma letra, mudou o resumo, e a assinatura não confere mais.`,
-    'E o aniversário explica por que ninguém usa resumo curto para assinar. Quem quer fraudar não precisa achar uma mensagem com o resumo de uma ordem dada (2^256 tentativas); basta gerar muitas versões de uma ordem honesta e de uma desonesta até duas baterem, e aí pedir a assinatura na honesta. Com 256 bits, isso são 2^128 tentativas: fora de alcance. A tesouraria passou a assinar toda ordem, e a cooperativa só paga o que confere.',
+    `O RSA da aula fez o caminho inteiro: n = ${RSA_AULA.n}, φ(n) = ${RSA_AULA.phi}, e = ${RSA_AULA.e}, d = ${RSA_AULA.d}, e a mensagem ${MSG_AULA} foi a ${C_AULA} com a chave pública e voltou com a privada. A tesouraria pode publicar (n, e) num cartaz na praça: quem quiser mandar proposta cifra com ela, e ninguém além da tesouraria abre.`,
+    `Mas não com esses números. ${RSA_AULA.n} é 61 × 53, e quem fatora acha φ(n) e d em segundos. A chave de verdade da tesouraria tem n de 2048 bits, ${DIGITOS_2048} dígitos, e e = 65537; fatorar isso está fora do alcance de qualquer um, e é só isso que a segurança do RSA promete. Se um dia a fatoração ficar fácil, por matemática nova ou por computador quântico, toda chave RSA cai junto.`,
+    'As curvas elípticas fazem o mesmo serviço com chaves de 256 bits, e o X25519 é o jeito mais comum de duas pontas combinarem uma chave de sessão hoje. Em qualquer dos casos, a chave pública só abre a porta: quem atravessa com a conversa é uma cifra simétrica. Falta resolver o outro lado da moeda, provar quem escreveu, e é para isso que a próxima noite usa a chave privada.',
   ],
   passos: [
     passo({
@@ -138,32 +112,32 @@ const dia123: Dia = {
         opcoes: [
           'Combinar uma chave secreta com cada parceiro exige que ela viaje antes; com par de chaves, a pública pode ir para todo mundo',
           'Cifra simétrica é fácil de quebrar, e a de chave pública não',
-          'Chave pública dispensa o resumo da mensagem',
+          'Chave pública dispensa a cifra simétrica de vez',
           'Chave pública é mais rápida que a simétrica',
         ],
         certa: 0,
         errada: {
           1: 'Uma cifra simétrica moderna, como o AES, é tão forte quanto se queira. O problema não é a força, é como a chave chega até o outro lado.',
-          2: 'É o contrário: a assinatura de chave pública quase sempre assina o resumo, para a conta ficar pequena.',
-          3: 'É bem mais lenta. Por isso, na prática, a chave pública só combina uma chave de sessão, e a simétrica cifra o grosso.',
+          2: 'Na prática, as duas trabalham juntas: a chave pública combina uma chave de sessão, e a simétrica cifra o grosso.',
+          3: 'É bem mais lenta, milhares de vezes. Por isso ela só combina a chave de sessão, e a simétrica cifra o resto.',
         },
       },
       exemplo: { resposta: '0' },
       instrucao: 'Antes das contas: que problema a criptografia de chave pública resolve?',
-      porque: 'A tesouraria fala com dezenas de fornecedores. Entregar um segredo diferente em mãos para cada um não escala.',
-      feito: 'Com um par de chaves, a pública vai para quem quiser (até para o atacante) e a privada fica em casa. Nada secreto precisa viajar.',
+      porque: 'A tesouraria fala com 40 fornecedores. Entregar um segredo diferente em mãos para cada um não escala, e a lista de segredos vira alvo.',
+      feito: 'Com um par de chaves, a pública vai para quem quiser (até para quem ataca) e a privada fica em casa. Nada secreto precisa viajar.',
     }),
     passo({
       alvo: ['equip', 'tesouraria'],
       acao: 'sg-rsa',
       pedir: ['p', 'q', 'm'],
-      exemplo: { p: '61', q: '53', m: '65' },
-      instrucao: 'Na tesouraria, monte um RSA com p = 61 e q = 53 e cifre a mensagem 65.',
-      porque: 'Cada passo do RSA aparece na saída: n, φ(n), a escolha de e, o Euclides estendido que acha d, e a exponenciação que cifra e decifra.',
+      exemplo: { p: '61', q: '53', m: String(MSG_AULA) },
+      instrucao: `Na tesouraria, monte um RSA com p = 61 e q = 53 e cifre a mensagem ${MSG_AULA}.`,
+      porque: 'Cada passo do RSA aparece na saída: n, φ(n), a escolha de e, o Euclides estendido que acha d e a exponenciação que cifra e decifra.',
       conferir: (m) => {
         if (rsaFeito(m, RSA_AULA.n)) return true;
         const r = cripto(m, 'rsa');
-        if (r) return `Esse RSA deu n = ${r.n}. Para o exercício, p = 61 e q = 53, n = 3233.`;
+        if (r) return `Esse RSA deu n = ${r.n}. Para o exercício, p = 61 e q = 53, n = ${RSA_AULA.n}.`;
         return 'O RSA ainda não rodou. Os dois números precisam ser primos e diferentes, e a mensagem menor que p × q.';
       },
       feito: `n = ${RSA_AULA.n}, φ(n) = ${RSA_AULA.phi}, e = ${RSA_AULA.e}, d = ${RSA_AULA.d}. A mensagem ${MSG_AULA} virou ${C_AULA} com a pública e voltou a ${MSG_AULA} com a privada.`,
@@ -176,48 +150,58 @@ const dia123: Dia = {
       feito: `${RSA_AULA.e} × ${RSA_AULA.d} = ${RSA_AULA.e * RSA_AULA.d}, que é ${(RSA_AULA.e * RSA_AULA.d) / RSA_AULA.phi} × ${RSA_AULA.phi} + 1. É por isso que m^(e × d) volta a ser m.`,
     }),
     passo({
-      alvo: ['equip', 'tesouraria'],
-      acao: 'sg-sha256',
-      valores: { t: ORDEM },
-      instrucao: `Calcule o SHA-256 da ordem verdadeira, "${ORDEM}".`,
-      porque: 'O resumo é a impressão digital do texto: 256 bits, sempre do mesmo tamanho, qualquer que seja a entrada.',
-      conferir: (m) => (resumoFeito(m, H_ORDEM) ? true : `O resumo de "${ORDEM}" ainda não foi calculado.`),
-      feito: `Resumo: ${H_ORDEM.slice(0, 32)}... Guarde o começo para comparar.`,
-    }),
-    passo({
-      alvo: ['equip', 'tesouraria'],
-      acao: 'sg-sha256',
-      valores: { t: ORDEM_FALSA },
-      instrucao: `Agora o da ordem que chegou, "${ORDEM_FALSA}", com uma letra trocada.`,
-      porque: 'Uma boa função de resumo espalha qualquer mudança pela saída inteira: não dá para "ajustar um pouquinho" o texto e manter o resumo.',
-      conferir: (m) => (resumoFeito(m, H_FALSA) ? true : `O resumo de "${ORDEM_FALSA}" ainda não foi calculado.`),
-      feito: `Resumo: ${H_FALSA.slice(0, 32)}... Uma letra mudou ${BITS_AVALANCHE} dos 256 bits, perto da metade: o efeito avalanche.`,
-    }),
-    passo({
-      alvo: ['equip', 'tesouraria'],
-      acao: 'sg-assinar',
-      valores: { t: ORDEM },
-      instrucao: `Assine a ordem "${ORDEM}" com a chave privada da tesouraria e confira.`,
-      porque: 'A assinatura é o resumo, num bloco do tamanho da chave, elevado ao d da tesouraria (RSA de 2048 bits). Quem confere eleva ao e público, 65537, e compara com o bloco do resumo do que recebeu.',
-      conferir: (m) => {
-        if (assinaturaFeita(m)) return true;
-        return cripto(m, 'assinar') ? 'A assinatura não conferiu desta vez. Tente de novo.' : 'A ordem ainda não foi assinada.';
+      escolha: {
+        opcoes: [
+          `Nada, com esses números: ${RSA_AULA.n} = 61 × 53 se fatora de cabeça, e daí saem φ(n) e d; a proteção só vem com n de 2048 bits`,
+          'O e é secreto, então ninguém consegue calcular d',
+          'O d viaja cifrado com AES',
+          `${RSA_AULA.n} é primo, e primo não se fatora`,
+        ],
+        certa: 0,
+        errada: {
+          1: 'O e faz parte da chave pública e vai para todo mundo. O que protege d é não se conseguir fatorar n.',
+          2: 'O d nunca viaja: ele fica na tesouraria. O risco é alguém recalculá-lo a partir de n.',
+          3: `Se n fosse primo, não haveria p e q. ${RSA_AULA.n} é 61 × 53, por construção.`,
+        },
       },
-      feito: 'Conferiu com a chave pública. Com um caractere a mais no texto, o resumo muda e a mesma assinatura deixa de conferir: integridade e autoria na mesma conta.',
+      exemplo: { resposta: '0' },
+      instrucao: `Quem escuta a rede conhece n = ${RSA_AULA.n} e e = ${RSA_AULA.e}. O que o impede de achar d?`,
+      porque: 'A chave pública é pública de verdade: a pergunta é o que separa quem tem só ela de quem tem a privada.',
+      feito: `Nada, aqui. Com n de 2048 bits, ${DIGITOS_2048} dígitos, a mesma conta exige uma fatoração que ninguém sabe fazer em tempo útil. O RSA é exatamente tão seguro quanto fatorar é difícil.`,
     }),
     passo({
       pergunta: '2',
-      exemplo: { resposta: '128' },
-      instrucao: 'Até quantas tentativas, em potência de 2, um resumo de 256 bits aguenta o ataque do aniversário?',
-      porque: `Achar duas entradas quaisquer com o mesmo resumo é bem mais fácil que achar uma entrada para um resumo dado. No laboratório, um resumo de brinquedo de 16 bits colidiu em ${COLISAO.tentativas} tentativas, perto de √(2^16) = 256.`,
-      feito: 'Cerca de 2^(256/2) = 2^128. É por isso que um resumo para assinatura precisa do dobro dos bits da segurança que se quer.',
+      exemplo: { resposta: '256' },
+      instrucao: 'Uma chave de curva elíptica de quantos bits dá a segurança de um RSA de 3072 bits?',
+      porque: 'Para a curva não se conhece atalho como o crivo que acelera a fatoração. A regra prática é a chave de curva ter o dobro dos bits de segurança.',
+      feito: 'Duzentos e cinquenta e seis. Os dois dão 128 bits de segurança, a mesma do AES-128, e a chave de curva é doze vezes menor.',
+    }),
+    passo({
+      escolha: {
+        opcoes: [
+          'Combinar uma chave de sessão entre duas pontas, sem ela passar pelo fio',
+          'Assinar documentos',
+          'Cifrar a conversa inteira no lugar do AES',
+          'Resumir mensagens, como o SHA-256',
+        ],
+        certa: 0,
+        errada: {
+          1: 'Com a mesma curva existe um esquema de assinatura (o Ed25519), mas o X25519 é só a troca de chaves.',
+          2: 'Chave pública é lenta demais para cifrar tudo. O X25519 produz um segredo comum de 32 bytes, e dele sai a chave da cifra simétrica.',
+          3: 'Resumo não tem chave nenhuma. O X25519 é uma troca de Diffie-Hellman numa curva elíptica.',
+        },
+      },
+      exemplo: { resposta: '0' },
+      instrucao: 'O X25519 é a curva elíptica que o TLS 1.3 mais usa. Para quê?',
+      porque: 'Cada ponta sorteia uma privada, publica a pública e combina a sua privada com a pública da outra. O vetor de teste do padrão está na aula.',
+      feito: `Para combinar a chave de sessão. No vetor da RFC 7748, as duas pontas chegam ao mesmo segredo, ${curto(X_SEGREDO_A)}, sem que ele passe pela rede.`,
     }),
   ],
   aula: {
     cartoes: [
       {
         titulo: 'Uma chave para fechar, outra para abrir',
-        texto: ['A pública vai para todo mundo, até para o atacante. A privada nunca sai de casa. O que uma cifra, só a outra abre.'],
+        texto: ['A pública vai para todo mundo, até para quem ataca. A privada nunca sai de casa. O que uma cifra, só a outra abre.'],
         visual: {
           tipo: 'diagrama',
           nos: [
@@ -252,75 +236,75 @@ const dia123: Dia = {
         },
       },
       {
-        titulo: 'Uma letra, metade dos bits',
-        texto: [`O SHA-256 de dois textos que diferem numa letra. Os resumos diferem em ${BITS_AVALANCHE} dos 256 bits.`],
+        titulo: 'Tamanhos de verdade',
+        texto: ['Chaves de tipos diferentes com a mesma segurança, segundo a tabela de equivalência dos órgãos de padrão. A curva cresce devagar; o RSA, depressa.'],
         visual: {
           tipo: 'tabela',
-          cabecalho: ['Texto', 'Começo do SHA-256'],
+          cabecalho: ['Segurança', 'Simétrica', 'RSA', 'Curva elíptica'],
           linhas: [
-            [ORDEM, H_ORDEM.slice(0, 24)],
-            [ORDEM_FALSA, H_FALSA.slice(0, 24)],
+            ['112 bits', 'triplo DES', '2048 bits', '224 bits'],
+            ['128 bits', 'AES-128', '3072 bits', '256 bits'],
+            ['192 bits', 'AES-192', '7680 bits', '384 bits'],
+            ['256 bits', 'AES-256', '15360 bits', '512 bits'],
           ],
         },
       },
       {
-        titulo: 'Assina-se o resumo',
-        texto: ['A tesouraria resume e assina o resumo com d. Quem recebe resume de novo, abre a assinatura com e e compara. Iguais: o texto é o mesmo e veio de quem tem d.'],
-        visual: { tipo: 'camadas', camadas: ['ordem (qualquer tamanho)', 'SHA-256: 256 bits', 'resumo elevado a d mod n: a assinatura', 'quem confere: assinatura elevada a e, comparada com o resumo'], rotulo: 'assinar e conferir' },
-      },
-      {
-        titulo: 'O paradoxo do aniversário',
-        texto: ['Achar duas mensagens com o mesmo resumo de n bits leva cerca de 2^(n/2) tentativas.'],
+        titulo: 'X25519, de verdade',
+        texto: ['O vetor de teste da RFC 7748, calculado pelo motor do jogo. Cada ponta combina a própria privada com a pública da outra, e as duas chegam ao mesmo segredo.'],
         visual: {
           tipo: 'tabela',
-          cabecalho: ['Resumo', 'Achar uma mensagem para um resumo dado', 'Achar duas que colidem'],
+          cabecalho: ['', 'Alice', 'Bob'],
           linhas: [
-            ['16 bits (brinquedo)', '2^16 = 65536', `cerca de 2^8; no laboratório, ${COLISAO.tentativas} tentativas`],
-            ['64 bits', '2^64', '2^32: uma tarde'],
-            ['256 bits (SHA-256)', '2^256', '2^128: fora de alcance'],
+            ['privada (32 bytes, nunca sai)', curto(paraHex(X_ALICE.privada)), curto(paraHex(X_BOB.privada))],
+            ['pública (vai pela rede)', curto(paraHex(X_ALICE.publica)), curto(paraHex(X_BOB.publica))],
+            ['segredo calculado', curto(X_SEGREDO_A), curto(X_SEGREDO_B)],
+          ],
+        },
+      },
+      {
+        titulo: 'Outros algoritmos',
+        texto: ['Cada esquema de chave pública aposta num problema difícil. Quando o problema deixa de ser difícil, o esquema cai.'],
+        visual: {
+          tipo: 'tabela',
+          cabecalho: ['Esquema', 'Problema difícil', 'Situação'],
+          linhas: [
+            ['RSA', 'fatorar n = p × q', 'em uso, 2048 bits ou mais'],
+            ['curvas elípticas (X25519)', 'logaritmo discreto na curva', 'em uso, chaves de 256 bits'],
+            ['mochila', 'achar os pesos que somam um total', 'quebrada pouco depois de publicada'],
+            ['reticulados', 'achar o vetor curto numa grade', 'pós-quântico, entrando agora'],
           ],
         },
       },
     ],
     checagem: {
-      pergunta: 'Por que a assinatura com chave pública dispensa o árbitro da assinatura simétrica?',
+      pergunta: `Por que o RSA da aula, com n = ${RSA_AULA.n}, não protege nada, mesmo com todas as contas certas?`,
       opcoes: [
-        'Porque só quem tem a chave privada consegue produzir a assinatura, e qualquer um confere com a pública',
-        'Porque a chave pública é secreta',
-        'Porque o resumo já basta para provar quem escreveu',
-        'Porque a mensagem vai cifrada e ninguém a lê',
+        'Porque n se fatora em segundos, e de p e q saem φ(n) e d',
+        'Porque e = 17 é pequeno demais',
+        'Porque a mensagem 65 é pequena demais',
+        'Porque o RSA só funciona com chave de curva elíptica',
       ],
       certa: 0,
-      explicacao: 'Na assinatura simétrica, quem confere tem a mesma chave de quem assina e poderia ter forjado; por isso precisa de um árbitro. Com par de chaves, a privada é só de quem assina e a pública confere sem poder assinar. O resumo sozinho qualquer um calcula, e a assinatura nem precisa esconder o texto.',
+      explicacao: `A segurança do RSA é exatamente a dificuldade de fatorar n. ${RSA_AULA.n} = 61 × 53, e com isso qualquer um calcula φ(n) = ${RSA_AULA.phi} e d = ${RSA_AULA.d}. O e pode ser pequeno (o padrão é 65537), e o tamanho da mensagem não muda nada. Com n de 2048 bits, a mesma conta exige uma fatoração que ninguém sabe fazer.`,
     },
   },
   desafio: {
     carta: [
       `A cooperativa vai publicar a própria chave para os fornecedores: os primos guardados no cofre são p = 47 e q = 59. Antes, quer ver a chave funcionando com a mensagem ${MSG_DES}.`,
-      `Ao mesmo tempo, um fornecedor mandou o contrato "${CONTRATO}", e na rede circulou a versão "${CONTRATO_ALTERADO}". O sistema antigo do fornecedor usa um resumo de 40 bits.`,
-      'Objetivo: o RSA da cooperativa com d respondido, os resumos SHA-256 das duas versões do contrato, um contrato assinado e conferido e quanto o resumo de 40 bits aguenta.',
+      'E quer saber, para o cartaz da praça, quão grande é o n da chave de verdade, a de 2048 bits.',
+      'Objetivo: o RSA da cooperativa cifrando e decifrando, com o d respondido, e o número de dígitos decimais de um n de 2048 bits.',
     ],
     dicas: [
       `"RSA pequeno" na tesouraria com p = 47, q = 59 e m = ${MSG_DES}; o d aparece na saída.`,
-      'Resuma as duas versões do contrato com "Resumo SHA-256", exatamente como na carta, e assine a original com "Assinar e conferir".',
-      'Para o aniversário, metade dos bits: 40 ÷ 2.',
+      'Cada bit vale log10(2), perto de 0,301 dígito decimal.',
+      '2048 × 0,30103 dá perto de 616,5; arredonde para cima.',
     ],
     perguntas: d123D,
     montar: () => mundoCooperativa(8123),
-    objetivo: (m) => [
-      itemRsa(m, RSA_DES.n, `RSA da cooperativa (p = 47, q = 59, n = ${RSA_DES.n}), cifrando e decifrando`),
-      item('resumo SHA-256 do contrato original', resumoFeito(m, H_CONTRATO), H_CONTRATO.slice(0, 16) + '...'),
-      item('resumo SHA-256 da versão alterada', resumoFeito(m, H_CONTRATO_ALT), H_CONTRATO_ALT.slice(0, 16) + '...'),
-      item('um contrato assinado e conferido, com a alteração recusada', !!assinaturaFeita(m), assinaturaFeita(m) ? 'confere' : 'ainda não'),
-      ...todasRespondidas(m, d123D),
-    ],
-    solucao: [
-      ['equip', 'tesouraria', 'sg-rsa', { p: '47', q: '59', m: String(MSG_DES) }],
-      ['equip', 'tesouraria', 'sg-sha256', { t: CONTRATO }],
-      ['equip', 'tesouraria', 'sg-sha256', { t: CONTRATO_ALTERADO }],
-      ['equip', 'tesouraria', 'sg-assinar', { t: CONTRATO }],
-    ],
-    respostas: { '1': String(RSA_DES.d), '2': '20' },
+    objetivo: (m) => [itemRsa(m, RSA_DES.n, `RSA da cooperativa (p = 47, q = 59, n = ${RSA_DES.n}), cifrando e decifrando`), ...todasRespondidas(m, d123D)],
+    solucao: [['equip', 'tesouraria', 'sg-rsa', { p: '47', q: '59', m: String(MSG_DES) }]],
+    respostas: { '1': String(RSA_DES.d), '2': String(DIGITOS_2048) },
   },
 };
 
@@ -339,16 +323,19 @@ function mundoCooperativa(semente: number): Mundo {
 }
 
 /* ======================================================================
- * ref 124: Certificados e autenticação (8.8 e 8.9)
+ * ref 124: Certificados (8.8)
  * ====================================================================== */
 
 const PORTAL = 'www.prefeitura.exemplo';
 const URL_PORTAL = `https://${PORTAL}/`;
-const DH_A = 6n;
-const DH_B = 15n;
-const DH_M = 13n;
-const DH = diffieHellman(23n, 5n, DH_A, DH_B);
-const MITM = homemNoMeio(23n, 5n, DH_A, DH_B, DH_M);
+/** O dia do mundo quando ninguém mexe no relógio (diaDoMundo). */
+const HOJE = 200;
+/** A cadeia que o portal apresenta com o certificado em dia: folha, intermediária e raiz (RFC 5280). */
+const CADEIA_OK = cadeiaDoServidor(PORTAL, 'valido', HOJE);
+const FOLHA = CADEIA_OK[0]!;
+const INTER = CADEIA_OK[1]!;
+const RAIZ = CADEIA_OK[2]!;
+const VENCIDO_ATE = cadeiaDoServidor(PORTAL, 'vencido', HOJE)[0]!.validoAte;
 
 /**
  * Rede da prefeitura: o balcão de atendimento e o resolvedor ficam na rede de dentro (192.168.1.0/24); o portal da
@@ -388,83 +375,132 @@ function paradasPor(m: Mundo, motivo: string): boolean {
 }
 
 function cadeiaValida(m: Mundo): Registro | undefined {
-  return cripto(m, 'cadeia', (x) => x.valida === true);
+  return cripto(m, 'cadeia', (x) => x.valida === true && x.nome === PORTAL);
 }
 
-function kerberosCom(m: Mundo, sucesso: boolean): Registro | undefined {
-  return cripto(m, 'kerberos', (x) => x.sucesso === sucesso);
+function cadeiaRevogada(m: Mundo): Registro | undefined {
+  return cripto(m, 'cadeia', (x) => x.valida === false && x.motivo === 'revogado' && x.nome === PORTAL);
 }
+
+const d124: Pergunta[] = [
+  numerica('1', `Qual é o número de série do certificado de ${PORTAL}, o número que a AC põe na lista de revogados?`, FOLHA.serie, 0),
+];
+
+const d124D: Pergunta[] = [
+  numerica('1', 'O certificado válido que ficou no portal vale até que dia?', FOLHA.validoAte, 0),
+  numerica('2', 'Quantos certificados a cadeia válida do portal tem, contando a folha e a raiz?', CADEIA_OK.length, 0),
+];
 
 const dia124: Dia = {
   numero: 124,
   ato: 7,
-  titulo: 'Certificados e autenticação',
+  titulo: 'Certificados',
   chamado: [
     'CHAMADO #0124',
-    `Moradores ligaram de madrugada: o portal da prefeitura, ${PORTAL}, abriu com um aviso vermelho do navegador, e alguns clicaram em "continuar" e digitaram a senha. O certificado do portal venceu ontem e ninguém renovou.`,
-    'Antes de renovar, o centro de operações quer entender a corrente inteira: quem garante que aquela chave pública é mesmo da prefeitura, o que o navegador confere e como os sistemas de dentro provam quem é quem sem mandar senha pela rede.',
-    'Objetivo: conferir uma cadeia de certificados válida, ver o navegador parar diante do certificado vencido, simular o homem no meio no Diffie-Hellman e fazer um login Kerberos completo.',
+    `Moradores ligaram de madrugada: o portal da prefeitura, ${PORTAL}, abriu com um aviso vermelho do navegador, e alguns clicaram em "continuar" e digitaram a senha. O certificado do portal venceu e ninguém renovou.`,
+    'Antes de renovar, o centro de operações quer entender a corrente inteira: quem garante que aquela chave pública é mesmo da prefeitura, o que vai escrito dentro de um certificado, o que o navegador confere, elo por elo, e como um certificado deixa de valer antes da hora.',
+    'Objetivo: conferir a cadeia válida do portal até a raiz, conferir a mesma cadeia com o certificado revogado, responder o número de série que vai para a lista de revogados e ver o navegador do balcão parar diante do certificado vencido.',
   ],
   manual: {
     titulo: 'Quem garante a chave pública',
     texto: [
-      'A chave pública resolve a distribuição de segredos, mas cria outro problema: como saber que a chave que chegou é mesmo de quem diz? Se o atacante está no meio, ele troca a chave da prefeitura pela dele quando o navegador pede, decifra tudo, lê e cifra de novo com a chave verdadeira. As duas pontas acham que conversam entre si. É o homem no meio, e criptografia nenhuma resolve sem um jeito de amarrar nome a chave.',
-      'O certificado faz essa amarração: um documento que diz "esta chave pública pertence a www.prefeitura.exemplo", assinado por uma autoridade certificadora (AC). O formato é o X.509, com versão, número de série, algoritmo da assinatura, emissor, período de validade (não antes, não depois), sujeito (o nome), a chave pública do sujeito, extensões (nomes alternativos, se pode assinar outros certificados) e a assinatura da AC sobre tudo isso.',
-      'Ninguém confia numa AC só porque ela diz. A infraestrutura de chave pública (PKI) é uma árvore: uma AC raiz assina as intermediárias, as intermediárias assinam os servidores. As raízes vêm instaladas no navegador e no sistema, são as âncoras de confiança. O navegador sobe a cadeia: o nome bate com o endereço? Está na validade? Cada assinatura confere com a chave de quem está acima? A raiz é uma das âncoras? E não foi revogado? A revogação existe porque chave privada vaza: a AC publica uma lista de certificados revogados (CRL), ou responde na hora a uma consulta sobre um certificado (OCSP). Vencido, autoassinado, de outro nome ou revogado: o navegador para e avisa.',
-      `Autenticar é provar quem é. Com uma chave compartilhada, o jeito clássico é desafio e resposta: o servidor manda um número aleatório usado uma vez só, e o cliente devolve um HMAC dele com a chave, que nunca viaja. O protocolo ingênuo de mão dupla cai no ataque de reflexão: o atacante abre uma segunda sessão e faz o próprio servidor responder o desafio que ele recebeu. As regras para não cair: quem inicia prova primeiro, cada lado usa chave ou identidade diferente na conta, e os desafios dos dois lados vêm de conjuntos diferentes. O Diffie-Hellman deixa duas pontas combinarem uma chave sem ela passar pelo fio (com p = 23 e g = 5, os segredos ${DH_A} e ${DH_B} levam os dois à chave ${DH.chaveAlice}; números de aula, que no mundo real têm centenas de dígitos ou viram pontos de uma curva elíptica, como o X25519 que o TLS do jogo usa), mas sozinho não autentica: o homem no meio fecha uma chave com cada lado. Por isso, no TLS, o servidor assina a sua metade.`,
-      'Com muita gente e muitos serviços, as chaves compartilhadas viram centenas. Um centro de distribuição de chaves (KDC) guarda uma chave para cada um e entrega chaves de sessão sob demanda. O Kerberos é o KDC de quase toda rede corporativa: o servidor de autenticação entrega um tíquete de concessão (TGT), cifrado para o servidor de concessão de tíquetes; com ele, o usuário pede tíquetes para cada serviço, sem digitar a senha de novo, e a senha nunca passa pela rede. A autenticação por chave pública é o caminho que dispensa o KDC: cada lado prova que tem a chave privada do próprio certificado.',
+      'A chave pública resolve a distribuição de segredos, mas cria outro problema: como saber que a chave que chegou é mesmo de quem diz? Se o atacante está no meio, ele troca a chave do portal pela dele quando o navegador pede, decifra tudo, lê e cifra de novo com a chave verdadeira. As duas pontas acham que conversam entre si. É o homem no meio, e matemática nenhuma resolve isso sozinha: falta alguém que amarre o nome à chave.',
+      `O certificado faz essa amarração: um documento que diz "esta chave pública pertence a ${PORTAL}", assinado por uma autoridade certificadora (AC). O formato é o X.509 versão 3 (RFC 5280), campo a campo: versão (v3, que no arquivo vale 2); número de série, único entre os certificados daquela AC (o do portal é ${FOLHA.serie}); algoritmo da assinatura (sha256WithRSAEncryption: resumo SHA-256 assinado com RSA); emissor (${FOLHA.emissor}); validade, com "não antes de" e "não depois de"; sujeito, o dono; a chave pública do sujeito (RSA de 2048 bits, e = 65537); e as extensões. As que mais importam: nomes alternativos do sujeito (SAN), a lista de nomes DNS que o certificado cobre e que o navegador compara com o endereço; basicConstraints, que diz se o certificado é de AC (CA:TRUE, pode assinar outros) ou não (CA:FALSE, o caso do portal); e keyUsage, para que a chave serve (assinatura digital, assinar certificados, assinar listas de revogados). A assinatura da AC cobre todos os campos: mexeu em um, não confere.`,
+      `Ninguém confia numa AC só porque ela diz. A infraestrutura de chave pública (PKI) é uma árvore: uma AC raiz assina as intermediárias, as intermediárias assinam os servidores. A raiz assina a si mesma e fica guardada fora de linha; quem trabalha no dia a dia é a intermediária, para que um vazamento nela não derrube a raiz. As raízes vêm instaladas no navegador e no sistema: são as âncoras de confiança. O servidor manda a folha e a intermediária, e o navegador sobe a cadeia: o nome bate? Cada certificado está na validade? Não foi revogado? Quem emitiu é mesmo o próximo da cadeia, e é AC? Cada assinatura confere com a chave pública de quem está acima? A raiz é uma das âncoras? No portal: ${FOLHA.sujeito}, emitido por ${INTER.sujeito} (válida até o dia ${INTER.validoAte}), emitida por ${RAIZ.sujeito} (até o dia ${RAIZ.validoAte}).`,
+      'Chave privada vaza, servidor é roubado, empresa fecha: por isso existe revogação, a AC desfazendo a própria assinatura antes da validade. Do jeito antigo, a AC publica uma lista de certificados revogados (CRL), assinada, com o emissor e o número de série de cada um, e o navegador baixa a lista inteira. Do jeito novo, o navegador pergunta só por um número de série a um respondedor OCSP (RFC 6960), que devolve "bom", "revogado" ou "desconhecido", assinado. Perguntar a cada visita é lento e conta à AC que sites você visita; no grampeamento OCSP (a extensão status_request do TLS, RFC 6066), o próprio servidor busca a resposta assinada de tempos em tempos e a entrega no aperto de mão. E a transparência de certificados (RFC 6962), em linhas gerais: toda AC publica cada certificado que emite em registros públicos, só de acréscimo, e o navegador exige o recibo desse registro. Quem emite um certificado errado para o seu domínio, por erro ou ataque, aparece ali, e o dono do domínio pode vigiar.',
+      `Vencido, autoassinado, de outro nome ou revogado: em qualquer desses o navegador para e avisa, antes de mandar o pedido, o cookie ou a senha. Ele não tem como distinguir descuido de ataque, e é por isso que avisa igual. Hoje é dia ${HOJE} no jogo, e o certificado esquecido do portal valia até o dia ${VENCIDO_ATE}.`,
     ],
   },
   dicas: [
     '"Conferir uma cadeia de certificados" está no atendimento; "Ligar HTTPS" está no portal.',
+    'Na cadeia revogada, o número de série aparece na linha da folha: "série ...".',
     `Com o portal servindo o certificado vencido, abra ${URL_PORTAL} no atendimento: o navegador precisa parar.`,
-    'No Diffie-Hellman, preencha o segredo do atacante para ver as duas chaves diferentes. No Kerberos, a senha digitada igual à cadastrada.',
   ],
+  perguntas: d124,
   montar: () => mundoPortal(7124),
-  objetivo: (m) => {
-    const dh = cripto(m, 'dh-homem-no-meio');
-    const k = kerberosCom(m, true);
-    return [
-      item(`cadeia de ${PORTAL} conferida até a raiz, e válida`, !!cadeiaValida(m), cadeiaValida(m) ? 'válida' : 'ainda não conferida'),
-      item('o navegador do atendimento parou diante do certificado vencido do portal', paradasPor(m, 'vencido'), paradasPor(m, 'vencido') ? 'parou: certificado vencido' : 'ainda não'),
-      item('Diffie-Hellman com o homem no meio simulado', !!dh, dh ? `Alice ficou com ${dh.chaveAlice}, Bob com ${dh.chaveBob}` : 'ainda não'),
-      item('login Kerberos completo, com autenticação mútua', !!k, k ? k.etapas.join(', ') : 'ainda não'),
-    ];
-  },
+  objetivo: (m) => [
+    item(`cadeia de ${PORTAL} conferida até a raiz, e válida`, !!cadeiaValida(m), cadeiaValida(m) ? 'válida' : 'ainda não conferida'),
+    item(`cadeia de ${PORTAL} com o certificado revogado conferida, e recusada`, !!cadeiaRevogada(m), cadeiaRevogada(m) ? 'recusada: revogado' : 'ainda não conferida'),
+    item('o navegador do atendimento parou diante do certificado vencido do portal', paradasPor(m, 'vencido'), paradasPor(m, 'vencido') ? 'parou: certificado vencido' : 'ainda não'),
+    ...todasRespondidas(m, d124),
+  ],
   posMorte: [
-    `O aviso vermelho estava certo. O certificado do portal valia até o dia ${200 - 3} e hoje é dia 200: o navegador subiu a cadeia, viu a validade vencida e parou antes de mandar o pedido. Quem clicou em "continuar" mandou a senha para um servidor que podia ser qualquer um; a prefeitura pediu a essas pessoas que troquem a senha. Certificado vencido quase sempre é descuido, mas o navegador não tem como distinguir descuido de ataque, e é por isso que avisa igual.`,
-    `O Diffie-Hellman mostrou por que a assinatura do servidor importa. Sem atacante, os segredos ${DH_A} e ${DH_B} levaram os dois lados à chave ${DH.chaveAlice}. Com o atacante no meio trocando as metades públicas, Alice ficou com a chave ${MITM.chaveAlice} e Bob com ${MITM.chaveBob}, ambas conhecidas do atacante, e nenhum dos dois percebeu. No TLS, o servidor assina o aperto de mão com a chave do certificado, e o navegador confere: a troca que o atacante fizesse não teria assinatura válida.`,
-    'O Kerberos fechou o outro lado: no sistema interno da prefeitura, a atendente digitou a senha uma vez, a estação usou a senha só para abrir a resposta do servidor de autenticação, e daí em diante os tíquetes fizeram o trabalho. Seis mensagens, nenhuma com senha, e o serviço também provou quem era. O certificado novo do portal foi emitido pela AC Intermediária Exemplo, que vem da AC Raiz Exemplo, já instalada em todo navegador da cidade.',
+    `O aviso vermelho estava certo. O certificado do portal valia até o dia ${VENCIDO_ATE} e hoje é dia ${HOJE}: o navegador subiu a cadeia, viu a validade vencida e parou antes de mandar o pedido. Quem clicou em "continuar" mandou a senha para um servidor que podia ser qualquer um; a prefeitura pediu a essas pessoas que troquem a senha. Certificado vencido quase sempre é descuido, mas, para o navegador, descuido e ataque têm a mesma cara.`,
+    `A cadeia válida mostrou a corrente inteira: ${FOLHA.sujeito} (série ${FOLHA.serie}, CA:FALSE) assinado por ${INTER.sujeito}, assinada por ${RAIZ.sujeito}, que já vem instalada em todo navegador da cidade. Com o certificado revogado, tudo conferia (nome, validade, assinaturas) e mesmo assim a cadeia caiu: a série ${FOLHA.serie} estava na lista de revogados da intermediária. É esse número que a AC publica na CRL ou responde pelo OCSP.`,
+    'O certificado novo do portal saiu da mesma intermediária, com o nome no SAN, e o servidor passou a grampear a resposta OCSP no aperto de mão. A equipe também começou a vigiar os registros de transparência de certificados: se alguém emitir um certificado para prefeitura.exemplo sem ela saber, aparece ali.',
   ],
   passos: [
     passo({
       escolha: {
         opcoes: [
-          'Que aquela chave pública pertence àquele nome, com a assinatura de uma autoridade em quem o navegador confia',
-          'Que o servidor não tem vírus',
-          'Que a conversa vai ser cifrada com RSA',
-          'Que o site é de uma empresa honesta',
+          'Entrega a própria chave pública no lugar da do portal e fica com as duas conversas, decifrando e cifrando de novo',
+          'Quebra a cifra do portal na força bruta',
+          'Apaga os pacotes do portal e nada mais',
+          'Nada: com chave pública não há homem no meio',
         ],
         certa: 0,
         errada: {
-          1: 'O certificado não diz nada sobre o que roda no servidor. Ele só amarra um nome a uma chave.',
-          2: 'O certificado traz uma chave pública, que no TLS serve para o servidor assinar o aperto de mão; a conversa em si vai com uma cifra simétrica e uma chave de sessão.',
-          3: 'A autoridade confere que quem pediu controla o nome. Um golpista com domínio próprio também consegue certificado para o domínio dele.',
+          1: 'Não precisa quebrar nada. Se o navegador aceita qualquer chave que chega, o atacante entrega a dele e o navegador cifra para o atacante, feliz.',
+          2: 'Apagar só derruba a conversa. O perigo do homem no meio é a conversa continuar, passando por ele.',
+          3: 'É exatamente com chave pública que ele aparece: a chave viaja pela rede, e quem está no caminho pode trocá-la.',
         },
       },
       exemplo: { resposta: '0' },
-      instrucao: 'O que um certificado garante, exatamente?',
-      porque: 'Sem saber o que o certificado promete, não dá para saber o que o aviso do navegador quer dizer.',
-      feito: 'Nome e chave, amarrados pela assinatura da AC. Todo o resto (validade, revogação, a cadeia até a raiz) existe para o navegador saber se ainda pode acreditar nessa amarração.',
+      instrucao: 'Sem certificado, o que faz um atacante no meio do caminho quando o navegador pede a chave pública do portal?',
+      porque: 'O certificado só faz sentido como resposta a esse ataque.',
+      feito: 'Ele troca a chave. Por isso a chave precisa vir amarrada ao nome pela assinatura de alguém em quem o navegador já confia: a AC.',
     }),
     passo({
       alvo: ['equip', 'atendimento'],
       acao: 'sg-cadeia',
       valores: { nome: PORTAL, tipo: 'valido' },
-      instrucao: `No atendimento, confira a cadeia de um certificado válido de ${PORTAL}.`,
-      porque: 'A saída mostra cada verificação do navegador, na ordem: nome, validade, revogação, assinatura de cada elo e a raiz.',
-      conferir: (m) => (cadeiaValida(m) ? true : 'A cadeia válida ainda não foi conferida.'),
-      feito: 'Folha assinada pela AC Intermediária Exemplo, que foi assinada pela AC Raiz Exemplo, que está no repositório de raízes confiáveis. A confiança desce da âncora até o servidor.',
+      instrucao: `No atendimento, confira a cadeia do certificado válido de ${PORTAL}.`,
+      porque: 'A saída mostra cada verificação do navegador, na ordem: nome, validade, revogação, quem emitiu e a assinatura de cada elo, e a raiz entre as âncoras.',
+      conferir: (m) => (cadeiaValida(m) ? true : 'A cadeia válida do portal ainda não foi conferida.'),
+      feito: `Folha (série ${FOLHA.serie}) assinada pela ${INTER.sujeito}, que foi assinada pela ${RAIZ.sujeito}, que está no repositório de raízes confiáveis. A confiança desce da âncora até o servidor.`,
+    }),
+    passo({
+      escolha: {
+        opcoes: [
+          'basicConstraints com CA:FALSE',
+          'O número de série',
+          'O algoritmo de assinatura',
+          'A validade',
+        ],
+        certa: 0,
+        errada: {
+          1: 'A série só identifica o certificado (é ela que vai para a lista de revogados). Não diz o que o dono pode fazer.',
+          2: 'O algoritmo diz como a AC assinou este certificado, não se o dono pode assinar outros.',
+          3: 'A validade diz até quando vale, não para quê.',
+        },
+      },
+      exemplo: { resposta: '0' },
+      instrucao: 'Que campo do X.509 impede o dono do certificado do portal de usá-lo para emitir certificados para outros sites?',
+      porque: 'Se qualquer folha pudesse assinar outras, quem tivesse o certificado de um site qualquer viraria AC.',
+      feito: 'Na extensão basicConstraints, a intermediária e a raiz têm CA:TRUE e o portal tem CA:FALSE. O navegador recusa a cadeia em que alguém sem CA:TRUE assinou outro certificado. O keyUsage completa: o portal só assina o aperto de mão, não certificados nem listas de revogados.',
+    }),
+    passo({
+      alvo: ['equip', 'atendimento'],
+      acao: 'sg-cadeia',
+      valores: { nome: PORTAL },
+      pedir: ['tipo'],
+      exemplo: { tipo: 'revogado' },
+      instrucao: 'Confira de novo a cadeia do portal, agora com o certificado que a AC revogou.',
+      porque: 'Revogado é o caso mais traiçoeiro: nome, validade e assinaturas estão todos certos.',
+      conferir: (m) => {
+        if (cadeiaRevogada(m)) return true;
+        const c = cripto(m, 'cadeia');
+        if (c && c.tipo !== 'revogado') return `Essa foi a cadeia com o certificado ${c.tipo}. Escolha o revogado.`;
+        return 'A cadeia revogada ainda não foi conferida.';
+      },
+      feito: `Nome e validade passaram, e a série ${FOLHA.serie} estava na lista de revogados da ${INTER.sujeito}. A cadeia caiu ali, antes de qualquer assinatura.`,
+    }),
+    passo({
+      pergunta: '1',
+      exemplo: { resposta: String(FOLHA.serie) },
+      instrucao: 'Qual é o número de série do certificado do portal?',
+      porque: 'A CRL não guarda nomes, guarda pares emissor e número de série. O OCSP também pergunta pela série.',
+      feito: `Série ${FOLHA.serie}, emitida pela ${INTER.sujeito}. Cada AC garante que não repete série; por isso o par emissor e série identifica um certificado no mundo inteiro.`,
     }),
     passo({
       alvo: ['equip', 'portal'],
@@ -476,9 +512,9 @@ const dia124: Dia = {
       conferir: (m) => {
         const w = (m.equipamentos.get('portal')!.s.servicos as Registro | undefined)?.web?.https;
         if (w === 'vencido') return true;
-        return w ? `O portal está com o certificado ${w}. O que venceu ontem é o "vencido".` : 'O HTTPS do portal ainda não foi ligado.';
+        return w ? `O portal está com o certificado ${w}. O esquecido é o "vencido".` : 'O HTTPS do portal ainda não foi ligado.';
       },
-      feito: 'HTTPS na porta 443, com um certificado que venceu há 3 dias.',
+      feito: `HTTPS na porta 443, com um certificado que valia até o dia ${VENCIDO_ATE}.`,
     }),
     passo({
       alvo: ['equip', 'atendimento'],
@@ -493,52 +529,6 @@ const dia124: Dia = {
         return 'A navegação https até o portal ainda não foi tentada.';
       },
       feito: 'AVISO DO NAVEGADOR e nada de pedido. O aperto de mão até aconteceu, mas a cadeia falhou na validade, e o navegador parou antes de mandar caminho, cookie ou senha.',
-    }),
-    passo({
-      alvo: ['equip', 'atendimento'],
-      acao: 'sg-dh',
-      valores: { a: String(DH_A), b: String(DH_B) },
-      pedir: ['m'],
-      exemplo: { m: String(DH_M) },
-      instrucao: 'Simule um Diffie-Hellman entre Alice e Bob com um atacante no meio (escolha o segredo do atacante).',
-      porque: 'O Diffie-Hellman combina uma chave sem ela passar pelo fio, mas não diz com quem você combinou.',
-      conferir: (m) => {
-        if (cripto(m, 'dh-homem-no-meio')) return true;
-        return cripto(m, 'dh') ? 'Esse foi sem atacante. Preencha o segredo do atacante para ver o homem no meio.' : 'O Diffie-Hellman ainda não rodou.';
-      },
-      feito: `Alice ficou com a chave ${MITM.chaveAlice}, Bob com ${MITM.chaveBob}, e o atacante tem as duas. Sem ataque, os dois teriam chegado a ${DH.chaveAlice}. A cura é autenticar as metades públicas: assinatura com certificado.`,
-    }),
-    passo({
-      alvo: ['equip', 'atendimento'],
-      acao: 'sg-kerberos',
-      valores: { u: 'atendente', s: 'Balcao-2026!', c: 'Balcao-2026!' },
-      instrucao: 'Faça o login da atendente no sistema interno pelo Kerberos.',
-      porque: 'Seis mensagens: pedir o tíquete de concessão, recebê-lo, pedir o tíquete do serviço, recebê-lo, apresentá-lo ao serviço e a resposta do serviço.',
-      conferir: (m) => {
-        if (kerberosCom(m, true)) return true;
-        return kerberosCom(m, false) ? 'A senha digitada não bateu com a cadastrada: a resposta do servidor de autenticação não abriu. Use a mesma nas duas.' : 'O Kerberos ainda não rodou.';
-      },
-      feito: 'AS-REQ, AS-REP, TGS-REQ, TGS-REP, AP-REQ e AP-REP. A senha só abriu a primeira resposta, na própria estação; o serviço devolveu a hora mais um, provando que também é legítimo.',
-    }),
-    passo({
-      escolha: {
-        opcoes: [
-          'Fazer quem inicia a conversa provar a identidade primeiro, e pôr a identidade de quem responde na conta',
-          'Usar desafios maiores',
-          'Repetir o mesmo desafio para os dois lados',
-          'Mandar a chave junto com a resposta',
-        ],
-        certa: 0,
-        errada: {
-          1: 'Um desafio de qualquer tamanho é refletido do mesmo jeito: o atacante só copia o que o servidor mandou.',
-          2: 'É justamente o que permite o reflexo: se o desafio de um lado pode ser usado no outro, a resposta de um serve para o outro.',
-          3: 'A graça do desafio e resposta é a chave nunca viajar. Mandá-la entrega tudo para quem escuta.',
-        },
-      },
-      exemplo: { resposta: '0' },
-      instrucao: 'No desafio e resposta de mão dupla, o que derruba o ataque de reflexão?',
-      porque: 'No ataque, o atacante abre uma segunda sessão e faz o servidor responder o desafio que ele mesmo mandou na primeira.',
-      feito: 'Se a resposta carrega quem respondeu (HMAC da chave sobre identidade e desafio), a resposta do servidor não serve como resposta do cliente. E se quem inicia prova primeiro, o atacante nem chega a receber um desafio para refletir.',
     }),
   ],
   aula: {
@@ -561,25 +551,40 @@ const dia124: Dia = {
       },
       {
         titulo: 'Dentro de um certificado X.509',
-        texto: ['Tudo que está acima da assinatura é assinado pela AC: mexeu num campo, a assinatura não confere.'],
+        texto: ['Tudo acima da assinatura é assinado pela AC: mexeu num campo, a assinatura não confere.'],
         visual: {
           tipo: 'tabela',
-          cabecalho: ['Campo', 'O que diz'],
+          cabecalho: ['Campo', 'No certificado do portal'],
           linhas: [
-            ['versão e número de série', 'qual certificado é este (a série é o que vai para a lista de revogados)'],
-            ['emissor', 'quem assinou: AC Intermediária Exemplo'],
-            ['validade', 'não antes de, não depois de'],
-            ['sujeito e nomes alternativos', PORTAL],
-            ['chave pública do sujeito', 'a chave que o certificado garante'],
-            ['extensões', 'pode ou não assinar outros certificados, para que serve'],
-            ['assinatura', 'da AC sobre todos os campos acima'],
+            ['versão', 'v3 (vale 2 no arquivo)'],
+            ['número de série', String(FOLHA.serie)],
+            ['algoritmo de assinatura', 'sha256WithRSAEncryption'],
+            ['emissor', FOLHA.emissor],
+            ['validade', `do dia ${FOLHA.validoDe} ao ${FOLHA.validoAte}`],
+            ['sujeito e SAN', PORTAL],
+            ['chave pública', 'RSA de 2048 bits, e = 65537'],
+            ['basicConstraints e keyUsage', 'CA:FALSE; assinatura digital'],
           ],
         },
       },
       {
         titulo: 'A cadeia até a âncora',
         texto: ['O navegador sobe elo por elo até uma raiz que já vem instalada. Se a raiz não é uma das âncoras, a cadeia não vale nada.'],
-        visual: { tipo: 'camadas', camadas: ['AC Raiz Exemplo: âncora de confiança no navegador', 'AC Intermediária Exemplo: assinada pela raiz', `${PORTAL}: assinado pela intermediária`], rotulo: 'PKI' },
+        visual: { tipo: 'camadas', camadas: [`${RAIZ.sujeito}: âncora no navegador, CA:TRUE, até o dia ${RAIZ.validoAte}`, `${INTER.sujeito}: assinada pela raiz, CA:TRUE, até o dia ${INTER.validoAte}`, `${PORTAL}: assinado pela intermediária, CA:FALSE`], rotulo: 'PKI' },
+      },
+      {
+        titulo: 'Revogar antes da hora',
+        texto: ['Três jeitos de saber se a AC desfez a assinatura, e um registro público para pegar quem emite errado.'],
+        visual: {
+          tipo: 'tabela',
+          cabecalho: ['Mecanismo', 'Como funciona', 'Custo'],
+          linhas: [
+            ['CRL', 'lista assinada de pares emissor e série, baixada inteira', 'lista grande, atualizada de tempos em tempos'],
+            ['OCSP (RFC 6960)', 'pergunta por uma série: bom, revogado ou desconhecido', 'uma consulta por visita, e a AC fica sabendo'],
+            ['grampeamento OCSP', 'o servidor entrega a resposta assinada no aperto de mão', 'nenhuma consulta do navegador'],
+            ['transparência (RFC 6962)', 'todo certificado emitido vai para registros públicos', 'o dono do domínio vigia'],
+          ],
+        },
       },
       {
         titulo: 'Os quatro avisos',
@@ -591,23 +596,7 @@ const dia124: Dia = {
             ['vencido', 'a validade', 'descuido na renovação, ou chave antiga reaproveitada'],
             ['autoassinado', 'a raiz não é âncora', 'alguém se passando pelo site'],
             ['de outro nome', 'o sujeito não bate com o endereço', 'certificado de outro site, ou desvio'],
-            ['revogado', 'a lista de revogados (CRL) ou a consulta (OCSP)', 'a chave privada vazou'],
-          ],
-        },
-      },
-      {
-        titulo: 'Kerberos em seis mensagens',
-        texto: ['A senha só abre a primeira resposta, na estação. Depois, os tíquetes fazem o trabalho.'],
-        visual: {
-          tipo: 'tabela',
-          cabecalho: ['Mensagem', 'De quem para quem', 'O que leva'],
-          linhas: [
-            ['AS-REQ', 'usuário para o servidor de autenticação', 'quem é (sem senha)'],
-            ['AS-REP', 'servidor de autenticação para o usuário', 'chave de sessão cifrada com a senha e o TGT'],
-            ['TGS-REQ', 'usuário para o servidor de tíquetes', 'TGT, serviço desejado e um autenticador'],
-            ['TGS-REP', 'servidor de tíquetes para o usuário', 'tíquete do serviço e nova chave de sessão'],
-            ['AP-REQ', 'usuário para o serviço', 'tíquete do serviço e autenticador'],
-            ['AP-REP', 'serviço para o usuário', 'a hora mais um: o serviço também prova quem é'],
+            ['revogado', 'a série está na CRL, ou o OCSP diz revogado', 'a chave privada vazou'],
           ],
         },
       },
@@ -621,20 +610,21 @@ const dia124: Dia = {
         'O servidor está fora do ar',
       ],
       certa: 0,
-      explicacao: 'Revogação é a AC desfazendo a própria assinatura antes da hora: o número de série entra na lista de revogados, ou a consulta online responde "revogado". Venceu e autoassinado são outros avisos, e servidor fora do ar nem chega ao certificado.',
+      explicacao: 'Revogação é a AC desfazendo a própria assinatura antes da hora: o par emissor e série entra na lista de revogados, ou a consulta OCSP responde "revogado". Venceu e autoassinado são outros avisos, e servidor fora do ar nem chega ao certificado.',
     },
   },
   desafio: {
     carta: [
       `A empresa que cuida do portal "consertou" o certificado três vezes esta noite, e cada vez o aviso mudou. Agora ${PORTAL} está com um certificado autoassinado, gerado às pressas no próprio servidor.`,
-      'O centro de operações quer cada problema visto e entendido no balcão, e o portal de volta com um certificado válido. E a supervisora quer confirmar que, no Kerberos, senha errada não abre nada e não passa pela rede.',
-      'Objetivo: ver o navegador parar com o certificado autoassinado, com o de outro nome e com o revogado; deixar o portal com o certificado válido e a página aberta; e um login Kerberos com senha errada recusado.',
+      'O centro de operações quer cada problema visto e entendido no balcão, e o portal de volta com um certificado válido, com a validade e o tamanho da cadeia anotados na ficha.',
+      'Objetivo: ver o navegador parar com o certificado autoassinado, com o de outro nome e com o revogado; deixar o portal com o certificado válido e a página aberta; e responder até que dia ele vale e quantos certificados a cadeia tem.',
     ],
     dicas: [
       'Alterne: no portal, "Ligar HTTPS" com cada tipo de certificado; no atendimento, abra a página segura depois de cada troca.',
       'O último certificado é o válido, e a página precisa abrir sem aviso.',
-      'No Kerberos, digite uma senha diferente da cadastrada.',
+      'A validade e os elos aparecem na saída da página aberta, ou em "Conferir uma cadeia de certificados" no atendimento.',
     ],
+    perguntas: d124D,
     montar: () => mundoPortal(8124, 'autoassinado'),
     objetivo: (m) => {
       const cfg = (m.equipamentos.get('portal')!.s.servicos as Registro | undefined)?.web?.https;
@@ -646,7 +636,7 @@ const dia124: Dia = {
         item('o navegador parou com o certificado de outro nome', paradasPor(m, 'nome')),
         item('o navegador parou com o certificado revogado', paradasPor(m, 'revogado')),
         item(`${PORTAL} com o certificado válido e a página segura aberta sem aviso`, aberto, `certificado ${cfg ?? 'nenhum'}${t ? `, último TLS ${t.ok ? 'válido' : 'com aviso'}` : ''}`),
-        item('login Kerberos com senha errada recusado', !!kerberosCom(m, false)),
+        ...todasRespondidas(m, d124D),
       ];
     },
     solucao: [
@@ -657,8 +647,8 @@ const dia124: Dia = {
       ['equip', 'atendimento', 'ap-navegar-https', { url: URL_PORTAL }],
       ['equip', 'portal', 'ap-servico-https', { tipo: 'valido' }],
       ['equip', 'atendimento', 'ap-navegar-https', { url: URL_PORTAL }],
-      ['equip', 'atendimento', 'sg-kerberos', { u: 'atendente', s: 'balcao2026', c: 'Balcao-2026!' }],
     ],
+    respostas: { '1': String(FOLHA.validoAte), '2': String(CADEIA_OK.length) },
   },
 };
 

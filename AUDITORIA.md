@@ -2,7 +2,7 @@
 
 Cada subseção do currículo de referência (8 capítulos) e o dia do jogo que a ensina. A ordem oficial dos dias está em `src/conteudo/curriculo.ts`.
 
-Legenda: **287 subseções**: 278 com dia pronto, 9 resumos de capítulo. 181 subseções dividem o dia com outras. Os atos 0 a 7 (capítulos 1 a 8) estão completos.
+Legenda: **287 subseções**: 278 com dia pronto, 9 resumos de capítulo. 177 subseções dividem o dia com outras (dias com três ou mais subseções). Os atos 0 a 7 (capítulos 1 a 8) estão completos.
 
 ## Correções feitas nesta auditoria
 
@@ -11,6 +11,7 @@ Legenda: **287 subseções**: 278 com dia pronto, 9 resumos de capítulo. 181 su
 - **PPP no último quilômetro** cobria só a 3.5.1. A 3.5.2 e 3.5.3 (o enlace do ADSL e do cabo) ganharam um dia próprio.
 - **Duas casas, um cabo** continua na 1.3.1 a 1.3.3: a aula ensina rede pessoal, local e doméstica, e a prática mostra o que define uma rede local (hosts que falam direto, sem roteador). Fica registrado que a prática adianta o endereçamento IP, aprofundado depois em 5.7.2.
 - Os dias de par trançado e de OTDR ensinam a seção e vão além dela com prática de campo (crimpagem, MDI-X, limite de 100 m, ruído, fusão). Isso é acréscimo, não troca de conteúdo.
+- Oito dias que juntavam de 6 a 8 subseções viraram dois cada: Bluetooth (4.5.1 a 4.5.4 e 4.5.5 a 4.5.7), TCP por dentro (6.5.1 a 6.5.3 e 6.5.4 a 6.5.6), Medir de verdade (6.7.1 a 6.7.4 e 6.7.5 a 6.7.8), Princípios da segurança (8.1) e Anatomia de um ataque (8.2), Segredos (8.4) e Chave simétrica (8.5), Chave pública (8.6) e Assinaturas e resumos (8.7), Certificados (8.8) e Autenticação (8.9), Correio seguro (8.11) e Web segura (8.12).
 
 ## Ainda falta
 
@@ -148,8 +149,8 @@ Legenda: **287 subseções**: 278 com dia pronto, 9 resumos de capítulo. 181 su
 | 4.3.7 | 66: De 100 mega a 100 giga | pronta e fiel, agrupada |
 | 4.3.8 | 66: De 100 mega a 100 giga | pronta e fiel, agrupada |
 | 4.3.9 | 66: De 100 mega a 100 giga | pronta e fiel, agrupada |
-| 4.4.1 | 67: Canal lotado | pronta e fiel, agrupada |
-| 4.4.2 | 67: Canal lotado | pronta e fiel, agrupada |
+| 4.4.1 | 67: Canal lotado | pronta e fiel |
+| 4.4.2 | 67: Canal lotado | pronta e fiel |
 | 4.4.3 | 68: Pedir a vez no ar | pronta e fiel |
 | 4.4.4 | 69: Associar e autenticar | pronta e fiel |
 | 4.4.5 | 69: Associar e autenticar | pronta e fiel |
@@ -157,188 +158,188 @@ Legenda: **287 subseções**: 278 com dia pronto, 9 resumos de capítulo. 181 su
 | 4.5.2 | 70: Bluetooth | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
 | 4.5.3 | 70: Bluetooth | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
 | 4.5.4 | 70: Bluetooth | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
-| 4.5.5 | 70: Bluetooth | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
-| 4.5.6 | 70: Bluetooth | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
-| 4.5.7 | 70: Bluetooth | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
-| 4.6.1 | 71: DOCSIS por dentro | pronta e fiel, agrupada |
-| 4.6.2 | 71: DOCSIS por dentro | pronta e fiel, agrupada |
-| 4.6.3 | 71: DOCSIS por dentro | pronta e fiel, agrupada |
-| 4.7.1 | 72: A ponte que aprende | pronta e fiel |
-| 4.7.2 | 72: A ponte que aprende | pronta e fiel |
-| 4.7.3 | 73: Matando o laço | pronta e fiel |
-| 4.7.4 | 74: Quem é de qual camada | pronta e fiel |
-| 4.7.5 | 75: VLANs | pronta e fiel |
+| 4.5.5 | 71: Bluetooth por dentro | pronta e fiel, agrupada |
+| 4.5.6 | 71: Bluetooth por dentro | pronta e fiel, agrupada |
+| 4.5.7 | 71: Bluetooth por dentro | pronta e fiel, agrupada |
+| 4.6.1 | 72: DOCSIS por dentro | pronta e fiel, agrupada |
+| 4.6.2 | 72: DOCSIS por dentro | pronta e fiel, agrupada |
+| 4.6.3 | 72: DOCSIS por dentro | pronta e fiel, agrupada |
+| 4.7.1 | 73: A ponte que aprende | pronta e fiel |
+| 4.7.2 | 73: A ponte que aprende | pronta e fiel |
+| 4.7.3 | 74: Matando o laço | pronta e fiel |
+| 4.7.4 | 75: Quem é de qual camada | pronta e fiel |
+| 4.7.5 | 76: VLANs | pronta e fiel |
 | 4.8 | (nenhum) | resumo |
 
 ## Capítulo 5
 
 | Subseção | Dia | Situação |
 |---|---|---|
-| 5.1.1 | 76: Armazena e repassa | pronta e fiel |
-| 5.1.2 | 76: Armazena e repassa | pronta e fiel |
-| 5.1.3 | 77: Datagrama ou circuito virtual | pronta e fiel, agrupada |
-| 5.1.4 | 77: Datagrama ou circuito virtual | pronta e fiel, agrupada |
-| 5.1.5 | 77: Datagrama ou circuito virtual | pronta e fiel, agrupada |
-| 5.2.1 | 78: O caminho mais curto | pronta e fiel |
-| 5.2.2 | 78: O caminho mais curto | pronta e fiel |
-| 5.2.3 | 79: Inundação | pronta e fiel |
-| 5.2.4 | 80: Contagem ao infinito | pronta e fiel |
-| 5.2.5 | 81: Estado de enlace | pronta e fiel |
-| 5.2.6 | 82: Roteamento hierárquico | pronta e fiel |
-| 5.2.7 | 83: Um para todos, um para alguns | pronta e fiel, agrupada |
-| 5.2.8 | 83: Um para todos, um para alguns | pronta e fiel, agrupada |
-| 5.2.9 | 83: Um para todos, um para alguns | pronta e fiel, agrupada |
-| 5.3.1 | 84: Congestionamento | pronta e fiel |
-| 5.3.2 | 84: Congestionamento | pronta e fiel |
-| 5.4.1 | 85: Filas e prioridades | pronta e fiel, agrupada |
-| 5.4.2 | 85: Filas e prioridades | pronta e fiel, agrupada |
-| 5.4.3 | 85: Filas e prioridades | pronta e fiel, agrupada |
-| 5.4.4 | 86: Serviços diferenciados | pronta e fiel |
-| 5.4.5 | 86: Serviços diferenciados | pronta e fiel |
-| 5.5.1 | 87: Redes diferentes, um túnel | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
-| 5.5.2 | 87: Redes diferentes, um túnel | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
-| 5.5.3 | 87: Redes diferentes, um túnel | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
-| 5.5.4 | 87: Redes diferentes, um túnel | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
-| 5.5.5 | 88: Fragmentação | pronta e fiel |
-| 5.5.6 | 88: Fragmentação | pronta e fiel |
-| 5.6.1 | 89: A rede programável | pronta e fiel, agrupada |
-| 5.6.2 | 89: A rede programável | pronta e fiel, agrupada |
-| 5.6.3 | 89: A rede programável | pronta e fiel, agrupada |
-| 5.6.4 | 89: A rede programável | pronta e fiel, agrupada |
-| 5.7.1 | 90: O cabeçalho IPv4 | pronta e fiel |
-| 5.7.2 | 91: Sub-redes; 92: NAT | pronta e fiel |
-| 5.7.3 | 93: IPv6 | pronta e fiel |
-| 5.7.4 | 94: ICMP, ARP e DHCP | pronta e fiel |
-| 5.7.5 | 95: MPLS | pronta e fiel |
-| 5.7.6 | 96: OSPF | pronta e fiel |
-| 5.7.7 | 97: BGP | pronta e fiel |
-| 5.7.8 | 98: Multicast | pronta e fiel |
-| 5.8.1 | 99: Política na camada de rede | pronta e fiel |
-| 5.8.2 | 99: Política na camada de rede | pronta e fiel |
+| 5.1.1 | 77: Armazena e repassa | pronta e fiel |
+| 5.1.2 | 77: Armazena e repassa | pronta e fiel |
+| 5.1.3 | 78: Datagrama ou circuito virtual | pronta e fiel, agrupada |
+| 5.1.4 | 78: Datagrama ou circuito virtual | pronta e fiel, agrupada |
+| 5.1.5 | 78: Datagrama ou circuito virtual | pronta e fiel, agrupada |
+| 5.2.1 | 79: O caminho mais curto | pronta e fiel |
+| 5.2.2 | 79: O caminho mais curto | pronta e fiel |
+| 5.2.3 | 80: Inundação | pronta e fiel |
+| 5.2.4 | 81: Contagem ao infinito | pronta e fiel |
+| 5.2.5 | 82: Estado de enlace | pronta e fiel |
+| 5.2.6 | 83: Roteamento hierárquico | pronta e fiel |
+| 5.2.7 | 84: Um para todos, um para alguns | pronta e fiel, agrupada |
+| 5.2.8 | 84: Um para todos, um para alguns | pronta e fiel, agrupada |
+| 5.2.9 | 84: Um para todos, um para alguns | pronta e fiel, agrupada |
+| 5.3.1 | 85: Congestionamento | pronta e fiel |
+| 5.3.2 | 85: Congestionamento | pronta e fiel |
+| 5.4.1 | 86: Filas e prioridades | pronta e fiel, agrupada |
+| 5.4.2 | 86: Filas e prioridades | pronta e fiel, agrupada |
+| 5.4.3 | 86: Filas e prioridades | pronta e fiel, agrupada |
+| 5.4.4 | 87: Serviços diferenciados | pronta e fiel |
+| 5.4.5 | 87: Serviços diferenciados | pronta e fiel |
+| 5.5.1 | 88: Redes diferentes, um túnel | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
+| 5.5.2 | 88: Redes diferentes, um túnel | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
+| 5.5.3 | 88: Redes diferentes, um túnel | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
+| 5.5.4 | 88: Redes diferentes, um túnel | pronta e fiel na aula; a prática usa uma aproximação no simulador, avisada no texto, agrupada |
+| 5.5.5 | 89: Fragmentação | pronta e fiel |
+| 5.5.6 | 89: Fragmentação | pronta e fiel |
+| 5.6.1 | 90: A rede programável | pronta e fiel, agrupada |
+| 5.6.2 | 90: A rede programável | pronta e fiel, agrupada |
+| 5.6.3 | 90: A rede programável | pronta e fiel, agrupada |
+| 5.6.4 | 90: A rede programável | pronta e fiel, agrupada |
+| 5.7.1 | 91: O cabeçalho IPv4 | pronta e fiel |
+| 5.7.2 | 92: Sub-redes; 93: NAT | pronta e fiel |
+| 5.7.3 | 94: IPv6 | pronta e fiel |
+| 5.7.4 | 95: ICMP, ARP e DHCP | pronta e fiel |
+| 5.7.5 | 96: MPLS | pronta e fiel |
+| 5.7.6 | 97: OSPF | pronta e fiel |
+| 5.7.7 | 98: BGP | pronta e fiel |
+| 5.7.8 | 99: Multicast | pronta e fiel |
+| 5.8.1 | 100: Política na camada de rede | pronta e fiel |
+| 5.8.2 | 100: Política na camada de rede | pronta e fiel |
 | 5.9 | (nenhum) | resumo |
 
 ## Capítulo 6
 
 | Subseção | Dia | Situação |
 |---|---|---|
-| 6.1.1 | 100: Soquetes | pronta e fiel, agrupada |
-| 6.1.2 | 100: Soquetes | pronta e fiel, agrupada |
-| 6.1.3 | 100: Soquetes | pronta e fiel, agrupada |
-| 6.1.4 | 100: Soquetes | pronta e fiel, agrupada |
-| 6.2.1 | 101: Aperto de mão | pronta e fiel, agrupada |
-| 6.2.2 | 101: Aperto de mão | pronta e fiel, agrupada |
-| 6.2.3 | 101: Aperto de mão | pronta e fiel, agrupada |
-| 6.2.4 | 102: Fluxo e falhas | pronta e fiel, agrupada |
-| 6.2.5 | 102: Fluxo e falhas | pronta e fiel, agrupada |
-| 6.2.6 | 102: Fluxo e falhas | pronta e fiel, agrupada |
-| 6.3.1 | 103: Dividir a banda com justiça | pronta e fiel, agrupada |
-| 6.3.2 | 103: Dividir a banda com justiça | pronta e fiel, agrupada |
-| 6.3.3 | 103: Dividir a banda com justiça | pronta e fiel, agrupada |
-| 6.4.1 | 104: UDP e tempo real | pronta e fiel, agrupada |
-| 6.4.2 | 104: UDP e tempo real | pronta e fiel, agrupada |
-| 6.4.3 | 104: UDP e tempo real | pronta e fiel, agrupada |
-| 6.5.1 | 105: TCP por dentro | pronta e fiel, agrupada |
-| 6.5.2 | 105: TCP por dentro | pronta e fiel, agrupada |
-| 6.5.3 | 105: TCP por dentro | pronta e fiel, agrupada |
-| 6.5.4 | 105: TCP por dentro | pronta e fiel, agrupada |
-| 6.5.5 | 105: TCP por dentro | pronta e fiel, agrupada |
-| 6.5.6 | 105: TCP por dentro | pronta e fiel, agrupada |
-| 6.5.7 | 106: Estados e janela do TCP | pronta e fiel |
-| 6.5.8 | 106: Estados e janela do TCP | pronta e fiel |
-| 6.5.9 | 107: Timers do TCP | pronta e fiel |
-| 6.5.10 | 108: Partida lenta e CUBIC | pronta e fiel |
-| 6.5.11 | 108: Partida lenta e CUBIC | pronta e fiel |
-| 6.6.1 | 109: QUIC e BBR | pronta e fiel, agrupada |
-| 6.6.2 | 109: QUIC e BBR | pronta e fiel, agrupada |
-| 6.6.3 | 109: QUIC e BBR | pronta e fiel, agrupada |
-| 6.7.1 | 110: Medir de verdade | pronta e fiel, agrupada |
-| 6.7.2 | 110: Medir de verdade | pronta e fiel, agrupada |
-| 6.7.3 | 110: Medir de verdade | pronta e fiel, agrupada |
-| 6.7.4 | 110: Medir de verdade | pronta e fiel, agrupada |
-| 6.7.5 | 110: Medir de verdade | pronta e fiel, agrupada |
-| 6.7.6 | 110: Medir de verdade | pronta e fiel, agrupada |
-| 6.7.7 | 110: Medir de verdade | pronta e fiel, agrupada |
-| 6.7.8 | 110: Medir de verdade | pronta e fiel, agrupada |
+| 6.1.1 | 101: Soquetes | pronta e fiel, agrupada |
+| 6.1.2 | 101: Soquetes | pronta e fiel, agrupada |
+| 6.1.3 | 101: Soquetes | pronta e fiel, agrupada |
+| 6.1.4 | 101: Soquetes | pronta e fiel, agrupada |
+| 6.2.1 | 102: Aperto de mão | pronta e fiel, agrupada |
+| 6.2.2 | 102: Aperto de mão | pronta e fiel, agrupada |
+| 6.2.3 | 102: Aperto de mão | pronta e fiel, agrupada |
+| 6.2.4 | 103: Fluxo e falhas | pronta e fiel, agrupada |
+| 6.2.5 | 103: Fluxo e falhas | pronta e fiel, agrupada |
+| 6.2.6 | 103: Fluxo e falhas | pronta e fiel, agrupada |
+| 6.3.1 | 104: Dividir a banda com justiça | pronta e fiel, agrupada |
+| 6.3.2 | 104: Dividir a banda com justiça | pronta e fiel, agrupada |
+| 6.3.3 | 104: Dividir a banda com justiça | pronta e fiel, agrupada |
+| 6.4.1 | 105: UDP e tempo real | pronta e fiel, agrupada |
+| 6.4.2 | 105: UDP e tempo real | pronta e fiel, agrupada |
+| 6.4.3 | 105: UDP e tempo real | pronta e fiel, agrupada |
+| 6.5.1 | 106: TCP por dentro | pronta e fiel, agrupada |
+| 6.5.2 | 106: TCP por dentro | pronta e fiel, agrupada |
+| 6.5.3 | 106: TCP por dentro | pronta e fiel, agrupada |
+| 6.5.4 | 107: Cabeçalho, abrir e fechar | pronta e fiel, agrupada |
+| 6.5.5 | 107: Cabeçalho, abrir e fechar | pronta e fiel, agrupada |
+| 6.5.6 | 107: Cabeçalho, abrir e fechar | pronta e fiel, agrupada |
+| 6.5.7 | 108: Estados e janela do TCP | pronta e fiel |
+| 6.5.8 | 108: Estados e janela do TCP | pronta e fiel |
+| 6.5.9 | 109: Timers do TCP | pronta e fiel |
+| 6.5.10 | 110: Partida lenta e CUBIC | pronta e fiel |
+| 6.5.11 | 110: Partida lenta e CUBIC | pronta e fiel |
+| 6.6.1 | 111: QUIC e BBR | pronta e fiel, agrupada |
+| 6.6.2 | 111: QUIC e BBR | pronta e fiel, agrupada |
+| 6.6.3 | 111: QUIC e BBR | pronta e fiel, agrupada |
+| 6.7.1 | 112: Medir de verdade | pronta e fiel, agrupada |
+| 6.7.2 | 112: Medir de verdade | pronta e fiel, agrupada |
+| 6.7.3 | 112: Medir de verdade | pronta e fiel, agrupada |
+| 6.7.4 | 112: Medir de verdade | pronta e fiel, agrupada |
+| 6.7.5 | 113: Redes rápidas | pronta e fiel, agrupada |
+| 6.7.6 | 113: Redes rápidas | pronta e fiel, agrupada |
+| 6.7.7 | 113: Redes rápidas | pronta e fiel, agrupada |
+| 6.7.8 | 113: Redes rápidas | pronta e fiel, agrupada |
 | 6.8 | (nenhum) | resumo |
 
 ## Capítulo 7
 
 | Subseção | Dia | Situação |
 |---|---|---|
-| 7.1.1 | 111: Nomes | pronta e fiel, agrupada |
-| 7.1.2 | 111: Nomes | pronta e fiel, agrupada |
-| 7.1.3 | 111: Nomes | pronta e fiel, agrupada |
-| 7.1.4 | 111: Nomes | pronta e fiel, agrupada |
-| 7.1.5 | 112: Resolver | pronta e fiel, agrupada |
-| 7.1.6 | 112: Resolver | pronta e fiel, agrupada |
-| 7.1.7 | 112: Resolver | pronta e fiel, agrupada |
-| 7.1.8 | 112: Resolver | pronta e fiel, agrupada |
-| 7.2.1 | 113: Correio | pronta e fiel, agrupada |
-| 7.2.2 | 113: Correio | pronta e fiel, agrupada |
-| 7.2.3 | 113: Correio | pronta e fiel, agrupada |
-| 7.2.4 | 113: Correio | pronta e fiel, agrupada |
-| 7.2.5 | 113: Correio | pronta e fiel, agrupada |
-| 7.3.1 | 114: A teia | pronta e fiel, agrupada |
-| 7.3.2 | 114: A teia | pronta e fiel, agrupada |
-| 7.3.3 | 114: A teia | pronta e fiel, agrupada |
-| 7.3.4 | 115: HTTP e HTTPS | pronta e fiel |
-| 7.3.5 | 115: HTTP e HTTPS | pronta e fiel |
-| 7.4.1 | 116: Ao vivo | pronta e fiel, agrupada |
-| 7.4.2 | 116: Ao vivo | pronta e fiel, agrupada |
-| 7.4.3 | 116: Ao vivo | pronta e fiel, agrupada |
-| 7.4.4 | 116: Ao vivo | pronta e fiel, agrupada |
-| 7.5.1 | 117: Perto de quem assiste | pronta e fiel, agrupada |
-| 7.5.2 | 117: Perto de quem assiste | pronta e fiel, agrupada |
-| 7.5.3 | 117: Perto de quem assiste | pronta e fiel, agrupada |
-| 7.5.4 | 118: De par em par | pronta e fiel; a DHT do simulador é o anel tipo Chord (sucessor, tabela de atalhos e busca em O(log N) saltos), com a distância XOR (tipo Kademlia) como variante escolhida no menu |
-| 7.5.5 | 118: De par em par | pronta e fiel; a DHT do simulador é o anel tipo Chord (sucessor, tabela de atalhos e busca em O(log N) saltos), com a distância XOR (tipo Kademlia) como variante escolhida no menu |
+| 7.1.1 | 114: Nomes | pronta e fiel, agrupada |
+| 7.1.2 | 114: Nomes | pronta e fiel, agrupada |
+| 7.1.3 | 114: Nomes | pronta e fiel, agrupada |
+| 7.1.4 | 114: Nomes | pronta e fiel, agrupada |
+| 7.1.5 | 115: Resolver | pronta e fiel, agrupada |
+| 7.1.6 | 115: Resolver | pronta e fiel, agrupada |
+| 7.1.7 | 115: Resolver | pronta e fiel, agrupada |
+| 7.1.8 | 115: Resolver | pronta e fiel, agrupada |
+| 7.2.1 | 116: Correio | pronta e fiel, agrupada |
+| 7.2.2 | 116: Correio | pronta e fiel, agrupada |
+| 7.2.3 | 116: Correio | pronta e fiel, agrupada |
+| 7.2.4 | 116: Correio | pronta e fiel, agrupada |
+| 7.2.5 | 116: Correio | pronta e fiel, agrupada |
+| 7.3.1 | 117: A teia | pronta e fiel, agrupada |
+| 7.3.2 | 117: A teia | pronta e fiel, agrupada |
+| 7.3.3 | 117: A teia | pronta e fiel, agrupada |
+| 7.3.4 | 118: HTTP e HTTPS | pronta e fiel |
+| 7.3.5 | 118: HTTP e HTTPS | pronta e fiel |
+| 7.4.1 | 119: Ao vivo | pronta e fiel, agrupada |
+| 7.4.2 | 119: Ao vivo | pronta e fiel, agrupada |
+| 7.4.3 | 119: Ao vivo | pronta e fiel, agrupada |
+| 7.4.4 | 119: Ao vivo | pronta e fiel, agrupada |
+| 7.5.1 | 120: Perto de quem assiste | pronta e fiel, agrupada |
+| 7.5.2 | 120: Perto de quem assiste | pronta e fiel, agrupada |
+| 7.5.3 | 120: Perto de quem assiste | pronta e fiel, agrupada |
+| 7.5.4 | 121: De par em par | pronta e fiel |
+| 7.5.5 | 121: De par em par | pronta e fiel |
 | 7.6 | (nenhum) | resumo |
 
 ## Capítulo 8
 
 | Subseção | Dia | Situação |
 |---|---|---|
-| 8.1.1 | 119: Anatomia de um ataque | pronta e fiel, agrupada |
-| 8.1.2 | 119: Anatomia de um ataque | pronta e fiel, agrupada |
-| 8.1.3 | 119: Anatomia de um ataque | pronta e fiel, agrupada |
-| 8.2.1 | 119: Anatomia de um ataque | pronta e fiel, agrupada |
-| 8.2.2 | 119: Anatomia de um ataque | pronta e fiel, agrupada |
-| 8.2.3 | 119: Anatomia de um ataque | pronta e fiel, agrupada |
-| 8.2.4 | 119: Anatomia de um ataque | pronta e fiel, agrupada |
-| 8.3.1 | 120: Firewall | pronta e fiel |
-| 8.3.2 | 120: Firewall | pronta e fiel |
-| 8.4.1 | 121: Segredos | pronta e fiel, agrupada |
-| 8.4.2 | 121: Segredos | pronta e fiel, agrupada |
-| 8.4.3 | 121: Segredos | pronta e fiel, agrupada |
-| 8.4.4 | 121: Segredos | pronta e fiel, agrupada |
-| 8.4.5 | 121: Segredos | pronta e fiel, agrupada |
-| 8.5.1 | 121: Segredos | pronta e fiel, agrupada |
-| 8.5.2 | 121: Segredos | pronta e fiel, agrupada |
-| 8.5.3 | 121: Segredos | pronta e fiel, agrupada |
-| 8.6.1 | 122: Chave pública e assinatura | pronta e fiel; a aula usa RSA pequeno (p = 61, q = 53) de propósito, e a assinatura da prática é RSA de 2048 bits com PKCS#1 v1.5 e SHA-256 (RFC 8017), agrupada |
-| 8.6.2 | 122: Chave pública e assinatura | pronta e fiel; a aula usa RSA pequeno (p = 61, q = 53) de propósito, e a assinatura da prática é RSA de 2048 bits com PKCS#1 v1.5 e SHA-256 (RFC 8017), agrupada |
-| 8.7.1 | 122: Chave pública e assinatura | pronta e fiel; a aula usa RSA pequeno (p = 61, q = 53) de propósito, e a assinatura da prática é RSA de 2048 bits com PKCS#1 v1.5 e SHA-256 (RFC 8017), agrupada |
-| 8.7.2 | 122: Chave pública e assinatura | pronta e fiel; a aula usa RSA pequeno (p = 61, q = 53) de propósito, e a assinatura da prática é RSA de 2048 bits com PKCS#1 v1.5 e SHA-256 (RFC 8017), agrupada |
-| 8.7.3 | 122: Chave pública e assinatura | pronta e fiel; a aula usa RSA pequeno (p = 61, q = 53) de propósito, e a assinatura da prática é RSA de 2048 bits com PKCS#1 v1.5 e SHA-256 (RFC 8017), agrupada |
-| 8.7.4 | 122: Chave pública e assinatura | pronta e fiel; a aula usa RSA pequeno (p = 61, q = 53) de propósito, e a assinatura da prática é RSA de 2048 bits com PKCS#1 v1.5 e SHA-256 (RFC 8017), agrupada |
-| 8.8.1 | 123: Certificados e autenticação | pronta e fiel; certificados com RSA de 2048 bits, e = 65537, assinados com PKCS#1 v1.5 e SHA-256; o Kerberos sela com AES-128-GCM (o de verdade usa AES-CTS com HMAC, RFC 3962), agrupada |
-| 8.8.2 | 123: Certificados e autenticação | pronta e fiel; certificados com RSA de 2048 bits, e = 65537, assinados com PKCS#1 v1.5 e SHA-256; o Kerberos sela com AES-128-GCM (o de verdade usa AES-CTS com HMAC, RFC 3962), agrupada |
-| 8.8.3 | 123: Certificados e autenticação | pronta e fiel; certificados com RSA de 2048 bits, e = 65537, assinados com PKCS#1 v1.5 e SHA-256; o Kerberos sela com AES-128-GCM (o de verdade usa AES-CTS com HMAC, RFC 3962), agrupada |
-| 8.9.1 | 123: Certificados e autenticação | pronta e fiel; certificados com RSA de 2048 bits, e = 65537, assinados com PKCS#1 v1.5 e SHA-256; o Diffie-Hellman da aula é pequeno (p = 23) de propósito, agrupada |
-| 8.9.2 | 123: Certificados e autenticação | pronta e fiel; certificados com RSA de 2048 bits, e = 65537, assinados com PKCS#1 v1.5 e SHA-256; o Diffie-Hellman da aula é pequeno (p = 23) de propósito, agrupada |
-| 8.9.3 | 123: Certificados e autenticação | pronta e fiel; certificados com RSA de 2048 bits, e = 65537, assinados com PKCS#1 v1.5 e SHA-256; o Diffie-Hellman da aula é pequeno (p = 23) de propósito, agrupada |
-| 8.9.4 | 123: Certificados e autenticação | pronta e fiel; certificados com RSA de 2048 bits, e = 65537, assinados com PKCS#1 v1.5 e SHA-256; o Diffie-Hellman da aula é pequeno (p = 23) de propósito, agrupada |
-| 8.9.5 | 123: Certificados e autenticação | pronta e fiel; certificados com RSA de 2048 bits, e = 65537, assinados com PKCS#1 v1.5 e SHA-256; o Diffie-Hellman da aula é pequeno (p = 23) de propósito, agrupada |
-| 8.10.1 | 124: VPN e Wi-Fi seguro | pronta e fiel; ESP com AES-128-GCM (RFC 4106) e chave do IKEv2 por X25519 (RFC 8031); WPA2 com PBKDF2 de 4096 iterações, PTK pelo PRF do 802.11i e quadros em CCMP (AES-CCM, RFC 3610); o SAE do WPA3 é narrado, sem a conta da curva, agrupada |
-| 8.10.2 | 124: VPN e Wi-Fi seguro | pronta e fiel; ESP com AES-128-GCM (RFC 4106) e chave do IKEv2 por X25519 (RFC 8031); WPA2 com PBKDF2 de 4096 iterações, PTK pelo PRF do 802.11i e quadros em CCMP (AES-CCM, RFC 3610); o SAE do WPA3 é narrado, sem a conta da curva, agrupada |
-| 8.10.3 | 124: VPN e Wi-Fi seguro | pronta e fiel; ESP com AES-128-GCM (RFC 4106) e chave do IKEv2 por X25519 (RFC 8031); WPA2 com PBKDF2 de 4096 iterações, PTK pelo PRF do 802.11i e quadros em CCMP (AES-CCM, RFC 3610); o SAE do WPA3 é narrado, sem a conta da curva, agrupada |
-| 8.11.1 | 125: Correio e web seguros | pronta e fiel; PGP com RSA de 2048 bits e AES-128-GCM, em pacote simplificado (não o formato binário da RFC 9580), agrupada |
-| 8.11.2 | 125: Correio e web seguros | pronta e fiel; PGP com RSA de 2048 bits e AES-128-GCM, em pacote simplificado (não o formato binário da RFC 9580), agrupada |
-| 8.12.1 | 125: Correio e web seguros | pronta e fiel; TLS 1.3 com X25519, escala de chaves do HKDF, CertificateVerify em RSA-PSS e registros em AES-128-GCM (RFC 8446); DNSSEC com RSA/SHA-256 de 2048 bits, uma chave por zona, agrupada |
-| 8.12.2 | 125: Correio e web seguros | pronta e fiel; TLS 1.3 com X25519, escala de chaves do HKDF, CertificateVerify em RSA-PSS e registros em AES-128-GCM (RFC 8446); DNSSEC com RSA/SHA-256 de 2048 bits, uma chave por zona, agrupada |
-| 8.12.3 | 125: Correio e web seguros | pronta e fiel; TLS 1.3 com X25519, escala de chaves do HKDF, CertificateVerify em RSA-PSS e registros em AES-128-GCM (RFC 8446); DNSSEC com RSA/SHA-256 de 2048 bits, uma chave por zona, agrupada |
-| 8.12.4 | 125: Correio e web seguros | pronta e fiel; TLS 1.3 com X25519, escala de chaves do HKDF, CertificateVerify em RSA-PSS e registros em AES-128-GCM (RFC 8446); DNSSEC com RSA/SHA-256 de 2048 bits, uma chave por zona, agrupada |
-| 8.13.1 | 126: O ponto de troca | pronta e fiel; a prática monta um circuito em cebola de verdade (três nós, chave X25519 com cada um, três camadas de AES-GCM, cada nó só vê o anterior e o próximo), além da corrente de túneis, agrupada |
-| 8.13.2 | 126: O ponto de troca | pronta e fiel; a prática monta um circuito em cebola de verdade (três nós, chave X25519 com cada um, três camadas de AES-GCM, cada nó só vê o anterior e o próximo), além da corrente de túneis, agrupada |
-| 8.13.3 | 126: O ponto de troca | pronta e fiel; a prática monta um circuito em cebola de verdade (três nós, chave X25519 com cada um, três camadas de AES-GCM, cada nó só vê o anterior e o próximo), além da corrente de túneis, agrupada |
+| 8.1.1 | 122: Princípios da segurança | pronta e fiel, agrupada |
+| 8.1.2 | 122: Princípios da segurança | pronta e fiel, agrupada |
+| 8.1.3 | 122: Princípios da segurança | pronta e fiel, agrupada |
+| 8.2.1 | 123: Anatomia de um ataque | pronta e fiel, agrupada |
+| 8.2.2 | 123: Anatomia de um ataque | pronta e fiel, agrupada |
+| 8.2.3 | 123: Anatomia de um ataque | pronta e fiel, agrupada |
+| 8.2.4 | 123: Anatomia de um ataque | pronta e fiel, agrupada |
+| 8.3.1 | 124: Firewall | pronta e fiel |
+| 8.3.2 | 124: Firewall | pronta e fiel |
+| 8.4.1 | 125: Segredos | pronta e fiel, agrupada |
+| 8.4.2 | 125: Segredos | pronta e fiel, agrupada |
+| 8.4.3 | 125: Segredos | pronta e fiel, agrupada |
+| 8.4.4 | 125: Segredos | pronta e fiel, agrupada |
+| 8.4.5 | 125: Segredos | pronta e fiel, agrupada |
+| 8.5.1 | 126: Chave simétrica | pronta e fiel, agrupada |
+| 8.5.2 | 126: Chave simétrica | pronta e fiel, agrupada |
+| 8.5.3 | 126: Chave simétrica | pronta e fiel, agrupada |
+| 8.6.1 | 127: Chave pública | pronta e fiel |
+| 8.6.2 | 127: Chave pública | pronta e fiel |
+| 8.7.1 | 128: Assinaturas e resumos | pronta e fiel, agrupada |
+| 8.7.2 | 128: Assinaturas e resumos | pronta e fiel, agrupada |
+| 8.7.3 | 128: Assinaturas e resumos | pronta e fiel, agrupada |
+| 8.7.4 | 128: Assinaturas e resumos | pronta e fiel, agrupada |
+| 8.8.1 | 129: Certificados | pronta e fiel, agrupada |
+| 8.8.2 | 129: Certificados | pronta e fiel, agrupada |
+| 8.8.3 | 129: Certificados | pronta e fiel, agrupada |
+| 8.9.1 | 130: Autenticação | pronta e fiel, agrupada |
+| 8.9.2 | 130: Autenticação | pronta e fiel, agrupada |
+| 8.9.3 | 130: Autenticação | pronta e fiel, agrupada |
+| 8.9.4 | 130: Autenticação | pronta e fiel, agrupada |
+| 8.9.5 | 130: Autenticação | pronta e fiel, agrupada |
+| 8.10.1 | 131: VPN e Wi-Fi seguro | pronta e fiel, agrupada |
+| 8.10.2 | 131: VPN e Wi-Fi seguro | pronta e fiel, agrupada |
+| 8.10.3 | 131: VPN e Wi-Fi seguro | pronta e fiel, agrupada |
+| 8.11.1 | 132: Correio seguro | pronta e fiel |
+| 8.11.2 | 132: Correio seguro | pronta e fiel |
+| 8.12.1 | 133: Web segura | pronta e fiel, agrupada |
+| 8.12.2 | 133: Web segura | pronta e fiel, agrupada |
+| 8.12.3 | 133: Web segura | pronta e fiel, agrupada |
+| 8.12.4 | 133: Web segura | pronta e fiel, agrupada |
+| 8.13.1 | 134: O ponto de troca | pronta e fiel, agrupada |
+| 8.13.2 | 134: O ponto de troca | pronta e fiel, agrupada |
+| 8.13.3 | 134: O ponto de troca | pronta e fiel, agrupada |
 | 8.14 | (nenhum) | resumo |

@@ -1,5 +1,5 @@
 // Dias do ato 7 (O Cerco), com prática guiada, aula e desafio no próprio dia.
-// Os dois últimos dias do jogo, no centro de operações: correio e web seguros (8.11 e 8.12) e as questões
+// Os dois últimos dias do jogo, no centro de operações: a web segura (8.12) e as questões
 // sociais da rede (8.13), na noite em que Fim de Linha vira ponto de troca de tráfego.
 
 import { adicionar, comutador, ligar, novoMundo, pc, roteador, type Mundo } from '../motor/mundo';
@@ -7,8 +7,8 @@ import { cacheDoResolvedor } from '../motor/cliAplicacao';
 import { refrescarVpns } from '../motor/roteamento';
 import { calcularBgp, type ConfigBgp } from '../motor/protocolos';
 import { lerCidr } from '../motor/util';
-import { SOBRA_ESP } from '../motor/filtro';
-import { item, registroPing, todasRespondidas } from './comum';
+import { historicoDe, SOBRA_ESP } from '../motor/filtro';
+import { item, numerica, registroPing, todasRespondidas } from './comum';
 import type { Dia, Passo, Pergunta } from './tipos';
 
 /* ---------- ajudantes ---------- */
@@ -25,21 +25,21 @@ function curta(id: string, texto: string, re: RegExp): Pergunta {
 }
 
 /* ======================================================================
- * ref 126: Correio e web seguros (8.11 e 8.12)
+ * ref 126: Web segura (8.12)
  * ====================================================================== */
 
 const LOJA = '203.0.113.10';
 const DNS_VELHO = '192.168.1.53';
 const DNS_NOVO = '192.168.1.54';
 const IP_FALSO = '198.51.100.66';
-const CONTATO = 'contato@loja.exemplo';
+const URL_LOJA = 'https://www.loja.exemplo/';
 
 /**
  * A rede da escola (192.168.1.0/24, switch sw): ana, bia, dns1 (o resolvedor antigo, com porta fixa e sem validar
  * DNSSEC), dns2 (o resolvedor novo, que vem sem as defesas ligadas), mxesc (correio da escola) e a bancada do laboratório (espiao, na porta p5).
  * r1 e r2 levam à rede pública 203.0.113.0/24, com a loja (DNS assinado e web), o correio da loja e caio.
  */
-function mundoCorreioWeb(o: { semente: number; desafio: boolean }): Mundo {
+function mundoWeb(o: { semente: number; desafio: boolean }): Mundo {
   const m = novoMundo(o.semente);
   m.flags.aplicacao = true;
   m.flags.seguranca = true;
@@ -83,26 +83,9 @@ function mundoCorreioWeb(o: { semente: number; desafio: boolean }): Mundo {
   s('correio').servicos = { correio: { dominio: 'loja.exemplo', caixas: ['contato'] } };
   for (const n of ['ana', 'bia', 'mxesc', 'espiao', 'loja', 'correio', 'caio']) s(n).dns = DNS_VELHO;
   if (o.desafio) s('ana').dns = DNS_NOVO;
-  // Quem recebe já tem par de chaves e publicou a pública.
-  s('caio').correio = { endereco: CONTATO, servidor: '203.0.113.25' };
-  s('caio').pgp = true;
-  if (!o.desafio) s('bia').correio = { endereco: 'bia@escola.exemplo', servidor: '192.168.1.25' };
   // A porta p5, da bancada, espelha o switch inteiro: é por ela que o laboratório olha o tráfego.
   if (!o.desafio) s('sw').espelho = 'p5';
   return m;
-}
-
-interface RegistroPgp {
-  de?: string;
-  para?: string;
-  assinada?: boolean;
-  cifrada?: boolean;
-  entregue?: boolean;
-}
-
-function cartaSegura(m: Mundo, de: string): boolean {
-  const p = (m.flags.pgp ?? {}) as RegistroPgp;
-  return p.de === de && p.para === CONTATO && !!p.assinada && !!p.cifrada && !!p.entregue;
 }
 
 /** O resolvedor guardou uma resposta forjada para o nome? */
@@ -150,36 +133,41 @@ function sandboxOk(m: Mundo, programa: string): boolean {
   return !!s && s.programa === programa && s.modo === 'sandbox' && (s.bloqueadas?.length ?? 0) > 0;
 }
 
+/** O AES-GCM rodou no equipamento, voltou intacto e recusou o cifrado e o dado adicional adulterados. */
+function gcmRecusou(m: Mundo): boolean {
+  return historicoDe(m, 'cripto').some((x) => x.op === 'gcm' && x.confere === true && x.adulteradaConfere === false && x.aadTrocadoConfere === false);
+}
+
 const d126D: Pergunta[] = [
-  curta('1', 'Na carta que você mandou, o que vai cifrado com a chave pública de quem recebe: o texto inteiro ou só a chave de sessão? (responda "texto" ou "chave")', /^(a\s+)?chave(\s+de\s+sess[aã]o)?$/i),
+  numerica('1', 'Quantos bits tem a etiqueta que o AES-GCM do TLS 1.3 confere em cada registro?', 128, 0),
+  numerica('2', 'Contra um resolvedor de porta fixa, quantos valores diferentes de identificador a resposta forjada precisa cobrir?', 65536, 0),
 ];
 
 const dia126: Dia = {
   numero: 126,
   ato: 7,
-  titulo: 'Correio e web seguros',
+  titulo: 'Web segura',
   chamado: [
     'CHAMADO #0126',
-    'A coordenação da escola manda as notas finais para a loja que imprime os boletins, e hoje cedo alguém da loja leu em voz alta, no balcão, uma nota que ainda nem tinha saído. O correio passa em claro por dois servidores e um provedor. Na mesma noite, o resolvedor antigo da escola começou a mandar gente para um endereço estranho quando digitam www.loja.exemplo.',
+    'Desde ontem à noite, quem digita www.loja.exemplo na escola às vezes cai num endereço estranho, com uma página igualzinha à da loja pedindo o login. O resolvedor antigo da escola (dns1) pergunta sempre da mesma porta e não confere assinatura nenhuma. E a secretaria quer instalar uma extensão "que deixa as páginas mais bonitas".',
     'O laboratório do centro de operações tem uma bancada na porta espelhada do switch da escola e um resolvedor novo (dns2), recém-instalado, ainda com as defesas desligadas.',
-    'Objetivo: mandar as notas assinadas e cifradas, ensaiar o envenenamento do resolvedor antigo, ligar as defesas do resolvedor novo (portas aleatórias e validação DNSSEC) e levar a secretaria para ele, abrir a loja por HTTPS e conferir o que a bancada enxerga, e testar a extensão suspeita numa sandbox.',
+    'Objetivo: ensaiar o envenenamento do resolvedor antigo, ligar as defesas do resolvedor novo (portas aleatórias e validação DNSSEC) e levar a secretaria para ele, abrir a loja por HTTPS e conferir o que a bancada enxerga, e testar a extensão suspeita numa sandbox.',
   ],
   manual: {
-    titulo: 'Correio e web seguros',
+    titulo: 'Nome, canal e código: a web segura',
     texto: [
-      'Correio comum é um cartão-postal: o SMTP leva o texto em claro, e cada servidor do caminho guarda uma cópia. Cifrar o enlace (STARTTLS) protege um trecho por vez, mas cada servidor ainda lê tudo. Segurança de verdade no correio é de ponta a ponta, e o PGP faz assim: calcula o resumo (hash) do texto e assina esse resumo com a chave privada de quem manda; junta texto e assinatura e comprime; sorteia uma chave de sessão aleatória e cifra tudo com ela, numa cifra simétrica rápida; cifra só a chave de sessão com a chave pública de quem recebe; e codifica o resultado em base64, porque o correio só leva texto. Quem recebe usa a chave privada para abrir a chave de sessão, decifra, e confere a assinatura com a chave pública de quem mandou.',
-      'De onde vem a chave pública certa? No PGP, cada pessoa tem um anel de chaves privadas (as suas) e um anel de chaves públicas (as dos outros), e a confiança é uma teia: você confere a impressão digital da chave de alguém pessoalmente ou confia porque alguém em quem você confia assinou aquela chave. No S/MIME a ideia de assinar e cifrar é a mesma, mas a chave pública vem dentro de um certificado X.509 emitido por uma autoridade certificadora, como na web.',
-      'Na web, as ameaças vão da desfiguração (trocar a página de alguém) ao roubo de dados (cartões, senhas, cadastros) e à negação de serviço. E começam antes da página: no nome. O DNS pergunta por UDP e aceita a primeira resposta cujo identificador de 16 bits (e porta) bata com a pergunta. Quem envenena o cache faz o resolvedor perguntar e despeja respostas forjadas antes da verdadeira; com a porta sempre a mesma, só há 65536 identificadores para adivinhar, e uma resposta certa fica no cache pelo TTL inteiro, mandando todo cliente para o endereço falso. Duas defesas: sortear a porta de origem de cada consulta (mais uns 16 bits para adivinhar) e o DNSSEC, em que a zona assina cada conjunto de registros (RRSIG) com a sua chave (DNSKEY), o resumo dessa chave fica na zona mãe (DS), e o resolvedor que valida joga fora o que não tem assinatura certa.',
-      'O TLS 1.3 é o que põe o S no HTTPS. No aperto de mão, o navegador manda o ClientHello com a sua metade de uma troca Diffie-Hellman e o nome do site no SNI, em claro; o servidor responde com a metade dele, e dali em diante tudo vai cifrado. O servidor mostra o certificado, o navegador sobe a cadeia até uma raiz confiável e confere que o servidor tem a chave privada daquele certificado; os dois derivam chaves de sessão do segredo combinado. Quem fareja vê os IPs, a porta 443, o SNI e o tamanho dos registros; não vê caminho, cookies nem conteúdo. Neste jogo a troca é X25519, o certificado tem chave RSA de 2048 bits, o servidor prova a posse dela com uma assinatura RSA-PSS, e os registros vão em AES-128-GCM, com o cabeçalho de cada registro protegido junto: quem mexe num byte no caminho faz a etiqueta não conferir, e o navegador derruba a conexão.',
+      'As ameaças à web vão da desfiguração (trocar a página de alguém) ao roubo de dados (cartões, senhas, cadastros), à negação de serviço e ao desvio de quem visita para um site falso. Cada uma ataca um elo diferente: o nome (o DNS manda você para o lugar errado), o canal (alguém lê ou muda o que passa), o servidor e o código que roda no seu navegador. Defender a web é defender os quatro.',
+      'O nome vem primeiro. O DNS pergunta por UDP, porta 53, e o resolvedor aceita a primeira resposta que bata com a pergunta: o mesmo nome, o identificador de 16 bits e a porta de origem. Quem envenena o cache faz o resolvedor perguntar e despeja respostas forjadas antes da verdadeira. Se a porta é sempre a mesma, só há 65536 identificadores para cobrir, e uma resposta certa fica no cache pelo TTL que o atacante escolher, mandando todo cliente para o endereço falso. Primeira defesa (RFC 5452): sortear a porta de origem de cada consulta entre as portas altas, mais uns 16 bits para adivinhar. Segunda e de verdade: o DNSSEC (RFC 4033 a 4035). A zona assina cada conjunto de registros (RRSIG) com a sua chave (DNSKEY, aqui RSA de 2048 bits com SHA-256, o algoritmo 8); o resumo da chave fica na zona mãe (DS), e assim a confiança sobe até a raiz. O resolvedor que valida joga fora o que não traz assinatura certa, acerte o atacante o identificador ou não. A zona precisa estar assinada (a ação "Assinar a zona") e o resolvedor precisa conferir ("Validar DNSSEC"): uma sem a outra não protege ninguém.',
+      'O canal é o TLS 1.3 (RFC 8446), o S do HTTPS. No aperto de mão, o navegador manda o ClientHello com a sua metade de uma troca X25519 e o nome do site no SNI, em claro; o servidor responde com a metade dele, e dali em diante tudo vai cifrado. O servidor manda o certificado (RSA de 2048 bits), prova que tem a chave privada assinando o aperto de mão com RSA-PSS, e os dois fecham com um Finished, um HMAC de tudo que trocaram. Os registros de dados vão em AES-128-GCM, com o cabeçalho de cada registro como dado adicional e uma etiqueta de 128 bits: quem troca um único bit no caminho faz a etiqueta não conferir, e o navegador derruba a conexão (alerta bad_record_mac). Quem fareja vê IPs, porta 443, o SNI e o tamanho dos registros; não vê caminho, cookies nem conteúdo. E mesmo com o nome desviado, o servidor falso não teria um certificado válido para www.loja.exemplo.',
       'O último perigo vem de dentro do navegador: código que você não escreveu. Toda página traz scripts que rodam na sua máquina, e uma extensão instalada pode ler e mudar todas as páginas que você abre. A defesa é a caixa de areia (sandbox): o código roda isolado, sem tocar em arquivos, em outras páginas ou na rede além do que foi liberado. Assinatura de código diz de quem o programa veio, não se ele é bom; a sandbox limita o estrago mesmo quando a confiança falha.',
     ],
   },
   dicas: [
-    'O PGP fica no PC bia: primeiro "Gerar chaves PGP", depois "Mandar e-mail assinado e cifrado" para contato@loja.exemplo. A chave pública de quem recebe já foi publicada.',
-    'O envenenamento sai da bancada espiao contra o resolvedor 192.168.1.53. A defesa mora no dns2: "Portas de origem aleatórias no resolvedor" e "Validar DNSSEC no resolvedor". Depois, na ana, "Escolher o resolvedor de DNS" com o 192.168.1.54.',
-    'Depois de abrir https://www.loja.exemplo/ na ana, "Farejar a rede" na espiao, e por fim "Rodar código não confiável" com a extensão, na sandbox.',
+    'O envenenamento sai da bancada espiao contra o resolvedor 192.168.1.53.',
+    'A defesa mora no dns2: "Portas de origem aleatórias no resolvedor" e "Validar DNSSEC no resolvedor". Depois, na ana, "Escolher o resolvedor de DNS" com o 192.168.1.54.',
+    `Depois de abrir ${URL_LOJA} na ana, "Farejar a rede" na espiao, e por fim "Rodar código não confiável" com a extensão, na sandbox.`,
   ],
-  montar: () => mundoCorreioWeb({ semente: 5126, desafio: false }),
+  montar: () => mundoWeb({ semente: 5126, desafio: false }),
   objetivo: (m) => {
     const forjado = cacheForjado(m, 'dns1');
     const t = tlsOk(m, 'ana');
@@ -187,43 +175,20 @@ const dia126: Dia = {
     const viu = !!f && f.de === 'espiao' && (f.cifrados ?? 0) > 0 && (f.segredos ?? []).length === 0;
     const dnsAna = m.equipamentos.get('ana')!.s.dns as string | undefined;
     return [
-      item('notas da bia para contato@loja.exemplo, assinadas e cifradas com PGP, entregues', cartaSegura(m, 'bia@escola.exemplo'), m.flags.pgp?.entregue ? 'entregue' : 'ainda não'),
       item('envenenamento ensaiado: o resolvedor antigo (dns1) guardou o endereço falso de www.loja.exemplo', !!forjado, forjado ? `dns1 manda www.loja.exemplo para ${forjado}` : 'cache limpo'),
       item('o resolvedor novo (dns2) com portas aleatórias e validação DNSSEC', defesasDns2(m), defesasTexto(m)),
       item('a secretaria (ana) usando o resolvedor novo, 192.168.1.54', dnsAna === DNS_NOVO, `resolvedor da ana: ${dnsAna ?? 'nenhum'}`),
-      item('ana abriu https://www.loja.exemplo/ com TLS 1.3 e certificado válido', !!t, t ? `SNI ${t.sni}, cadeia ${t.cadeia}` : 'ainda não'),
+      item(`ana abriu ${URL_LOJA} com TLS 1.3 e certificado válido`, !!t, t ? `SNI ${t.sni}, cadeia ${t.cadeia}` : 'ainda não'),
       item('a bancada farejou e só viu o HTTPS cifrado, sem segredo nenhum em claro', viu, f ? `${f.quadros ?? 0} quadros, ${f.cifrados ?? 0} cifrado(s), segredos: ${(f.segredos ?? []).length}` : 'ainda não farejou'),
       item('a extensão suspeita rodou na sandbox, com o que era perigoso negado', sandboxOk(m, 'extensao'), m.flags.sandbox ? `${m.flags.sandbox.programa} em modo ${m.flags.sandbox.modo}` : 'ainda não'),
     ];
   },
   posMorte: [
-    'A nota vazou porque correio comum é cartão-postal: as notas saíram em claro do PC da coordenação, passaram pelo servidor da escola, pelo provedor e ficaram guardadas no servidor da loja, onde qualquer um com acesso à caixa lia. Com o PGP, a bia assinou o resumo do texto com a chave privada dela, uma chave de sessão sorteada cifrou texto e assinatura, e só essa chave de sessão foi cifrada com a chave pública de contato@loja.exemplo. Na caixa do servidor ficou um bloco em base64 entre BEGIN e END. Os cabeçalhos De, Para e Assunto continuam em claro: o PGP esconde o conteúdo, não quem fala com quem.',
-    'O endereço estranho era o cache do resolvedor antigo. Ele pergunta sempre da mesma porta, então a resposta forjada só precisava acertar o identificador de 16 bits: com 100000 respostas, a chance foi de 78,3 %, e o endereço falso ficou guardado por 86400 s. O dns2 sorteia a porta de cada consulta (a chance cai para perto de zero) e confere as assinaturas DNSSEC da zona loja.exemplo, que já é assinada. E mesmo que o nome fosse desviado, o HTTPS ainda seguraria: o servidor falso não teria certificado válido para www.loja.exemplo.',
-    'O que a bancada viu na porta espelhada conta o resto da história: as consultas de DNS e o SMTP em claro, e da ana para a loja só um registro TLS com o SNI www.loja.exemplo e bytes ilegíveis. Já a extensão "que deixa as páginas mais bonitas" tentou ler tudo que se digita em todos os sites e mandar o histórico para fora; na sandbox, só conseguiu mudar as cores.',
+    'O endereço estranho era o cache do resolvedor antigo. Ele pergunta sempre da mesma porta, então a resposta forjada só precisava acertar o identificador de 16 bits: com 100000 respostas, a chance foi de 78,3 %, e o endereço falso ficou guardado por 86400 s. A zona loja.exemplo já era assinada, mas o dns1 não conferia. O dns2 sorteia a porta de cada consulta (a chance cai para perto de 0,002 %) e confere as assinaturas DNSSEC: resposta sem RRSIG que confira com a DNSKEY da zona vai para o lixo.',
+    'E mesmo que o nome fosse desviado, o HTTPS ainda seguraria: o servidor falso não teria certificado válido para www.loja.exemplo, e o navegador pararia antes de mandar o login. O que a bancada viu na porta espelhada conta o resto: as consultas de DNS em claro, com nome e resposta, e da ana para a loja só um registro TLS com o SNI www.loja.exemplo e bytes ilegíveis. Um bit trocado nesses bytes, e a etiqueta de 128 bits do AES-GCM não confere.',
+    'Já a extensão "que deixa as páginas mais bonitas" tentou ler tudo que se digita em todos os sites e mandar o histórico para fora; na sandbox, só conseguiu mudar as cores. A secretaria desistiu dela.',
   ],
   passos: [
-    passo({
-      alvo: ['equip', 'bia'],
-      acao: 'sg-pgp',
-      instrucao: 'No PC bia, gere o par de chaves PGP da coordenação.',
-      porque: 'Assinar pede a chave privada de quem manda; a pública vai para os outros conferirem a assinatura e cifrarem para você.',
-      conferir: (m) => (m.equipamentos.get('bia')!.s.pgp ? true : 'O par de chaves da bia ainda não existe.'),
-      feito: 'Par de chaves de bia@escola.exemplo criado, com um identificador curto da chave pública. A privada fica só no PC; a impressão digital se confere por outro canal, como um telefonema.',
-    }),
-    passo({
-      alvo: ['equip', 'bia'],
-      acao: 'sg-correio-seguro',
-      valores: { para: CONTATO, assunto: 'Notas finais', corpo: 'Notas finais do 9º ano: conferidas pela coordenação.' },
-      instrucao: 'Mande as notas para contato@loja.exemplo, assinadas e cifradas.',
-      porque: 'O PGP assina com a chave privada da bia e cifra para a chave pública da loja. Só quem tem a privada da loja abre.',
-      conferir: (m) => {
-        if (cartaSegura(m, 'bia@escola.exemplo')) return true;
-        const p = (m.flags.pgp ?? {}) as RegistroPgp;
-        if (p.para && p.para !== CONTATO) return `Foi para ${p.para}. As notas vão para contato@loja.exemplo, que publicou a chave pública.`;
-        return 'A carta segura ainda não foi entregue.';
-      },
-      feito: 'Resumo SHA-256 assinado, chave de sessão AES sorteada cifrando texto e assinatura, chave de sessão cifrada com a pública da loja, tudo em base64. No servidor da loja fica um bloco ilegível. As chaves RSA são de 2048 bits, a chave de sessão é AES-128, e o texto vai em AES-GCM: mexido no servidor, não abre.',
-    }),
     passo({
       alvo: ['equip', 'espiao'],
       acao: 'sg-envenenar-dns',
@@ -271,16 +236,16 @@ const dia126: Dia = {
     passo({
       alvo: ['equip', 'ana'],
       acao: 'ap-navegar-https',
-      valores: { url: 'https://www.loja.exemplo/' },
-      instrucao: 'Na ana, abra https://www.loja.exemplo/.',
-      porque: 'Veja o aperto de mão do TLS 1.3 por inteiro: a troca Diffie-Hellman, o SNI, a cadeia do certificado e a prova de que o servidor tem a chave privada.',
+      valores: { url: URL_LOJA },
+      instrucao: `Na ana, abra ${URL_LOJA}.`,
+      porque: 'Veja o aperto de mão do TLS 1.3 por inteiro: a troca X25519, o SNI, a cadeia do certificado, a prova de que o servidor tem a chave privada e o registro cifrado que não aceita adulteração.',
       conferir: (m) => {
         if (tlsOk(m, 'ana')) return true;
         const h = m.flags.http as { ok?: boolean; motivo?: string } | undefined;
         if (h?.motivo === 'dns' || h?.motivo === 'sem caminho') return 'O nome não levou à loja. A ana ainda está no resolvedor envenenado?';
         return 'A página segura ainda não abriu na ana.';
       },
-      feito: 'O certificado de www.loja.exemplo subiu até a AC Raiz Exemplo, que está no repositório do navegador; o servidor assinou o aperto de mão; os dois derivaram a chave de sessão. O pedido e a resposta, com o cookie, foram cifrados.',
+      feito: 'O certificado de www.loja.exemplo subiu até a AC Raiz Exemplo, que está no repositório do navegador; o servidor assinou o aperto de mão com RSA-PSS; o Finished bateu; os dois derivaram a chave de sessão. O pedido e a resposta, com o cookie, foram em AES-128-GCM, e o byte trocado de propósito no fio foi descartado pela etiqueta.',
     }),
     passo({
       alvo: ['equip', 'espiao'],
@@ -292,7 +257,7 @@ const dia126: Dia = {
         if (!f) return 'Ainda não farejou.';
         return (f.cifrados ?? 0) > 0 ? true : 'Nada cifrado apareceu. Abra a página segura na ana antes de farejar.';
       },
-      feito: 'Em claro: o diálogo SMTP entre a bia e o servidor da escola (o corpo, ali, já é o bloco do PGP) e as consultas de DNS, com nome perguntado e resposta. Da ana para a loja, só "TLS 1.3, SNI www.loja.exemplo" e bytes ilegíveis. Quem escuta sabe com que site você fala; não sabe o que você faz lá.',
+      feito: 'Em claro: as consultas de DNS, com nome perguntado e resposta. Da ana para a loja, só "TLS 1.3, SNI www.loja.exemplo" e bytes ilegíveis. Quem escuta sabe com que site você fala; não sabe o que você faz lá.',
     }),
     passo({
       alvo: ['equip', 'ana'],
@@ -313,39 +278,36 @@ const dia126: Dia = {
   aula: {
     cartoes: [
       {
-        titulo: 'O envelope do PGP',
-        texto: ['Assinar usa a chave de quem manda; cifrar usa a de quem recebe. A cifra pesada (de chave pública) só cifra a chave de sessão, que é pequena; o texto vai na simétrica, que é rápida. O PGP do jogo pula a compressão e usa um RSA de números pequenos.'],
-        visual: {
-          tipo: 'camadas',
-          camadas: ['base64: texto blindado entre BEGIN e END, porque o correio só leva texto', 'chave de sessão cifrada com a chave PÚBLICA de quem recebe', 'texto e assinatura comprimidos e cifrados com a chave de sessão (AES)', 'assinatura: resumo SHA-256 do texto, assinado com a chave PRIVADA de quem manda', 'o texto das notas'],
-          rotulo: 'de fora para dentro',
-        },
-      },
-      {
-        titulo: 'PGP ou S/MIME?',
-        texto: ['Os dois assinam e cifram o corpo do mesmo jeito. A diferença é de onde vem a confiança na chave pública.'],
+        titulo: 'Quatro elos para atacar',
+        texto: ['Cada ameaça à web mira um elo. A defesa de um não cobre o outro.'],
         visual: {
           tipo: 'tabela',
-          cabecalho: ['', 'PGP', 'S/MIME'],
+          cabecalho: ['Elo', 'Ataque', 'Defesa'],
           linhas: [
-            ['a chave pública vem', 'de quem você conhece, num anel de chaves', 'num certificado X.509'],
-            ['quem garante', 'a teia de confiança: pessoas assinam chaves de pessoas', 'uma autoridade certificadora'],
-            ['os cabeçalhos De, Para, Assunto', 'em claro', 'em claro'],
+            ['nome', 'envenenar o cache do DNS', 'portas aleatórias e DNSSEC validado'],
+            ['canal', 'ler ou mudar o que passa', 'TLS 1.3: certificado, X25519 e AES-GCM'],
+            ['servidor', 'desfigurar, roubar o cadastro, derrubar', 'atualização, firewall, cópia de segurança'],
+            ['código no navegador', 'extensão ou script que espiona', 'sandbox e permissões mínimas'],
           ],
         },
       },
       {
         titulo: 'Envenenar um cache',
-        texto: ['A resposta forjada precisa chegar antes da verdadeira e acertar o que a pergunta levou. Com 100000 tentativas: porta fixa, 78,3 % de chance; porta sorteada, perto de zero. E com DNSSEC validado, nem acertar adianta.'],
+        texto: ['A resposta forjada precisa chegar antes da verdadeira e acertar o que a pergunta levou. Com 100000 tentativas: porta fixa, 78,3 % de chance; porta sorteada, perto de 0,002 %. E com DNSSEC validado, nem acertar adianta.'],
         visual: {
           tipo: 'tabela',
           cabecalho: ['Resolvedor', 'O que o atacante adivinha', 'Resultado'],
           linhas: [
             ['porta fixa, sem validar', 'id de 16 bits (65536 valores)', 'envenenado por 86400 s'],
-            ['porta sorteada', 'id e porta (cerca de 32 bits)', 'nenhuma acerta'],
+            ['porta sorteada (RFC 5452)', 'id e uma de 64512 portas (cerca de 32 bits)', 'nenhuma acerta'],
             ['valida DNSSEC', 'teria de forjar a RRSIG da zona', 'resposta forjada descartada'],
           ],
         },
+      },
+      {
+        titulo: 'A corrente do DNSSEC',
+        texto: ['Cada zona assina os próprios registros e entrega à zona de cima o resumo da sua chave. O resolvedor sobe a corrente até a chave da raiz, que ele já conhece.'],
+        visual: { tipo: 'camadas', camadas: ['raiz: chave conhecida pelo resolvedor que valida', 'exemplo.: DS assinado pela raiz, com o resumo da DNSKEY da zona de baixo', 'loja.exemplo.: DNSKEY (RSA 2048, algoritmo 8), conferida pelo DS', 'www.loja.exemplo. A 203.0.113.10, com a RRSIG feita pela DNSKEY'], rotulo: 'de cima para baixo' },
       },
       {
         titulo: 'O que o farejador vê no TLS 1.3',
@@ -358,11 +320,16 @@ const dia126: Dia = {
             { id: 'srv', rotulo: 'www.loja.exemplo', x: 480, y: 140 },
           ],
           ligacoes: [
-            ['nav', 'srv', 'ClientHello (SNI e metade do DH, em claro)'],
-            ['srv', 'nav', 'ServerHello, certificado, assinatura, Finished (cifrados)'],
+            ['nav', 'srv', 'ClientHello (SNI e metade X25519, em claro)'],
+            ['srv', 'nav', 'ServerHello em claro; certificado, CertificateVerify e Finished cifrados'],
             ['nav', 'meio', 'só vê o envelope'],
           ],
         },
+      },
+      {
+        titulo: 'Um bit trocado, um registro a menos',
+        texto: ['O registro TLS 1.3 leva o cabeçalho em claro e o resto em AES-128-GCM. A etiqueta de 128 bits cobre o cifrado e o cabeçalho juntos.'],
+        visual: { tipo: 'bits', antes: '01001000 01101001 00110111', depois: '01001001 01101001 00110111', legenda: 'um bit trocado no cifrado: a etiqueta de 128 bits não confere, e o navegador descarta o registro e derruba a conexão (bad_record_mac)' },
       },
       {
         titulo: 'Código dos outros',
@@ -379,54 +346,52 @@ const dia126: Dia = {
       },
     ],
     checagem: {
-      pergunta: 'Num e-mail com PGP, por que o texto é cifrado com uma chave de sessão aleatória, e não direto com a chave pública de quem recebe?',
+      pergunta: 'O resolvedor sorteia a porta de origem, mas não valida DNSSEC. Ele está protegido contra envenenamento?',
       opcoes: [
-        'Porque a cifra de chave pública é lenta: ela só cifra a chave de sessão, pequena, e a cifra simétrica cuida do texto',
-        'Porque a chave pública de quem recebe é secreta',
-        'Porque a chave de sessão é a mesma para todos os e-mails, e assim o servidor consegue ler',
-        'Porque o base64 só funciona com chave simétrica',
+        'Só em parte: a chance de acertar id e porta fica pequena, mas com tentativas suficientes uma acerta e é aceita',
+        'Totalmente: com porta sorteada ninguém acerta nunca',
+        'Não faz diferença nenhuma sortear a porta',
+        'Sim, desde que a zona esteja assinada, mesmo sem validar',
       ],
       certa: 0,
-      explicacao: 'Cifra de chave pública custa caro por byte. O PGP sorteia uma chave de sessão nova a cada mensagem, cifra o texto com ela numa cifra simétrica rápida e usa a chave pública só para embrulhar essa chave. Quem recebe abre a chave de sessão com a privada e decifra o resto.',
+      explicacao: 'A porta sorteada junta uns 16 bits aos 16 do identificador e torna o ataque muito mais caro, mas é sorte, não prova. Só a validação DNSSEC recusa a resposta forjada que acertou tudo. E zona assinada não ajuda quem não confere a assinatura.',
     },
   },
   desafio: {
     carta: [
-      'Na manhã seguinte, a secretaria (ana) também precisa mandar documentos para a loja, mas nunca configurou o correio nem tem chaves. O resolvedor novo (dns2) foi reinstalado e voltou sem defesa nenhuma: nem portas aleatórias, nem validação DNSSEC. E o site da loja amanheceu com o certificado vencido.',
-      'O conserto das portas fica para a equipe do resolvedor. Antes, o laboratório quer provar que a validação, sozinha, já segura o envenenamento: ligue só ela.',
-      'Objetivo: a conta da ana no servidor da escola, uma carta assinada e cifrada para contato@loja.exemplo, a validação DNSSEC ligada no dns2 e o ensaio de envenenamento contra ele barrado pelo DNSSEC, a loja com certificado válido aberta por HTTPS na ana, o jogo "grátis" testado na sandbox e a pergunta respondida.',
+      'Na manhã seguinte, o resolvedor novo (dns2) foi reinstalado e voltou sem defesa nenhuma: nem portas aleatórias, nem validação DNSSEC. E o site da loja amanheceu com o certificado vencido.',
+      'O conserto das portas fica para a equipe do resolvedor. Antes, o laboratório quer provar que a validação, sozinha, já segura o envenenamento: ligue só ela. E quer ver, com as próprias mãos, a etiqueta do AES-GCM recusar um cifrado adulterado.',
+      'Objetivo: a validação DNSSEC ligada no dns2 e o ensaio de envenenamento contra ele barrado pelo DNSSEC, a loja com certificado válido aberta por HTTPS na ana, o AES-GCM recusando a adulteração, o jogo "grátis" testado na sandbox e as perguntas respondidas.',
     ],
     dicas: [
-      'A conta da ana é ana@escola.exemplo, no servidor 192.168.1.25. Depois, chaves PGP e o e-mail seguro, como fez a bia.',
-      'O certificado se troca no servidor loja, em "Ligar HTTPS". No dns2, "Validar DNSSEC no resolvedor" (as portas aleatórias, não: com elas a resposta forjada nem acerta, e o ensaio não prova nada). O ensaio sai da espiao contra o 192.168.1.54.',
-      'Na carta, a chave pública da loja embrulha só a chave de sessão.',
+      'No dns2, "Validar DNSSEC no resolvedor" (as portas aleatórias, não: com elas a resposta forjada nem acerta, e o ensaio não prova nada). O ensaio sai da espiao contra o 192.168.1.54.',
+      'O certificado se troca no servidor loja, em "Ligar HTTPS". Depois, abra a página segura na ana.',
+      '"AES-GCM: cifrar e adulterar" mostra a etiqueta e o que acontece quando um bit muda. O identificador do DNS tem 16 bits: 2 elevado a 16.',
     ],
     perguntas: d126D,
-    montar: () => mundoCorreioWeb({ semente: 6126, desafio: true }),
+    montar: () => mundoWeb({ semente: 6126, desafio: true }),
     objetivo: (m) => {
       const d = m.flags.dnssec as { rejeitada?: boolean; resolvedor?: string } | undefined;
       const barrado = !!d && d.rejeitada === true && d.resolvedor === 'dns2' && !cacheForjado(m, 'dns2');
       const t = tlsOk(m, 'ana');
       return [
-        item('carta da ana para contato@loja.exemplo, assinada e cifrada, entregue', cartaSegura(m, 'ana@escola.exemplo'), m.flags.pgp?.de ?? 'ainda não'),
         item('validação DNSSEC ligada no dns2', !!dnsDe(m, 'dns2')?.validar, defesasTexto(m)),
         item('envenenamento contra o dns2 acertou o id, mas foi descartado pelo DNSSEC', barrado, d ? `zona assinada: ${d.rejeitada ? 'forjada rejeitada' : 'nada rejeitado ainda'}` : 'ainda não ensaiado'),
-        item('ana abriu https://www.loja.exemplo/ com certificado válido', !!t && t.cadeia === 'valida', t ? `cadeia ${t.cadeia}` : (m.flags.tls as RegistroTls | undefined)?.cadeia ? `certificado ${(m.flags.tls as RegistroTls).cadeia}` : 'ainda não'),
+        item(`ana abriu ${URL_LOJA} com certificado válido`, !!t && t.cadeia === 'valida', t ? `cadeia ${t.cadeia}` : (m.flags.tls as RegistroTls | undefined)?.cadeia ? `certificado ${(m.flags.tls as RegistroTls).cadeia}` : 'ainda não'),
+        item('o AES-GCM recusou o cifrado e o dado adicional adulterados', gcmRecusou(m), gcmRecusou(m) ? 'etiqueta não conferiu' : 'ainda não'),
         item('o jogo "grátis" rodou na sandbox, com o perigoso negado', sandboxOk(m, 'jogo-gratis'), m.flags.sandbox ? `${m.flags.sandbox.programa} em modo ${m.flags.sandbox.modo}` : 'ainda não'),
         ...todasRespondidas(m, d126D),
       ];
     },
     solucao: [
-      ['equip', 'ana', 'ap-correio-conta', { end: 'ana@escola.exemplo', srv: '192.168.1.25' }],
-      ['equip', 'ana', 'sg-pgp'],
-      ['equip', 'ana', 'sg-correio-seguro', { para: CONTATO, assunto: 'Documentos', corpo: 'Seguem os documentos da secretaria.' }],
       ['equip', 'dns2', 'ap-servico-dns-validar', { v: 'on' }],
       ['equip', 'espiao', 'sg-envenenar-dns', { r: DNS_NOVO, nome: 'www.loja.exemplo', falso: IP_FALSO }],
       ['equip', 'loja', 'ap-servico-https', { tipo: 'valido' }],
-      ['equip', 'ana', 'ap-navegar-https', { url: 'https://www.loja.exemplo/' }],
+      ['equip', 'ana', 'ap-navegar-https', { url: URL_LOJA }],
+      ['equip', 'ana', 'sg-gcm', { t: 'Pedido 4412: 30 boletins' }],
       ['equip', 'ana', 'sg-sandbox', { p: 'jogo-gratis', modo: 'sandbox' }],
     ],
-    respostas: { '1': 'chave' },
+    respostas: { '1': '128', '2': '65536' },
   },
 };
 

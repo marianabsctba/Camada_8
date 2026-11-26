@@ -1,7 +1,9 @@
 // Dias do ato 7 (O Cerco), com prática guiada, aula e desafio no próprio dia.
-// O centro de operações, à noite: anatomia de um ataque (8.1 e 8.2), firewall e IDS (8.3) e
-// os primeiros segredos da criptografia (8.4 e 8.5). Os ataques rodam só no laboratório da cidade.
+// O centro de operações, à noite: anatomia de um ataque (8.2), firewall e IDS (8.3) e os segredos da
+// criptografia clássica (8.4). Os princípios (8.1) e a chave simétrica (8.5) estão em ato7d.ts, no mesmo
+// laboratório. Os ataques rodam só no laboratório da cidade.
 
+import { ordemDaChave, transposicao } from '../motor/cripto';
 import { avaliarFirewall, firewallDe, ultimoQue, type InfoPacote, type RegistroFlag } from '../motor/filtro';
 import { adicionar, comutador, ligar, novoMundo, pc, roteador, type Equipamento, type Mundo } from '../motor/mundo';
 import type { InundacaoSyn } from '../motor/transporte';
@@ -30,7 +32,7 @@ const PORTAL = '192.168.1.80';
  * e a bancada de testes. A borda liga a rede ao provedor por um enlace de 10 Mb/s; atrás do provedor, a rede
  * pública 203.0.113.0/24 com a loja (DNS e web de loja.exemplo) e uma máquina visitante.
  */
-function laboratorio(semente: number, o: { portal?: boolean } = {}): Mundo {
+export function laboratorio(semente: number, o: { portal?: boolean } = {}): Mundo {
   const m = novoMundo(semente);
   m.flags.aplicacao = true;
   m.flags.seguranca = true;
@@ -64,7 +66,7 @@ function laboratorio(semente: number, o: { portal?: boolean } = {}): Mundo {
   return m;
 }
 
-function equip(m: Mundo, nome: string): Equipamento {
+export function equip(m: Mundo, nome: string): Equipamento {
   return m.equipamentos.get(nome)!;
 }
 
@@ -94,7 +96,7 @@ function arpFixo(m: Mundo, nome: string, end: string): boolean {
 }
 
 /* ======================================================================
- * ref 120: Anatomia de um ataque (8.1 e 8.2)
+ * ref 120: Anatomia de um ataque (8.2)
  * ====================================================================== */
 
 const SENHA = 'Livro42';
@@ -119,18 +121,17 @@ const dia120: Dia = {
   titulo: 'Anatomia de um ataque',
   chamado: [
     'CHAMADO #0120',
-    'Primeira noite no centro de operações. Desde que a final passou ao vivo, Fim de Linha aparece no mapa, e alguém começou a bater na porta: o registro da borda mostra sondas em portas que ninguém usa, e o terminal da biblioteca teve uma senha trocada sem explicação.',
-    'Para defender, é preciso entender como se ataca. A prefeitura montou um laboratório isolado, com uma bancada de testes, para ensaiar o ataque inteiro sem tocar em ninguém de verdade.',
+    'Segunda noite no centro de operações. O portal já mostra para fora só o que precisa, mas o terminal da biblioteca teve uma senha trocada sem explicação, e ninguém de fora passou pela borda.',
+    'Para defender, é preciso entender como se ataca por dentro. A prefeitura montou um laboratório isolado, com uma bancada de testes, para ensaiar o ataque inteiro sem tocar em ninguém de verdade.',
     'Objetivo: varrer as portas da loja do laboratório a partir da bancada, ficar no meio do caminho da biblioteca com ARP falso e ler a senha dela no farejador, e depois fixar o ARP do gateway na biblioteca.',
   ],
   manual: {
-    titulo: 'Segurança: o que proteger e como se ataca',
+    titulo: 'Anatomia de um ataque: varrer, farejar, falsificar, derrubar',
     texto: [
-      'Segurança de rede começa com uma lista curta do que se quer garantir. Confidencialidade: só quem deve lê. Integridade: ninguém altera no caminho sem ser percebido. Disponibilidade: o serviço responde quando alguém precisa. Autenticação: quem fala é quem diz ser. Não repúdio: quem mandou não consegue negar depois. Quase todo ataque quebra um desses, e quase toda defesa protege um ou dois. Junto vêm os princípios de projeto: menor privilégio (cada um com o mínimo de acesso que precisa), padrão seguro (o que ninguém configurou fica fechado), mediação completa (todo acesso conferido, toda vez, não só no primeiro), economia de mecanismo (quanto mais simples, menos lugar para erro) e projeto aberto (a segurança não pode depender de ninguém saber como o sistema funciona, só da chave).',
-      'Um ataque costuma ter três fases. Reconhecimento: descobrir o que existe, que máquinas, que portas, que versões. Exploração: usar uma falha para entrar ou para atrapalhar. Persistência: ficar lá dentro, com uma porta dos fundos, para voltar quando quiser. A defesa pensa ao contrário, das ameaças às soluções: para cada ameaça, que princípio ela fere e que mecanismo segura. A varredura de portas é o reconhecimento clássico: mandar um SYN para cada porta e ver o que volta. SYN+ACK quer dizer aberta (alguém escuta; a bancada responde RST e a conexão nunca se completa, por isso o nome meio aberta). RST quer dizer fechada (a máquina existe, mas ninguém escuta ali). Silêncio quer dizer filtrada (um firewall jogou fora, ou a máquina nem existe). No UDP não há aperto de mão: manda-se um datagrama vazio, e só a mensagem ICMP de porta inalcançável diz que está fechada.',
-      'Farejar (sniffing) é ler o tráfego dos outros com a placa em modo promíscuo, aceitando todo quadro que chegar. Num hub, tudo chega a todos. Num switch, cada porta recebe só o que é dela, mais os broadcasts, a não ser que alguém configure uma porta espelhada (o switch manda cópia de tudo para lá, que é para o IDS e por isso fica trancada) ou que o atacante desvie o tráfego para si. O desvio mais simples é o ARP falso: o ARP não tem autenticação, então a bancada manda respostas ARP dizendo que o IP do gateway está no MAC dela. A vítima acredita, troca o cache e passa a entregar tudo à bancada, que copia e repassa ao gateway verdadeiro. A vítima não percebe nada: é o homem no meio. Bisbilhotar assim (snooping) só funciona contra o que vai em claro; contra TLS, o homem no meio vê, mas não lê.',
-      'Falsificar (spoofing) vai além do ARP. O IP não confere a origem: qualquer um monta um pacote com o endereço de outra pessoa, e a resposta vai para essa outra pessoa, nunca para quem mandou. Por isso o IP falso serve para esconder quem ataca, não para conversar. No roteamento entre redes, quem anuncia por BGP um prefixo que não é seu, ou um pedaço mais específico dele, puxa o tráfego daquele endereço para si (sequestro de BGP). No DNS, uma resposta forjada que acerta o identificador da consulta fica no cache do resolvedor, e a cidade inteira passa a ir ao endereço errado (DNS envenenado).',
-      'O último ingrediente é a interrupção, que ataca a disponibilidade. Na inundação de SYN, o atacante manda muitos SYN e nunca o ACK final: cada um vira uma conexão meio aberta que o servidor guarda por 63 s na fila, e a fila da loja tem 128 lugares. Com 1000 SYN por segundo, enche num piscar, e cliente de verdade não entra. A defesa são os SYN cookies: o servidor responde o SYN sem guardar nada, com o estado escondido no número de sequência, e só cria a conexão quando o ACK volta. Na negação de serviço distribuída (DDoS), milhares de máquinas zumbis, computadores de terceiros infectados sem que ninguém saiba, atacam ao mesmo tempo: aí não é só a fila, é o cano que enche. Com amplificação, o atacante manda pedidos pequenos com a origem falsificada para servidores que respondem muito mais, e a resposta grande cai na vítima. Contra volume, só o provedor, longe do servidor.',
+      'A noite anterior olhou o ataque de cima, em fases. Hoje é por dentro, com as quatro ferramentas que aparecem em quase todo incidente: explorar e varrer, farejar, falsificar e interromper. A varredura de portas é a sonda clássica. Na varredura SYN, quem varre manda o primeiro segmento do aperto de mão do TCP (RFC 9293) para cada porta e lê o que volta. SYN+ACK quer dizer aberta: alguém escuta, e quem varre responde RST em vez do ACK, então a conexão nunca se completa (por isso o nome meio aberta, e por isso muito programa nem registra a tentativa). RST quer dizer fechada: a máquina existe, mas ninguém escuta ali. Silêncio quer dizer filtrada: um firewall jogou fora, ou não há máquina naquele endereço. No UDP não há aperto de mão: manda-se um datagrama vazio, e só o ICMP de porta inalcançável diz que está fechada; o silêncio não separa aberta de filtrada. Depois de achar a porta, quem ataca pergunta a versão do programa que atende, e é aí que a varredura vira exploração: versão velha com falha conhecida é porta de entrada pronta. Fora do laboratório, varrer a rede dos outros sem autorização é crime.',
+      'Farejar (sniffing) é ler o tráfego dos outros com a placa em modo promíscuo, aceitando todo quadro que chegar, não só os endereçados a ela. Num hub, tudo chega a todos. Num switch, cada porta recebe só o que é dela, mais os broadcasts, a não ser que alguém configure uma porta espelhada (o switch manda cópia de tudo para lá; é para o IDS, e por isso fica trancada) ou que o atacante desvie o tráfego para si. O desvio mais simples é o ARP falso. O ARP (RFC 826) não tem autenticação nenhuma, e as máquinas aceitam até resposta que não pediram (o ARP gratuito). A bancada manda à biblioteca respostas dizendo que o IP do gateway está no MAC dela, e ao gateway respostas dizendo que o IP da biblioteca também está. Os dois caches mudam, e a bancada fica no meio, copiando e repassando. A vítima não percebe nada: é o homem no meio. Bisbilhotar assim (snooping) só rende contra o que vai em claro; contra TLS, o homem no meio vê os bytes, mas não lê.',
+      'Falsificar (spoofing) vai além do ARP. O IP não confere a origem: qualquer um monta um pacote com o endereço de outra pessoa, e a resposta vai para essa outra pessoa, nunca para quem mandou. Por isso o IP falso serve para esconder quem ataca e para refletir tráfego, não para conversar; num TCP às cegas, seria preciso adivinhar o número de sequência de 32 bits que o servidor sorteou. A defesa é o filtro de entrada no provedor (BCP 38): pacote que chega de um cliente com origem que não é do cliente vai para o lixo. No roteamento entre redes, quem anuncia por BGP um prefixo que não é seu, ou um pedaço mais específico dele, puxa o tráfego daquele endereço para si, porque o prefixo mais longo vence em todo roteador (sequestro de BGP); a defesa é filtrar o que cada cliente anuncia e conferir a origem com RPKI. No DNS, uma resposta forjada que chega antes da verdadeira e acerta o identificador de 16 bits da consulta fica no cache do resolvedor, e a cidade inteira passa a ir ao endereço errado (DNS envenenado); porta de origem aleatória (RFC 5452) faz o atacante acertar uns 32 bits em vez de 16, e o DNSSEC faz a resposta forjada não ter assinatura que confira.',
+      'O último ingrediente é a interrupção, que ataca a disponibilidade. Na inundação de SYN, o atacante manda muitos SYN e nunca o ACK final: cada um vira uma conexão meio aberta que o servidor guarda enquanto reenvia o SYN+ACK (1 + 2 + 4 + 8 + 16 + 32 = 63 s, com cinco reenvios), e a fila da loja tem 128 lugares. Com 1000 SYN por segundo, enche num piscar, e cliente de verdade não entra. A defesa são os SYN cookies (RFC 4987): quando a fila aperta, o servidor responde o SYN sem guardar nada, com o estado escondido no número de sequência inicial, e só cria a conexão quando o ACK volta com esse número mais um. Na negação de serviço distribuída (DDoS), milhares de máquinas zumbis, computadores de terceiros infectados sem que ninguém saiba, atacam ao mesmo tempo: aí não é só a fila, é o cano que enche, e o servidor não tem o que fazer. Na amplificação, o atacante manda pedidos pequenos com a origem falsificada, a da vítima, para servidores que respondem muito mais (dezenas de vezes num DNS aberto, centenas num NTP antigo), e a resposta grande cai na vítima. Contra volume, só o provedor, longe do servidor, e o BCP 38 em toda parte, que tira a matéria prima da amplificação.',
     ],
   },
   dicas: [
@@ -151,7 +152,7 @@ const dia120: Dia = {
     ];
   },
   posMorte: [
-    'O ensaio refez o roteiro de quem anda rondando a cidade. A varredura foi o reconhecimento: 1024 SYN, duas respostas SYN+ACK (53, o DNS, e 80, a web) e 1022 RST. Do lado de fora, isso é um mapa de por onde tentar entrar; do lado de dentro, é a lista do que precisa estar aberto e do que sobrou aberto por descuido.',
+    'O ensaio refez o roteiro de quem anda rondando a cidade. A varredura foi a sondagem: 1024 SYN, duas respostas SYN+ACK (53, o DNS, e 80, a web) e 1022 RST. Do lado de fora, isso é um mapa de por onde tentar entrar; do lado de dentro, é a lista do que precisa estar aberto e do que sobrou aberto por descuido.',
     'O ARP falso foi a exploração, e não precisou de falha nenhuma em programa: bastou o ARP acreditar em quem responde. A bancada disse à biblioteca que era o gateway e disse ao gateway que era a biblioteca, ficou no meio e repassou tudo. A página de login ia em HTTP, então a senha passou em claro diante do farejador, e a confidencialidade acabou ali. Com a entrada estática, a biblioteca deixa de acreditar em resposta ARP para o gateway. É trabalhoso manter em toda máquina, por isso a defesa de verdade junta várias camadas: inspeção de ARP no switch, e cifrar tudo que importa, porque o homem no meio que só vê bytes cifrados não leva nada.',
     'Faltou a persistência, de propósito: no laboratório não se instala porta dos fundos em ninguém. Mas é ela que o centro de operações vai caçar nas próximas noites, porque um atacante que entrou quer voltar sem precisar repetir o trabalho.',
   ],
@@ -161,7 +162,7 @@ const dia120: Dia = {
       acao: 'sg-varrer',
       valores: { ip: LOJA, portas: '1-1024' },
       instrucao: 'Na bancada, varra as portas TCP de 1 a 1024 da loja (203.0.113.10).',
-      porque: 'Reconhecimento: antes de atacar, quem ataca descobre o que escuta. Cada porta recebe um SYN, e a resposta diz o estado.',
+      porque: 'Varredura: antes de explorar, quem ataca descobre o que escuta. Cada porta recebe um SYN, e a resposta diz o estado.',
       conferir: (m) => (varredura(m) ? true : 'A varredura TCP da bancada até 203.0.113.10 ainda não foi feita.'),
       feito: 'SYN+ACK em 53 e 80: abertas. RST em todas as outras: fechadas, a máquina existe mas ninguém escuta. Nenhuma filtrada, porque não há firewall no caminho. Ainda.',
     }),
@@ -216,9 +217,9 @@ const dia120: Dia = {
         },
       },
       exemplo: { resposta: '0' },
-      instrucao: 'Que princípio de segurança a bancada quebrou ao ler a senha?',
-      porque: 'Dar nome ao que foi quebrado ajuda a escolher a defesa: cada princípio pede mecanismos diferentes.',
-      feito: 'Confidencialidade: alguém que não devia leu. A defesa que protege esse princípio é cifrar (HTTPS); a de hoje, fixar o ARP, tira a bancada do meio.',
+      instrucao: 'Que garantia de segurança a bancada quebrou ao ler a senha?',
+      porque: 'Dar nome ao que foi quebrado ajuda a escolher a defesa: cada garantia pede mecanismos diferentes.',
+      feito: 'Confidencialidade: alguém que não devia leu. A defesa que protege essa garantia é cifrar (HTTPS); a de hoje, fixar o ARP, tira a bancada do meio.',
     }),
     passo({
       alvo: ['equip', 'biblioteca'],
@@ -233,38 +234,8 @@ const dia120: Dia = {
   aula: {
     cartoes: [
       {
-        titulo: 'O que se protege',
-        texto: ['Cinco garantias. Quase todo ataque quebra uma delas, e cada defesa protege uma ou duas.'],
-        visual: {
-          tipo: 'tabela',
-          cabecalho: ['Princípio', 'Garante que', 'Quebrado quando'],
-          linhas: [
-            ['confidencialidade', 'só quem deve lê', 'alguém fareja a senha em claro'],
-            ['integridade', 'ninguém altera sem ser notado', 'o homem no meio troca a página'],
-            ['disponibilidade', 'o serviço responde', 'a inundação enche a fila'],
-            ['autenticação', 'quem fala é quem diz ser', 'o ARP acredita em qualquer um'],
-            ['não repúdio', 'quem mandou não nega', 'mensagem sem assinatura'],
-          ],
-        },
-      },
-      {
-        titulo: 'Princípios de projeto',
-        texto: ['Antes de qualquer mecanismo, um jeito de pensar: começar fechado, dar o mínimo, conferir sempre, manter simples e não contar com segredo de projeto.'],
-        visual: {
-          tipo: 'tabela',
-          cabecalho: ['Princípio', 'Na prática'],
-          linhas: [
-            ['menor privilégio', 'o terminal da biblioteca não administra nada'],
-            ['padrão seguro', 'o que ninguém liberou fica fechado'],
-            ['mediação completa', 'todo acesso é conferido, toda vez'],
-            ['economia de mecanismo', 'regra simples tem menos lugar para erro'],
-            ['projeto aberto', 'o segredo é a chave, não o funcionamento'],
-          ],
-        },
-      },
-      {
-        titulo: 'Reconhecimento: o que a porta responde',
-        texto: ['O ataque começa descobrindo, segue explorando e termina tentando ficar. A varredura é o primeiro passo: o tipo de resposta diz o estado da porta.'],
+        titulo: 'Varredura: o que a porta responde',
+        texto: ['A varredura pergunta a cada porta, e o tipo de resposta diz o estado. A versão do programa que atende é o passo seguinte, e é onde a varredura vira exploração.'],
         visual: {
           tipo: 'tabela',
           cabecalho: ['Estado', 'TCP (manda SYN)', 'UDP (manda datagrama vazio)'],
@@ -276,8 +247,22 @@ const dia120: Dia = {
         },
       },
       {
+        titulo: 'Quem fareja vê o quê',
+        texto: ['A placa em modo promíscuo aceita todo quadro que chega. O que chega depende do equipamento no meio, e de quem desviou o tráfego.'],
+        visual: {
+          tipo: 'tabela',
+          cabecalho: ['Onde a placa está', 'O que chega a ela', 'Defesa'],
+          linhas: [
+            ['porta de hub', 'tudo de todos', 'trocar o hub por switch'],
+            ['porta de switch', 'o que é dela e os broadcasts', 'já é a defesa'],
+            ['porta espelhada', 'cópia de tudo do switch', 'porta trancada, só para o IDS'],
+            ['switch, com ARP falso', 'o tráfego da vítima, desviado', 'ARP fixo, inspeção de ARP, cifrar'],
+          ],
+        },
+      },
+      {
         titulo: 'Homem no meio pelo ARP',
-        texto: ['O ARP não tem autenticação. A bancada diz para cada lado que é o outro e fica no meio, copiando e repassando. Falsificar também funciona com o IP de origem, com anúncios de BGP e com respostas de DNS.'],
+        texto: ['O ARP não tem autenticação. A bancada diz para cada lado que é o outro e fica no meio, copiando e repassando.'],
         visual: {
           tipo: 'diagrama',
           nos: [
@@ -289,6 +274,20 @@ const dia120: Dia = {
             ['bib', 'atk', '"o gateway sou eu"'],
             ['atk', 'gw', '"a biblioteca sou eu"'],
             ['bib', 'gw', 'caminho de antes'],
+          ],
+        },
+      },
+      {
+        titulo: 'Falsificar além do ARP',
+        texto: ['Toda camada que acredita no que ouve sem conferir pode ser enganada. A defesa é sempre conferir: na entrada, na origem do anúncio, na assinatura.'],
+        visual: {
+          tipo: 'tabela',
+          cabecalho: ['O que se falsifica', 'O que se ganha', 'Defesa'],
+          linhas: [
+            ['MAC no ARP', 'homem no meio na rede local', 'ARP fixo, inspeção de ARP no switch'],
+            ['IP de origem', 'esconder quem ataca, refletir tráfego', 'filtro de entrada no provedor (BCP 38)'],
+            ['anúncio de BGP', 'puxar o tráfego de um prefixo inteiro', 'filtrar o que o cliente anuncia, RPKI'],
+            ['resposta de DNS', 'a cidade inteira no endereço errado', 'porta aleatória (RFC 5452), DNSSEC'],
           ],
         },
       },
@@ -618,13 +617,24 @@ const dia121: Dia = {
 };
 
 /* ======================================================================
- * ref 122: Segredos (8.4 e 8.5)
+ * ref 122: Segredos (8.4)
  * ====================================================================== */
 
 /** Bilhete achado na bancada, cifrado com César de chave 7. */
 const BILHETE = 'V HAHJHUAL CVSAH XBHUKV H JPKHKL KVYTPY LUAHV KLPEL H WVYAH KVZ MBUKVZ MLJOHKH L VZ VSOVZ HILYAVZ';
 /** Nota antiga da equipe da represa, cifrada com César de chave 11. */
 const NOTA = 'L DPYSL OZ CLOTZ OL CPACPDL PDEL LYZELOL YZ NLOPCYZ LKFW OL DLWL OP XLBFTYLD APCEZ OL ULYPWL';
+
+/** Transposição por colunas da aula, calculada pelo motor. */
+const CHAVE_TRANSP = 'LINHA';
+const TRANSP = transposicao('A ESTRADA FECHA AS NOVE', CHAVE_TRANSP);
+const ORDEM_TRANSP = ordemDaChave(CHAVE_TRANSP);
+const GRADE_TRANSP = (() => {
+  const t = 'A ESTRADA FECHA AS NOVE'.replace(/\s+/g, '');
+  const linhas: string[][] = [];
+  for (let i = 0; i < t.length; i += CHAVE_TRANSP.length) linhas.push([...t.slice(i, i + CHAVE_TRANSP.length).padEnd(CHAVE_TRANSP.length, ' ')]);
+  return linhas;
+})();
 
 const ACENTOS = new RegExp('[' + String.fromCharCode(0x300) + '-' + String.fromCharCode(0x36f) + ']', 'g');
 const normal = (r: string) => r.normalize('NFD').replace(ACENTOS, '').trim().toUpperCase().replace(/\s+/g, ' ');
@@ -655,13 +665,13 @@ const dia122: Dia = {
     'Objetivo: cifrar uma frase com César, responder como fica a palavra NOVE, quebrar o bilhete pela frequência das letras e responder a chave.',
   ],
   manual: {
-    titulo: 'Criptografia: da cifra de César ao AES',
+    titulo: 'Criptografia clássica: de César à chave quântica',
     texto: [
       'Cifrar é transformar o texto claro em texto cifrado com um algoritmo e uma chave; decifrar é o caminho de volta, com a chave. O princípio de Kerckhoffs diz que o algoritmo deve ser público e só a chave secreta: algoritmo se descobre (alguém desmonta o aparelho, lê o programa, escuta o bastante), e um algoritmo que muita gente estudou e não quebrou vale mais que um escondido. Quem tenta ler sem a chave faz criptoanálise, e o que tem nas mãos define o jogo: só o texto cifrado (o mais difícil), texto claro conhecido (alguns pares de claro e cifrado, como o cabeçalho que toda mensagem tem) ou texto claro escolhido (consegue cifrar o que quiser e olhar o resultado). Uma boa cifra resiste aos três.',
-      'Dois princípios valem para qualquer sistema. Redundância: a mensagem precisa ter estrutura que permita notar que foi forjada, senão um intruso manda lixo aleatório e o receptor executa como se fosse ordem válida. Atualidade: a mensagem precisa provar que é recente, senão alguém grava uma ordem legítima e repete depois (ataque de repetição); por isso entram carimbo de tempo e números usados uma vez só.',
+      'Dois princípios valem para qualquer sistema cifrado. Redundância: a mensagem precisa ter estrutura que permita notar que foi forjada. Se toda sequência de bits decifra numa ordem válida (por exemplo, três bytes para o número de um pedido), um intruso manda lixo aleatório e o receptor executa como se fosse ordem de verdade; com campos de verificação (um resumo, um formato fixo), o lixo é recusado. O preço é que a redundância também ajuda quem ataca a reconhecer quando acertou a chave, por isso ela deve ser coisa sem padrão para adivinhar, como um resumo, e não uma fila de zeros. Atualidade: a mensagem precisa provar que é recente, senão alguém grava uma ordem legítima e a repete depois (ataque de repetição), e a ordem cifrada, intacta, passa em qualquer conferência. Por isso entram carimbo de tempo, com uma janela curta de validade, e números usados uma vez só (nonces) que o receptor lembra.',
       'As cifras mais antigas são de substituição. Na de César, cada letra anda a mesma quantidade de casas: com chave 3, A vira D e B vira E. São só 25 chaves, e tentar todas leva segundos. A substituição monoalfabética troca cada letra por outra qualquer, com 26! (perto de 4 × 10^26) tabelas possíveis, o que mata a força bruta. Mas cada letra clara vira sempre a mesma letra cifrada, então a frequência sobrevive: em português, A e E são as mais comuns, e a letra que mais aparece no cifrado provavelmente é uma delas. A análise de frequência quebra as duas, desde que haja texto suficiente; uma palavra curta engana a estatística. As cifras de transposição fazem o contrário: mantêm as letras e mudam a ordem. Na transposição por colunas, o texto é escrito em linhas sob uma palavra chave e lido coluna por coluna, na ordem alfabética das letras da chave. A frequência fica igual à do português, o que denuncia a transposição, e quem a quebra procura pares de letras comuns.',
-      'Existe uma cifra que não se quebra: a chave única (one-time pad). A chave é uma sequência aleatória do tamanho da mensagem, combinada bit a bit (com XOR) e usada uma vez só. Qualquer texto claro do mesmo tamanho é igualmente provável para quem só tem o cifrado, então não há o que analisar. É perfeita e impraticável: a chave tem o tamanho de tudo que se vai dizer, precisa chegar ao outro lado em segredo e não pode ser reutilizada nunca. A distribuição quântica de chaves ataca justamente a entrega: os bits vão em fótons polarizados, e medir um fóton na base errada o perturba, então quem escuta no meio deixa rastro e a chave é descartada.',
-      'Na prática, usam-se algoritmos de chave simétrica, com a mesma chave dos dois lados, cifrando blocos. O DES, padrão por mais de vinte anos, cifrava blocos de 64 bits em 16 rodadas com chave de 56 bits; morreu quando máquinas dedicadas passaram a testar todas as 2^56 chaves em poucos dias. O triplo DES aplica o DES três vezes (cifra, decifra, cifra), com segurança efetiva de 112 bits, e é lento. O AES, que o substituiu depois de um concurso aberto, cifra blocos de 128 bits com chave de 128, 192 ou 256 bits, em 10, 12 ou 14 rodadas de substituição, permutação e mistura com a chave. Falta decidir como cifrar mais de um bloco, o modo. O ECB cifra cada bloco sozinho: bloco claro igual, bloco cifrado igual, e uma imagem cifrada ainda mostra o contorno. O CBC mistura cada bloco claro com o cifrado anterior antes de cifrar, e o primeiro com um vetor de inicialização (IV) aleatório. O modo contador cifra um contador e combina o resultado com o texto, como uma cifra de fluxo: rápido e paralelo, mas se a mesma chave e o mesmo contador forem usados duas vezes, o XOR dos dois cifrados é o XOR dos dois textos claros, e a segurança vai embora junto.',
+      'Existe uma cifra que não se quebra: a chave única (one-time pad). A chave é uma sequência aleatória do tamanho da mensagem, combinada bit a bit (com XOR) e usada uma vez só. Para quem só tem o cifrado, qualquer texto claro do mesmo tamanho é igualmente provável: para cada um existe uma chave que o produziria, então não há estatística nem força bruta que ajude. É o único sigilo perfeito que se conhece, e é impraticável: a chave tem o tamanho de tudo que se vai dizer, precisa chegar ao outro lado em segredo, precisa ser aleatória de verdade (não saída de uma fórmula) e não pode ser reutilizada nunca. Reusar é o erro clássico: o XOR de dois cifrados com a mesma chave cancela a chave e deixa o XOR dos dois textos claros, que tem toda a redundância da língua.',
+      'A distribuição quântica de chaves ataca justamente o problema da entrega. No protocolo BB84, quem manda codifica cada bit num fóton polarizado, numa de duas bases sorteadas: a reta (0° e 90°) ou a diagonal (45° e 135°). Quem recebe mede cada fóton numa base também sorteada; quando acerta a base, lê o bit certo, e quando erra, lê um bit ao acaso. Depois, por um canal comum, os dois contam só quais bases usaram (nunca os bits), ficam com as posições em que coincidiram, cerca de metade, e jogam o resto fora. A física faz o resto: medir um fóton na base errada o perturba, e quem escuta no meio, sem saber as bases, erra em cerca de um quarto dos bits que sobram. Os dois sacrificam um pedaço da chave para comparar em público; se a taxa de erro passa do esperado, alguém escutou e a chave é descartada. O que sobra pode virar uma chave única. É distribuição de chave, não cifra, e na prática ainda pede fibra dedicada, distância curta e um jeito de saber que se fala com a pessoa certa.',
     ],
   },
   dicas: [
@@ -678,7 +688,7 @@ const dia122: Dia = {
   posMorte: [
     'A cifra de César protege tanto quanto um envelope transparente. A chave 3 levou A ESTRADA FECHA AS NOVE para D HVWUDGD IHFKD DV QRYH, e qualquer um que saiba que é César tenta as 25 chaves possíveis antes de terminar o café. O princípio de Kerckhoffs já condena de saída: o algoritmo é conhecido, e a chave cabe num dedo.',
     'O bilhete caiu sem força bruta, pela frequência: a letra que mais aparecia no cifrado era H, e H menos 7 casas é A, a letra mais comum do português. Para cada uma das 26 chaves, a análise mediu a distância entre a frequência das letras e a do português, e a chave 7 ficou muito à frente das outras. O texto dizia, sem cerimônia, que o atacante volta quando a cidade dormir. É texto suficiente que faz a estatística funcionar: só com NOVE, a mesma análise erraria.',
-    'Toda cifra que veio depois tenta apagar esse rastro. A transposição mantém as letras e embaralha a ordem; a chave única apaga tudo, mas pede uma chave do tamanho da mensagem; o AES mistura bloco a bloco em várias rodadas até nada do texto claro sobreviver, e o modo de operação cuida de que dois blocos iguais não virem dois cifrados iguais. A rede de Fim de Linha, daqui em diante, só vai confiar no que estiver cifrado com algoritmo público e chave bem guardada.',
+    'Toda cifra que veio depois tenta apagar esse rastro. A transposição mantém as letras e embaralha a ordem, e a frequência continua a do português; a chave única apaga tudo, mas pede uma chave aleatória do tamanho da mensagem, entregue em segredo e nunca reusada; a distribuição quântica resolve a entrega, deixando rastro de quem escuta, ao custo de fibra dedicada. O que a rede usa no dia a dia é o meio-termo da próxima noite: cifras simétricas que misturam o texto em muitas rodadas, com algoritmo público e uma chave curta bem guardada.',
   ],
   passos: [
     passo({
@@ -737,22 +747,22 @@ const dia122: Dia = {
     passo({
       escolha: {
         opcoes: [
-          'Porque no ECB blocos claros iguais viram blocos cifrados iguais',
-          'Porque o AES só usa chave de 56 bits',
-          'Porque o ECB não usa chave',
-          'Porque a imagem é grande demais para o AES',
+          'Porque medir um fóton na base errada o perturba, e quem escuta sem saber as bases erra em cerca de um quarto dos bits que sobram',
+          'Porque os fótons vão cifrados com AES',
+          'Porque os dois lados contam os bits um ao outro em público',
+          'Porque o fóton se apaga sozinho quando alguém olha',
         ],
         certa: 0,
         errada: {
-          1: '56 bits era a chave do DES. O AES usa 128, 192 ou 256 bits, e o problema aqui não é a chave, é o modo.',
-          2: 'O ECB usa a chave normalmente em cada bloco. O problema é cifrar cada bloco sozinho, sempre do mesmo jeito.',
-          3: 'O AES cifra mensagens de qualquer tamanho, bloco de 128 bits por bloco de 128 bits. O modo diz como juntar os blocos.',
+          1: 'No BB84 não há cifra nenhuma no fóton: o bit está na polarização. A proteção vem da física da medida, não de um algoritmo.',
+          2: 'Os dois contam em público só as bases que usaram, nunca os bits. Contar os bits entregaria a chave a quem escuta o canal comum.',
+          3: 'O fóton medido não some: ele sai do medidor polarizado na base que o medidor usou. É essa mudança que quem recebe depois percebe como erro.',
         },
       },
       exemplo: { resposta: '0' },
-      instrucao: 'Uma imagem cifrada com AES em modo ECB ainda mostra o contorno do desenho. Por quê?',
-      porque: 'Um bloco cifrado sozinho, com a mesma chave, sai sempre igual. A pergunta é o que acontece quando a mensagem tem muitos blocos parecidos.',
-      feito: 'Áreas de mesma cor viram blocos iguais, que viram cifrados iguais: o padrão vaza. O CBC mistura cada bloco com o cifrado anterior, começando por um IV aleatório, e o modo contador cifra um contador que nunca se repete.',
+      instrucao: 'Na distribuição quântica de chaves (BB84), por que quem escuta no meio é descoberto?',
+      porque: 'A chave única é perfeita, mas precisa chegar ao outro lado em segredo. O BB84 não impede que alguém escute; faz com que escutar deixe marca.',
+      feito: 'Quem escuta precisa medir, e mede na base errada metade das vezes, perturbando o fóton. Nas posições que sobram, isso aparece como cerca de 25 % de erro. Os dois comparam uma amostra em público e, com erro demais, descartam a chave.',
     }),
     passo({
       escolha: {
@@ -772,7 +782,7 @@ const dia122: Dia = {
       exemplo: { resposta: '0' },
       instrucao: 'Alguém usou a mesma chave única para cifrar duas mensagens. O que quem interceptou as duas ganha?',
       porque: 'Cifrar com chave única é fazer XOR do texto com a chave. Fazer XOR duas vezes com a mesma coisa desfaz.',
-      feito: 'O XOR dos dois cifrados cancela a chave e deixa o XOR dos dois textos claros, que tem toda a redundância da língua. O mesmo vale para o modo contador e qualquer cifra de fluxo: mesma chave e mesmo contador duas vezes é a chave única reusada.',
+      feito: 'O XOR dos dois cifrados cancela a chave e deixa o XOR dos dois textos claros, que tem toda a redundância da língua. É por isso que a chave única exige as quatro condições ao mesmo tempo: aleatória, do tamanho da mensagem, secreta e usada uma vez só.',
     }),
   ],
   aula: {
@@ -805,30 +815,41 @@ const dia122: Dia = {
         },
       },
       {
-        titulo: 'DES, triplo DES e AES',
-        texto: ['Cifras de bloco simétricas: a mesma chave cifra e decifra, em rodadas que misturam, trocam e somam a chave.'],
+        titulo: 'Transposição por colunas, de verdade',
+        texto: [`A frase A ESTRADA FECHA AS NOVE escrita em linhas sob a chave ${CHAVE_TRANSP}, e lida coluna por coluna na ordem alfabética das letras da chave (o número entre parênteses). Resultado: ${TRANSP.resultado}. As letras são as mesmas; só o lugar mudou.`],
         visual: {
           tipo: 'tabela',
-          cabecalho: ['Algoritmo', 'Bloco', 'Chave', 'Rodadas'],
+          cabecalho: [...CHAVE_TRANSP].map((c, i) => `${c} (${ORDEM_TRANSP.indexOf(i) + 1})`),
+          linhas: GRADE_TRANSP,
+        },
+      },
+      {
+        titulo: 'Redundância e atualidade',
+        texto: ['Dois princípios para qualquer sistema cifrado: dar um jeito de perceber o falso, e um jeito de perceber o velho.'],
+        visual: {
+          tipo: 'tabela',
+          cabecalho: ['Princípio', 'Sem ele', 'Com ele'],
           linhas: [
-            ['DES', '64 bits', '56 bits (caiu por força bruta)', '16'],
-            ['triplo DES', '64 bits', '112 bits efetivos', '3 × 16'],
-            ['AES-128', '128 bits', '128 bits', '10'],
-            ['AES-192', '128 bits', '192 bits', '12'],
-            ['AES-256', '128 bits', '256 bits', '14'],
+            ['redundância', 'lixo aleatório decifra numa ordem válida', 'um resumo ou formato fixo recusa o lixo'],
+            ['atualidade', 'a ordem gravada ontem é repetida hoje', 'carimbo de tempo e número usado uma vez só'],
           ],
         },
       },
       {
-        titulo: 'Modos: como juntar os blocos',
-        texto: ['O algoritmo cifra um bloco; o modo decide o que fazer com uma mensagem de muitos blocos.'],
+        titulo: 'BB84 em oito fótons',
+        texto: ['Quem manda sorteia o bit e a base; quem recebe sorteia a base. Depois, só as bases são contadas em público, e ficam as posições em que coincidiram. A chave deste exemplo: 1100.'],
         visual: {
           tipo: 'tabela',
-          cabecalho: ['Modo', 'Como funciona', 'Cuidado'],
+          cabecalho: ['Fóton', 'Bit', 'Base e polarização', 'Base de quem recebe', 'Lido', 'Fica?'],
           linhas: [
-            ['ECB', 'cada bloco sozinho', 'bloco igual, cifrado igual: vaza o padrão'],
-            ['CBC', 'bloco XOR cifrado anterior, começando pelo IV', 'IV previsível ajuda quem ataca'],
-            ['contador', 'cifra um contador e faz XOR com o texto', 'nunca repetir chave e contador'],
+            ['1', '1', 'reta, 90°', 'reta', '1', 'sim'],
+            ['2', '0', 'diagonal, 45°', 'reta', '1 (ao acaso)', 'não'],
+            ['3', '1', 'diagonal, 135°', 'diagonal', '1', 'sim'],
+            ['4', '1', 'reta, 90°', 'diagonal', '0 (ao acaso)', 'não'],
+            ['5', '0', 'reta, 0°', 'reta', '0', 'sim'],
+            ['6', '0', 'diagonal, 45°', 'diagonal', '0', 'sim'],
+            ['7', '1', 'reta, 90°', 'diagonal', '1 (ao acaso)', 'não'],
+            ['8', '0', 'diagonal, 45°', 'reta', '0 (ao acaso)', 'não'],
           ],
         },
       },

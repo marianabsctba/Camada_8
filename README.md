@@ -8,7 +8,7 @@ Você está sozinha, ou sozinho, com um alicate, um rack e uma cidade inteira qu
 
 ## Estado
 
-Modo guiado: cada dia é uma sequência de passos curtos. O jogo diz em uma frase o que fazer e por quê, uma seta laranja marca o objeto certo na sala em 3D, e o E faz o passo. Nas escolhas (cores do cabo, transceptor, canal), o erro vem explicado. O jogo está completo: os oito atos, do prólogo ao ponto de troca, com 126 dias que passam por todo o currículo, da camada física à segurança. Cada camada tem o seu motor de simulação, e o terminal e o menu de ações mostram o que acontece de verdade em cada pacote. O documento de desenho está em [DESENHO.md](DESENHO.md), e a auditoria de cobertura, subseção por subseção, em [AUDITORIA.md](AUDITORIA.md).
+Modo guiado: cada dia é uma sequência de passos curtos. O jogo diz em uma frase o que fazer e por quê, uma seta laranja marca o objeto certo na sala em 3D, e o E faz o passo. Nas escolhas (cores do cabo, transceptor, canal), o erro vem explicado. O jogo está completo: os oito atos, do prólogo ao ponto de troca, com 134 dias que passam por todo o currículo, da camada física à segurança. Cada camada tem o seu motor de simulação, e o terminal e o menu de ações mostram o que acontece de verdade em cada pacote. O documento de desenho está em [DESENHO.md](DESENHO.md), e a auditoria de cobertura, subseção por subseção, em [AUDITORIA.md](AUDITORIA.md).
 
 ## Rodar
 

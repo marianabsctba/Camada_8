@@ -234,4 +234,4 @@ Cada linha é uma seção (ou um grupo de subseções pequenas) e o dia em que e
 3. **Completar os atos 0, 1 e 2** com os dias que faltam no mapa de cobertura.
 4. **Atos 3 a 7**, um de cada vez, cada um publicado quando ficar pronto.
 
-Situação: os quatro passos estão feitos: o prólogo e os 126 dias escritos, e um lugar 3D próprio por ato (src/tres/lugares.ts).
+Situação: os quatro passos estão feitos: o prólogo e os 134 dias escritos, e um lugar 3D próprio por ato (src/tres/lugares.ts).
