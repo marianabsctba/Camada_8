@@ -608,7 +608,7 @@ interface NoLinha {
 
 /**
  * Uma linha de roteadores, cada um ligado ao seguinte por um /30, alguns com uma LAN e um PC.
- * "rip" diz quem já vem com o RIP ligado; "convergir" já roda as rodadas até as tabelas pararem.
+ * "rip" diz quem já vem com o RIP ligado; "convergir" já anda o relógio do RIP até a rede ficar quieta.
  */
 function linha(semente: number, rede: number, nos: NoLinha[], o: { rip: string[]; convergir?: boolean }): Mundo {
   const m = novoMundo(semente);
@@ -623,7 +623,11 @@ function linha(semente: number, rede: number, nos: NoLinha[], o: { rip: string[]
   for (const n of nos) if (n.lan) ifs[n.nome]!.lan = `10.${rede}.${n.lan[1]}.1/24`;
   for (const n of nos) {
     adicionar(m, roteador(n.nome, { modelo: 'Roteador Anel 6 (anel leste)', interfaces: ifs[n.nome] }));
-    if (o.rip.includes(n.nome)) configRip(m.equipamentos.get(n.nome)!).ligado = true;
+    const rip = configRip(m.equipamentos.get(n.nome)!);
+    if (o.rip.includes(n.nome)) rip.ligado = true;
+    // Laboratório: sem atualização disparada, cada notícia anda só na periódica, de 30 em 30 s, e a contagem
+    // ao infinito aparece passo a passo. Com elas ligadas, ela só acontece quando uma periódica cruza a disparada.
+    rip.disparadas = false;
   }
   let c = 1;
   for (const n of nos) {
@@ -671,31 +675,31 @@ const dia81: Dia = {
     titulo: 'Vetor de distância',
     texto: [
       'No roteamento por vetor de distância, ninguém tem o mapa da rede. Cada roteador guarda uma tabela com uma linha por destino: a distância que acredita ter e o vizinho por onde se chega. De tempos em tempos, manda essa tabela inteira, o vetor, a cada vizinho. Quem recebe soma a distância até aquele vizinho e fica, para cada destino, com o menor resultado. É o algoritmo de Bellman-Ford feito em pedaços, cada roteador fazendo a sua parte só com o que ouve dos vizinhos.',
-      'O RIP é o exemplo clássico: a métrica é o número de saltos, e a rede que o roteador tem numa porta vale 0. Rodada a rodada, as notícias se espalham, e quando uma rodada passa sem ninguém mudar nada, a rede convergiu. Boa notícia corre: uma rede nova anda um salto por rodada, e numa fila de n roteadores todo mundo sabe de tudo em n menos 1 rodadas.',
-      'Má notícia anda devagar. Quando um trecho cai, o roteador que perdeu a rota ouve do vizinho "eu chego lá com 2" e acredita, sem saber que o caminho do vizinho passava por ele mesmo. Fica com 3. O vizinho ouve 3 e vai para 4. Os dois se enganam um ao outro, subindo de dois em dois, até chegar ao número que o protocolo chama de infinito. É a contagem ao infinito. Por isso o infinito do RIP é 16, pequeno de propósito: a mentira acaba logo, e a rede nunca pode ter mais que 15 saltos.',
+      'O RIP é o exemplo clássico: a métrica é o número de saltos, e a rede que o roteador tem numa porta vale 0. A cada 30 segundos, com alguns segundos de variação sorteada para os roteadores não falarem todos juntos, cada um manda a tabela inteira aos vizinhos. Ao ligar, ele pede a tabela dos vizinhos, que respondem na hora. Boa notícia corre: uma rede nova anda um salto por atualização, e quando nenhuma atualização muda mais nada, a rede convergiu.',
+      'Má notícia anda devagar. O RIP não fica sabendo que um cabo caiu: a rota aprendida só morre quando passa 180 segundos sem ser renovada. Aí ela vai a 16, o infinito do RIP, e ainda fica 120 segundos sendo anunciada assim, para todos saberem que acabou, até a coleta de lixo apagá-la. Pior: enquanto isso, o roteador que perdeu a rota pode ouvir do vizinho "eu chego lá com 2" e acreditar, sem saber que o caminho do vizinho passava por ele mesmo. Fica com 3. O vizinho ouve 3 e vai para 4. Os dois se enganam um ao outro, subindo de dois em dois, até chegar a 16. É a contagem ao infinito. Por isso o infinito do RIP é pequeno de propósito: a mentira acaba logo, e a rede nunca pode ter mais que 15 saltos.',
       'O horizonte dividido corta a mentira na origem: não conte ao vizinho a rota que você aprendeu dele. O envenenamento reverso vai além: conte, mas com 16, para o vizinho saber que por você não dá. Numa fila, os dois resolvem. Em redes com laço de três ou mais roteadores, a mentira ainda pode dar a volta pelo outro lado, e é por isso que os protocolos de estado de enlace venceram nas redes grandes.',
-      'No laboratório, o RIP anda em rodadas, e o horizonte dividido vem desligado, para a contagem aparecer. Nos roteadores de verdade ele vem ligado, e cada rodada leva 30 segundos.',
+      'Os roteadores de verdade também mandam uma atualização disparada assim que uma rota muda, só com o que mudou e com um intervalo sorteado de 1 a 5 segundos entre uma e outra. Quase sempre isso leva a verdade na frente. Quase: se uma periódica cruzar com a disparada, a mentira entra do mesmo jeito, e a própria RFC 2453 admite que a contagem ao infinito continua possível. No laboratório, as disparadas e o horizonte dividido vêm desligados, para cada passo da contagem aparecer na linha do tempo, de 30 em 30 segundos. O relógio do RIP só anda quando você roda os protocolos.',
     ],
   },
   dicas: [
     'Ligue o RIP no r-dc e rode os protocolos até convergir. Depois derrube a porta "represa" do r-leste e rode de novo.',
     'Quem mente para o r-leste é o r-dc: ele conta de volta a rota que aprendeu do próprio r-leste.',
-    'Ligue o horizonte dividido no r-dc, derrube a porta "lan" do r-leste e rode 5 rodadas: tem de convergir antes disso.',
+    'Ligue o horizonte dividido no r-dc, derrube a porta "lan" do r-leste e rode 5 intervalos de 30 s: tem de convergir antes disso.',
   ],
   montar: () => linha(481, 81, LINHA81, { rip: ['r-leste', 'r-represa'] }),
   objetivo: (m) => {
     const f = m.flags.rip as { convergiu?: boolean; contagens?: number } | undefined;
     return [
       item('RIP ligado no r-dc', ripLigado(m, 'r-dc')),
-      item('contagem ao infinito vista: o r-dc acabou com 16 até a LAN da represa', (f?.contagens ?? 0) > 0 && derrubou(m, 'r-leste:represa', 'r-represa:leste') && metricaRip(m, 'r-dc', LAN_REPRESA) >= 16, `r-dc até ${LAN_REPRESA}: ${metricaRip(m, 'r-dc', LAN_REPRESA)}`),
+      item('contagem ao infinito vista depois do corte, e o r-dc sem rota para a LAN da represa', (f?.contagens ?? 0) > 0 && derrubou(m, 'r-leste:represa', 'r-represa:leste') && metricaRip(m, 'r-dc', LAN_REPRESA) >= 16, `r-dc até ${LAN_REPRESA}: ${metricaRip(m, 'r-dc', LAN_REPRESA)}`),
       item('horizonte dividido (ou envenenamento reverso) no r-dc', comHorizonte(m, 'r-dc'), horizonteDe(m, 'r-dc')),
       item('LAN da escola derrubada e a queda espalhada até o r-dc, já convergido', derrubou(m, 'r-leste:lan') && !!f?.convergiu && metricaRip(m, 'r-dc', LAN_ESCOLA) >= 16, `r-dc até ${LAN_ESCOLA}: ${metricaRip(m, 'r-dc', LAN_ESCOLA)}`),
     ];
   },
   posMorte: [
-    'A boa notícia levou 2 rodadas: na primeira, cada roteador aprendeu as redes dos vizinhos diretos; na segunda, o r-dc soube da LAN da represa com 2 saltos. A má notícia levou 16. Com o trecho cortado, o r-represa marcou tudo como 16 na hora, porque ficou sem vizinho. Mas o r-leste ouviu o r-dc dizer "chego na represa com 2" e acreditou: 3, pelo r-dc. O r-dc ouviu 3 e foi para 4. E assim de dois em dois, até 16. Com o RIP de verdade, que manda o vetor a cada 30 segundos, seriam 8 minutos de pacotes da telemetria rodando entre o r-dc e o r-leste até o TTL acabar.',
-    'O erro não era de ninguém em particular: cada roteador fez exatamente a conta do Bellman-Ford com o que ouviu. O defeito é do algoritmo, que não sabe que o caminho do vizinho passa por ele mesmo. O horizonte dividido no r-dc tirou essa informação do vetor que vai para o r-leste.',
-    'Na segunda queda, a da LAN da escola, o r-leste não ouviu mais nada do r-dc sobre ela, marcou 16 na primeira rodada, e o r-dc, na segunda. Três rodadas e acabou, sem contar nada. Numa fila isso basta. Num laço de três roteadores ou mais, nem o horizonte dividido salva sempre, e esse é um dos motivos de o estado de enlace ter tomado o lugar do vetor de distância nas redes grandes.',
+    'A boa notícia levou 32,7 s de relógio: ao ligar, o r-dc pediu a tabela ao r-leste e soube da escola na hora; a LAN da represa veio na periódica seguinte do r-leste, com 2 saltos. A má notícia levou minutos. O r-leste perdeu na hora a rede do próprio trecho cortado (10.81.101.0/30), mas a periódica do r-dc ainda dizia "chego nela com 1", e ele acreditou: 2, pelo r-dc. O r-dc ouviu 2 e foi para 3. De dois em dois, uma periódica por passo, até 16: os dois só desistiram aos 300 s de relógio, 4 min e 27 s depois do corte. Todo esse tempo, pacote para aquele trecho ficou indo e voltando entre eles até o TTL acabar.',
+    'A LAN da represa mostrou o outro lado do RIP: ninguém invalida a rota aprendida. O r-leste passou 180 s acreditando no r-represa, que já não falava; aos 205,6 s a rota expirou e foi a 16. Aí foi uma corrida. A periódica do r-leste, com o 16, chegou ao r-dc aos 208 s, antes de o r-dc repetir o 2; se o r-dc tivesse falado primeiro, a LAN da represa também contaria. Depois, a coleta de lixo ainda deixou cada rota morta em 16 por 120 s antes de apagá-la, e a rede só ficou quieta aos 420 s. Com as atualizações disparadas dos roteadores de verdade, cada passo levaria de 1 a 5 s em vez de 30, e a corrida quase sempre seria da verdade.',
+    'O erro não era de ninguém em particular: cada roteador fez exatamente a conta do Bellman-Ford com o que ouviu. O defeito é do algoritmo, que não sabe que o caminho do vizinho passa por ele mesmo. O horizonte dividido no r-dc tirou essa informação do vetor que vai para o r-leste. Na segunda queda, a da LAN da escola, o r-leste não ouviu nada do r-dc sobre ela, e o r-dc foi a 16 na periódica seguinte do r-leste, 30,3 s depois, sem contar nada. Numa fila isso basta. Num laço de três roteadores ou mais, nem o horizonte dividido salva sempre, e esse é um dos motivos de o estado de enlace ter tomado o lugar do vetor de distância nas redes grandes.',
   ],
   passos: [
     passo({
@@ -712,27 +716,31 @@ const dia81: Dia = {
       acao: 'rot-rodar',
       valores: { n: '' },
       instrucao: 'Rode os protocolos até convergir.',
-      porque: 'Em cada rodada, todo mundo manda o vetor aos vizinhos ao mesmo tempo, e cada um soma 1 ao que ouviu e fica com o menor.',
+      porque: 'Ao ligar, o r-dc pede a tabela aos vizinhos. Depois, cada roteador manda a sua a cada 30 s (sorteados entre 25 e 35 s), e quem recebe soma 1 ao que ouviu e fica com o menor.',
       conferir: (m) => (m.flags.rip?.convergiu && metricaRip(m, 'r-dc', LAN_REPRESA) === 2 ? true : 'As tabelas ainda não convergiram. Rode até ninguém mudar nada.'),
-      feito: 'Duas rodadas. Na primeira, o r-dc aprendeu a LAN da escola com 1 salto; na segunda, a da represa com 2, pelo r-leste. Boa notícia anda um salto por rodada.',
+      feito: 'Convergiu em 32,7 s de relógio. A resposta do r-leste ao pedido trouxe a LAN da escola com 1 salto na hora; a da represa veio com 2 na periódica seguinte do r-leste. Boa notícia anda um salto por atualização.',
     }),
     passo({
       alvo: ['equip', 'r-leste'],
       acao: 'rot-derrubar',
       valores: { porta: 'represa' },
       instrucao: 'Corte o trecho entre o r-leste e o r-represa: derrube a porta "represa" do r-leste.',
-      porque: 'O RIP não percebe a queda na hora como o OSPF. A rota velha fica na tabela até as próximas rodadas mudarem a opinião de cada um.',
+      porque: 'O RIP não percebe a queda como o OSPF. Só a rede da própria porta caída sai na hora; a rota aprendida por ali fica na tabela até passar 180 s sem notícia do vizinho.',
       conferir: (m) => (derrubou(m, 'r-leste:represa') ? true : 'Derrube a porta "represa" do r-leste.'),
-      feito: 'O trecho caiu. O r-dc ainda acredita que chega na represa com 2 saltos.',
+      feito: 'O trecho caiu. O r-dc ainda acredita que chega na represa com 2 saltos, e o r-leste, com 1, pelo r-represa que já não fala.',
     }),
     passo({
       alvo: ['equip', 'r-dc'],
       acao: 'rot-rodar',
       valores: { n: '' },
-      instrucao: 'Rode os protocolos de novo, até convergir, e acompanhe a métrica até a LAN da represa (10.81.4.0/24).',
-      porque: 'O r-leste perdeu o caminho, mas o vetor do r-dc ainda diz "chego na represa com 2". O r-leste não sabe que esse caminho passava por ele mesmo.',
-      conferir: (m) => (m.flags.rip?.contouAoInfinito && metricaRip(m, 'r-dc', LAN_REPRESA) >= 16 ? true : 'A contagem ainda não chegou a 16. Rode até convergir.'),
-      feito: 'O r-leste foi para 3, o r-dc para 4, o r-leste para 5, e assim até 16: dezesseis rodadas depois do corte. Contagem ao infinito. Pelo caminho, todo pacote para a represa ficou indo e voltando entre os dois.',
+      instrucao: 'Rode os protocolos de novo, até a rede ficar quieta, e leia a linha do tempo: a rede do trecho cortado (10.81.101.0/30) e a LAN da represa (10.81.4.0/24).',
+      porque: 'O r-leste perdeu na hora a rede do trecho, mas a periódica do r-dc ainda diz "chego nela com 1", e ele não sabe que esse caminho passa por ele mesmo. A LAN da represa espera 180 s para expirar, e então é uma corrida: quem falar primeiro, o r-leste com 16 ou o r-dc com 2, decide.',
+      conferir: (m) => {
+        if (m.flags.rip?.contouAoInfinito && metricaRip(m, 'r-dc', LAN_REPRESA) >= 16) return true;
+        if (m.flags.rip?.convergiu) return 'Desta vez a notícia da queda ganhou todas as corridas e nada contou (veja a linha do tempo). Levante a porta "represa" do r-leste, rode até convergir, derrube de novo e rode.';
+        return 'A rede ainda não ficou quieta. Rode até ninguém mudar nada.';
+      },
+      feito: 'Na linha do tempo, a rota que contou subiu de dois em dois, uma periódica por passo, até 16. Contagem ao infinito, em minutos de relógio. Pelo caminho, todo pacote para lá ficou indo e voltando entre o r-dc e o r-leste.',
     }),
     passo({
       alvo: ['equip', 'r-dc'],
@@ -757,10 +765,10 @@ const dia81: Dia = {
       alvo: ['equip', 'r-dc'],
       acao: 'rot-rodar',
       valores: { n: '5' },
-      instrucao: 'Rode só 5 rodadas. Sem o horizonte, isso não daria nem para começar a contagem.',
-      porque: 'Com o horizonte dividido no r-dc, o r-leste não ouve mais nada sobre a escola e marca 16 na hora.',
-      conferir: (m) => (m.flags.rip?.convergiu && metricaRip(m, 'r-dc', LAN_ESCOLA) >= 16 ? true : 'Não convergiu em 5 rodadas. Confira se o horizonte do r-dc está ligado.'),
-      feito: 'Três rodadas: o r-leste foi direto para 16, o r-dc o seguiu, e acabou. Desta vez, nenhum aviso de contagem: nenhuma métrica subiu.',
+      instrucao: 'Rode só 5 intervalos de 30 s (2 min 30 s de relógio). Sem o horizonte, a contagem levaria minutos.',
+      porque: 'Com o horizonte dividido no r-dc, o r-leste não ouve nada sobre a escola: a rede dele foi a 16 na hora, e o r-dc fica sabendo na periódica seguinte do r-leste.',
+      conferir: (m) => (m.flags.rip?.convergiu && metricaRip(m, 'r-dc', LAN_ESCOLA) >= 16 ? true : 'Não convergiu em 2 min 30 s. Confira se o horizonte do r-dc está ligado.'),
+      feito: 'Uma periódica do r-leste bastou: o r-dc foi a 16 sem nenhuma métrica subir, e a coleta de lixo apaga a linha 120 s depois. Desta vez, nenhum aviso de contagem.',
     }),
   ],
   aula: {
@@ -780,7 +788,7 @@ const dia81: Dia = {
       },
       {
         titulo: 'A fila do anel leste',
-        texto: ['Três roteadores em fila. Boa notícia anda um salto por rodada: em 2 rodadas, todos sabem de tudo.'],
+        texto: ['Três roteadores em fila. Boa notícia anda um salto por atualização: o pedido de tabela traz os vizinhos na hora, e a periódica seguinte traz o resto.'],
         visual: {
           tipo: 'diagrama',
           nos: [
@@ -802,19 +810,20 @@ const dia81: Dia = {
       },
       {
         titulo: 'Má notícia anda devagar',
-        texto: ['Depois do corte entre o r-leste e o r-represa, a distância até a LAN da represa, rodada a rodada. Um acredita no outro.'],
+        texto: ['Depois do corte entre o r-leste e o r-represa, a distância até a rede do trecho cortado (10.81.101.0/30), na linha do tempo do laboratório. Cada passo é uma periódica de um dos dois; um acredita no outro.'],
         visual: {
           tipo: 'tabela',
-          cabecalho: ['Rodada', 'r-leste', 'r-dc'],
+          cabecalho: ['Relógio', 'O que chegou', 'r-leste', 'r-dc'],
           linhas: [
-            ['antes do corte', '1', '2'],
-            ['1', '3 (ouviu o 2 do r-dc)', '2'],
-            ['2', '3', '4 (ouviu o 3 do r-leste)'],
-            ['3', '5', '4'],
-            ['4', '5', '6'],
-            ['...', 'de dois em dois', 'de dois em dois'],
-            ['14', '15', '16, infinito'],
-            ['15', '16, infinito', '16'],
+            ['32,7 s', 'o corte: a interface do r-leste caiu', '16, infinito', '1'],
+            ['55,8 s', 'periódica do r-dc: "1"', '2', '1'],
+            ['63,5 s', 'periódica do r-leste: "2"', '2', '3'],
+            ['88,1 s', 'periódica do r-dc: "3"', '4', '3'],
+            ['94,1 s', 'periódica do r-leste: "4"', '4', '5'],
+            ['...', 'de dois em dois', '...', '...'],
+            ['267,6 s', 'periódica do r-leste: "14"', '14', '15'],
+            ['279,1 s', 'periódica do r-dc: "15"', '16, infinito', '15'],
+            ['300 s', 'periódica do r-leste: "16"', '16', '16, infinito'],
           ],
         },
       },

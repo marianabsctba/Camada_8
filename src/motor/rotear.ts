@@ -1,5 +1,5 @@
 // Algoritmos de roteamento do ato 4, parte pura: grafo, caminho mais curto (Dijkstra), árvore de escoamento,
-// inundação, vetor de distância (estilo RIP), estado de enlace (estilo OSPF), roteamento hierárquico,
+// inundação, vetor de distância (em rodadas, e o RIP com os temporizadores da RFC 2453), estado de enlace (estilo OSPF), roteamento hierárquico,
 // difusão por caminho reverso, multicast com poda, anycast, MPLS e BGP entre sistemas autônomos.
 // Nada aqui conhece o mundo do jogo: entra grafo, sai tabela. A ligação com os roteadores do mundo fica em protocolos.ts.
 
@@ -332,6 +332,349 @@ export function convergirVD(g: Grafo, o: OpcoesVD = {}, inicio?: TabelasVD, max 
 /** Métrica de cada roteador até um destino, rodada a rodada: é aqui que a contagem ao infinito aparece. */
 export function metricasPorRodada(h: TabelasVD[], destino: string, nos: string[]): Record<string, number | null>[] {
   return h.map((t) => Object.fromEntries(nos.map((n) => [n, t[n]?.[destino]?.custo ?? null])));
+}
+
+/* ---------- RIP com relógio (RFC 2453) ---------- */
+
+/** Atualização periódica: a cada 30 s (RFC 2453, seção 3.8). */
+export const RIP_ATUALIZACAO_S = 30;
+/** O temporizador de 30 s é sorteado de novo a cada vez, com até 5 s para mais ou para menos (seção 3.8). */
+export const RIP_VARIACAO_S = 5;
+/** Rota aprendida que fica 180 s sem ser renovada expira: vai a 16 (seção 3.8). */
+export const RIP_EXPIRA_S = 180;
+/** Depois de ir a 16, a rota ainda é anunciada como inalcançável por 120 s, e só então sai da tabela (seção 3.8). */
+export const RIP_COLETA_S = 120;
+/** Depois de uma atualização disparada, a próxima espera um sorteio entre 1 e 5 s (seção 3.10.1). */
+export const RIP_DISPARO_MIN_S = 1;
+export const RIP_DISPARO_MAX_S = 5;
+
+/** Uma linha da tabela do RIP com os temporizadores. Instantes em segundos no relógio do laboratório. */
+export interface RotaRip extends EntradaVD {
+  /** Quando a rota expira se ninguém a renovar (só rota aprendida, ainda finita). */
+  expira?: number;
+  /** Quando a coleta de lixo apaga a rota (já em 16). */
+  coleta?: number;
+  /** Bandeira de rota mudada: vai na próxima atualização disparada. */
+  mudou?: boolean;
+  /** Último instante em que o vizinho renovou a rota. */
+  renovada?: number;
+}
+
+/** O que cada roteador guarda do RIP: a tabela e os temporizadores dele. */
+export interface RoteadorRip {
+  tabela?: Record<string, RotaRip>;
+  horizonte?: Horizonte;
+  /** Atualizações disparadas (seção 3.10.1). Sem o campo, ligadas. */
+  disparadas?: boolean;
+  /** Instante da próxima atualização periódica. Sem o campo, o RIP acabou de ligar. */
+  proxPeriodica?: number;
+  /** Fim da espera de 1 a 5 s depois da última atualização disparada. */
+  seguraAte?: number;
+  /** Há uma atualização disparada esperando para sair em seguraAte. */
+  pendente?: boolean;
+}
+
+/** Relógio do laboratório e o estado do sorteio (mesma semente, mesma linha do tempo). */
+export interface RelogioRip {
+  agora: number;
+  sorteio: number;
+}
+
+export type TipoEventoRip = 'partida' | 'aprendeu' | 'melhorou' | 'subiu' | 'infinito' | 'expirou' | 'perdeu-rede' | 'rede-voltou' | 'apagou';
+
+export interface EventoRip {
+  t: number;
+  roteador: string;
+  destino: string;
+  tipo: TipoEventoRip;
+  antes?: number;
+  depois?: number;
+  via?: string;
+  /** Quem mandou a notícia e em que tipo de mensagem. */
+  de?: string;
+  por?: 'periódica' | 'disparada' | 'resposta';
+  /** Chegou a 16 porque o vizinho anunciava 15: contou até o fim. */
+  contou?: boolean;
+  /** Mudou a rota de verdade (métrica ou próximo salto). A coleta de lixo apagando uma rota já em 16 não conta. */
+  mudanca: boolean;
+}
+
+export interface ResultadoRip {
+  inicio: number;
+  fim: number;
+  eventos: EventoRip[];
+  periodicas: number;
+  disparadas: number;
+  /** Nenhuma atualização futura muda métrica ou próximo salto (pode haver rota em 16 esperando a coleta). */
+  estavel: boolean;
+  /** Estável e sem nenhuma coleta de lixo pendente: a tabela não muda mais. */
+  quieto: boolean;
+}
+
+/** Sorteio mulberry32 com o estado guardado no relógio. */
+function sortearRip(r: RelogioRip): number {
+  let t = (r.sorteio = (r.sorteio + 0x6d2b79f5) >>> 0);
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+/** Instantes com um décimo de segundo, para a linha do tempo não acumular erro de vírgula flutuante. */
+const decimo = (x: number) => Math.round(x * 10) / 10;
+
+/** O vetor que um roteador manda a um vizinho, com o horizonte dele aplicado. Disparada: só as rotas mudadas. */
+export function anuncioRip(x: RoteadorRip, para: string, soMudadas = false, infinito = 16): Record<string, number> {
+  const h = x.horizonte ?? 'nenhum';
+  const v: Record<string, number> = {};
+  for (const [d, e] of Object.entries(x.tabela ?? {})) {
+    if (soMudadas && !e.mudou) continue;
+    if (e.via === para && h === 'dividido') continue;
+    v[d] = e.via === para && h === 'envenenado' ? infinito : e.custo;
+  }
+  return v;
+}
+
+/**
+ * A rede chegou num ponto fixo? Estável: nenhuma atualização futura de nenhum vizinho muda métrica ou próximo salto,
+ * nenhuma disparada está para sair e toda rota viva é renovada por quem a anunciou. Quieto: além disso, nenhuma
+ * coleta de lixo pendente. Quem decide é o simulador, que vê a rede inteira; os roteadores só veem os vetores.
+ */
+export function pontoFixoRip(g: Grafo, origina: Record<string, string[]>, rs: Record<string, RoteadorRip>, infinito = 16): { estavel: boolean; quieto: boolean } {
+  let coleta = false;
+  for (const n of g.nos) {
+    const x = rs[n];
+    if (!x) continue;
+    if (x.pendente) return { estavel: false, quieto: false };
+    const tab = x.tabela ?? {};
+    const proprias = new Set(origina[n] ?? []);
+    const vizinhos = new Set<string>();
+    for (const a of saindoDe(g, n)) {
+      const y = rs[a.para];
+      if (!y) continue;
+      vizinhos.add(a.para);
+      for (const [d, m] of Object.entries(anuncioRip(y, n, false, infinito))) {
+        if (proprias.has(d)) continue;
+        const nm = Math.min(infinito, m + 1);
+        const e = tab[d];
+        if (!e) {
+          if (nm < infinito) return { estavel: false, quieto: false };
+        } else if (e.via === a.para ? nm !== e.custo : nm < e.custo) return { estavel: false, quieto: false };
+      }
+    }
+    for (const [d, e] of Object.entries(tab)) {
+      if (e.coleta !== undefined) coleta = true;
+      if (!e.via || e.custo >= infinito) continue;
+      // Rota viva cujo vizinho sumiu ou não a anuncia mais: vai expirar.
+      if (!vizinhos.has(e.via) || anuncioRip(rs[e.via]!, n, false, infinito)[d] === undefined) return { estavel: false, quieto: false };
+    }
+  }
+  return { estavel: true, quieto: !coleta };
+}
+
+/**
+ * RIP com relógio, do jeito da RFC 2453. Cada roteador manda a tabela inteira aos vizinhos a cada 30 s, com o
+ * temporizador sorteado de novo entre 25 e 35 s (seção 3.8), para os roteadores não se sincronizarem. Quem recebe
+ * soma 1 e aplica as regras da seção 3.9.2: rota nova e finita entra; notícia do mesmo vizinho de quem veio a rota
+ * renova a rota e vale mesmo se piorou; de outro vizinho, só vale se for melhor. Rota aprendida sem renovação por
+ * 180 s expira e vai a 16; em 16, fica 120 s sendo anunciada como inalcançável e então a coleta de lixo a apaga.
+ * Mudança de rota dispara uma atualização só com o que mudou (seção 3.10.1); depois dela, a próxima espera um
+ * sorteio de 1 a 5 s, e a disparada é suprimida se a periódica vai sair antes. Ao ligar, o roteador pede a
+ * tabela aos vizinhos (seção 3.9.1), que respondem na hora.
+ *
+ * O RIP não olha o estado das interfaces para a rota aprendida: com o cabo cortado, ela só cai quando os 180 s
+ * vencem. A rede da própria interface, quando a interface cai, deixa de ser do roteador: ele a anuncia com 16 e
+ * começa a coleta de lixo (a RFC não fala de interface caindo; é o que os roteadores fazem).
+ *
+ * A topologia (g, origina) vale do começo ao fim desta chamada; quem a muda é o jogo, entre uma chamada e outra.
+ * O mensageiro é instantâneo: a atualização chega ao vizinho no mesmo instante em que sai.
+ */
+export function avancarRip(
+  g: Grafo,
+  origina: Record<string, string[]>,
+  rs: Record<string, RoteadorRip>,
+  rel: RelogioRip,
+  o: { ate?: number; convergir?: boolean; limiteS?: number; infinito?: number } = {},
+): ResultadoRip {
+  const INF = o.infinito ?? 16;
+  const inicio = rel.agora;
+  const eventos: EventoRip[] = [];
+  let periodicas = 0;
+  let disparadas = 0;
+  const nos = [...g.nos].filter((n) => rs[n]).sort();
+  const intervalo = () => decimo(RIP_ATUALIZACAO_S - RIP_VARIACAO_S + 2 * RIP_VARIACAO_S * sortearRip(rel));
+  const segura = () => decimo(RIP_DISPARO_MIN_S + (RIP_DISPARO_MAX_S - RIP_DISPARO_MIN_S) * sortearRip(rel));
+
+  /** Mudou uma rota: agenda a disparada, respeitando a espera de 1 a 5 s e a periódica que já vem. */
+  const sinalizar = (n: string, t: number) => {
+    const x = rs[n]!;
+    if (x.disparadas === false || x.pendente) return;
+    const quando = Math.max(t, x.seguraAte ?? -Infinity);
+    if ((x.proxPeriodica ?? Infinity) <= quando) return;
+    x.pendente = true;
+    x.seguraAte = quando;
+  };
+
+  const receber = (n: string, de: string, aresta: Aresta | undefined, vet: Record<string, number>, t: number, por: EventoRip['por']) => {
+    const x = rs[n]!;
+    const tab = (x.tabela ??= {});
+    const proprias = new Set(origina[n] ?? []);
+    for (const d of Object.keys(vet).sort()) {
+      if (proprias.has(d)) continue;
+      const m = vet[d]!;
+      const nm = Math.min(INF, m + 1);
+      const e = tab[d];
+      const base = { t, roteador: n, destino: d, de, por, mudanca: true } as const;
+      if (!e) {
+        if (nm >= INF) continue;
+        tab[d] = { custo: nm, via: de, aresta, expira: decimo(t + RIP_EXPIRA_S), renovada: t, mudou: true };
+        eventos.push({ ...base, tipo: 'aprendeu', depois: nm, via: de });
+        sinalizar(n, t);
+        continue;
+      }
+      if (e.via === de) {
+        // Do mesmo vizinho: renova o temporizador e acredita, melhor ou pior.
+        if (nm < INF) {
+          e.expira = decimo(t + RIP_EXPIRA_S);
+          e.renovada = t;
+        }
+        if (nm === e.custo) continue;
+        const antes = e.custo;
+        if (nm >= INF) {
+          e.custo = INF;
+          delete e.expira;
+          e.coleta = decimo(t + RIP_COLETA_S);
+          eventos.push({ ...base, tipo: 'infinito', antes, depois: INF, via: de, contou: m === INF - 1 });
+        } else {
+          e.custo = nm;
+          e.aresta = aresta;
+          delete e.coleta;
+          eventos.push({ ...base, tipo: nm > antes && antes < INF ? 'subiu' : 'melhorou', antes, depois: nm, via: de });
+        }
+        e.mudou = true;
+        sinalizar(n, t);
+        continue;
+      }
+      if (nm < e.custo) {
+        const antes = e.custo;
+        tab[d] = { custo: nm, via: de, aresta, expira: decimo(t + RIP_EXPIRA_S), renovada: t, mudou: true };
+        eventos.push({ ...base, tipo: 'melhorou', antes, depois: nm, via: de });
+        sinalizar(n, t);
+      }
+    }
+  };
+
+  const enviar = (n: string, t: number, soMudadas: boolean, por: EventoRip['por']) => {
+    const x = rs[n]!;
+    for (const a of saindoDe(g, n).sort((p, q) => (p.para < q.para ? -1 : p.para > q.para ? 1 : 0))) {
+      if (!rs[a.para]) continue;
+      const vet = anuncioRip(x, a.para, soMudadas, INF);
+      if (!Object.keys(vet).length) continue;
+      const volta = g.arestas.find((b) => b.de === a.para && b.para === n && (a.portaPara === undefined || b.porta === a.portaPara));
+      receber(a.para, n, volta, vet, t, por);
+    }
+    for (const e of Object.values(x.tabela ?? {})) delete e.mudou;
+  };
+
+  // Acerta cada roteador com a topologia de agora: quem acabou de ligar, rede própria que caiu ou voltou.
+  const novos: string[] = [];
+  for (const n of nos) {
+    const x = rs[n]!;
+    const tab = (x.tabela ??= {});
+    const proprias = origina[n] ?? [];
+    if (x.proxPeriodica === undefined) {
+      novos.push(n);
+      x.proxPeriodica = decimo(inicio + intervalo());
+      x.seguraAte = inicio;
+      x.pendente = false;
+      eventos.push({ t: inicio, roteador: n, destino: '', tipo: 'partida', mudanca: false });
+    }
+    for (const p of proprias) {
+      const e = tab[p];
+      if (e && e.custo === 0 && !e.via) continue;
+      tab[p] = { custo: 0, mudou: true };
+      if (!novos.includes(n)) eventos.push({ t: inicio, roteador: n, destino: p, tipo: 'rede-voltou', antes: e?.custo, depois: 0, mudanca: true });
+      sinalizar(n, inicio);
+    }
+    for (const [d, e] of Object.entries(tab)) {
+      if (e.custo !== 0 || e.via || proprias.includes(d)) continue;
+      tab[d] = { custo: INF, coleta: decimo(inicio + RIP_COLETA_S), mudou: true };
+      eventos.push({ t: inicio, roteador: n, destino: d, tipo: 'perdeu-rede', antes: 0, depois: INF, mudanca: true });
+      sinalizar(n, inicio);
+    }
+  }
+  // Pedido de tabela de quem ligou agora (seção 3.9.1): cada vizinho responde com a tabela inteira.
+  for (const n of novos) {
+    for (const a of saindoDe(g, n).sort((p, q) => (p.para < q.para ? -1 : 1))) {
+      const y = rs[a.para];
+      if (!y) continue;
+      receber(n, a.para, a, anuncioRip(y, n, false, INF), inicio, 'resposta');
+    }
+  }
+
+  const fim = o.convergir ? inicio + (o.limiteS ?? 3600) : (o.ate ?? inicio);
+  let st = pontoFixoRip(g, origina, rs, INF);
+  if (!(o.convergir && st.quieto)) {
+    for (let passos = 0; passos < 500000; passos++) {
+      // O próximo evento: (instante, prioridade, roteador, destino). Temporizador de rota antes de mensagem.
+      let t = Infinity;
+      let prio = 9;
+      let quem = '';
+      let dest = '';
+      let tipo: 'coleta' | 'expira' | 'disparada' | 'periodica' | null = null;
+      const propor = (tt: number | undefined, p: number, n: string, d: string, k: typeof tipo) => {
+        if (tt === undefined) return;
+        if (tt < t || (tt === t && (p < prio || (p === prio && (n < quem || (n === quem && d < dest)))))) {
+          t = tt;
+          prio = p;
+          quem = n;
+          dest = d;
+          tipo = k;
+        }
+      };
+      for (const n of nos) {
+        const x = rs[n]!;
+        for (const [d, e] of Object.entries(x.tabela ?? {})) {
+          propor(e.coleta, 0, n, d, 'coleta');
+          propor(e.expira, 1, n, d, 'expira');
+        }
+        if (x.pendente) propor(x.seguraAte, 2, n, '', 'disparada');
+        propor(x.proxPeriodica, 3, n, '', 'periodica');
+      }
+      if (tipo === null || t > fim) break;
+      rel.agora = t;
+      const x = rs[quem]!;
+      const tab = x.tabela!;
+      if (tipo === 'coleta') {
+        delete tab[dest];
+        eventos.push({ t, roteador: quem, destino: dest, tipo: 'apagou', mudanca: false });
+      } else if (tipo === 'expira') {
+        const e = tab[dest]!;
+        eventos.push({ t, roteador: quem, destino: dest, tipo: 'expirou', antes: e.custo, depois: INF, via: e.via, mudanca: true });
+        e.custo = INF;
+        delete e.expira;
+        e.coleta = decimo(t + RIP_COLETA_S);
+        e.mudou = true;
+        sinalizar(quem, t);
+      } else if (tipo === 'disparada') {
+        x.pendente = false;
+        enviar(quem, t, true, 'disparada');
+        x.seguraAte = decimo(t + segura());
+        disparadas++;
+      } else {
+        x.pendente = false;
+        enviar(quem, t, false, 'periódica');
+        x.proxPeriodica = decimo(t + intervalo());
+        periodicas++;
+      }
+      if (o.convergir) {
+        st = pontoFixoRip(g, origina, rs, INF);
+        if (st.quieto) break;
+      }
+    }
+  }
+  if (!o.convergir && fim > rel.agora) rel.agora = fim;
+  st = pontoFixoRip(g, origina, rs, INF);
+  return { inicio, fim: rel.agora, eventos, periodicas, disparadas, estavel: st.estavel, quieto: st.quieto };
 }
 
 /* ---------- Estado de enlace (estilo OSPF) ---------- */
@@ -667,7 +1010,12 @@ export interface NoBgp {
   /** Prefixos que este AS origina. */
   prefixos: string[];
   sessoes: { com: string; relacao: Relacao }[];
+  /** Identificador BGP (RFC 4271, 4.2): um endereço IPv4 do roteador. Sem ele, o desempate final usa o id. */
+  idBgp?: number;
 }
+
+/** Atributo ORIGIN (RFC 4271, 5.1.1): como o prefixo entrou no BGP. Menor é melhor. */
+export const ORIGEM_BGP = { igp: 0, egp: 1, incompleta: 2 } as const;
 
 export interface RotaBgp {
   prefixo: string;
@@ -677,19 +1025,31 @@ export interface RotaBgp {
   de: string | null;
   relacao: Relacao | 'propria';
   prefLocal: number;
+  /** ORIGIN: 0 IGP (anunciado com "network"), 1 EGP, 2 incompleto (redistribuído). Sem o campo, IGP. */
+  origem?: number;
+  /** MULTI_EXIT_DISC: preferência que o AS vizinho sugere entre os enlaces dele. Sem o campo, 0. */
+  med?: number;
+  /** Identificador BGP de quem mandou a rota. */
+  idBgp?: number;
 }
 
 /** Preferência local pela política comercial: rota de cliente dá dinheiro, de par é de graça, de provedor custa. */
 export const PREF_LOCAL: Record<Relacao | 'propria', number> = { propria: 1000, cliente: 200, par: 100, provedor: 50 };
 
 /**
- * Decisão do BGP (RFC 4271, seção 9.1.2.2), simplificada: maior preferência local, depois caminho de AS mais curto,
- * depois o menor identificador do vizinho (aqui, o nome do roteador). ORIGIN, MED, eBGP contra iBGP e custo interno
- * ficam de fora: no laboratório é um roteador por AS, só com eBGP.
+ * Decisão do BGP, na ordem da RFC 4271 (9.1.1 e 9.1.2.2): maior preferência local, caminho de AS mais curto, menor
+ * ORIGIN, menor MED (só entre rotas que vieram do mesmo AS vizinho), depois o menor identificador BGP de quem
+ * mandou e, por último, o nome do vizinho no lugar do endereço do par. Os passos de eBGP contra iBGP e de custo
+ * interno até o próximo salto não decidem nada aqui: no laboratório é um roteador por AS, só com eBGP.
  */
 export function melhorRotaBgp(a: RotaBgp, b: RotaBgp): RotaBgp {
   if (a.prefLocal !== b.prefLocal) return a.prefLocal > b.prefLocal ? a : b;
   if (a.caminho.length !== b.caminho.length) return a.caminho.length < b.caminho.length ? a : b;
+  const oa = a.origem ?? ORIGEM_BGP.igp;
+  const ob = b.origem ?? ORIGEM_BGP.igp;
+  if (oa !== ob) return oa < ob ? a : b;
+  if (a.caminho[0] !== undefined && a.caminho[0] === b.caminho[0] && (a.med ?? 0) !== (b.med ?? 0)) return (a.med ?? 0) < (b.med ?? 0) ? a : b;
+  if (a.idBgp !== undefined && b.idBgp !== undefined && a.idBgp !== b.idBgp) return a.idBgp < b.idBgp ? a : b;
   return (a.de ?? '') <= (b.de ?? '') ? a : b;
 }
 
@@ -738,7 +1098,8 @@ export function propagarBgp(nos: NoBgp[], max = 30): ResultadoBgp {
           if (!exporta(r, euParaEle)) continue;
           const caminho = [viz.asn, ...r.caminho];
           if (caminho.includes(n.asn)) continue;
-          lista.push({ prefixo: r.prefixo, caminho, de: viz.id, relacao: s.relacao, prefLocal: PREF_LOCAL[s.relacao] });
+          // ORIGIN atravessa os AS sem mudar; o MED só vale para o vizinho direto e não é repassado adiante.
+          lista.push({ prefixo: r.prefixo, caminho, de: viz.id, relacao: s.relacao, prefLocal: PREF_LOCAL[s.relacao], origem: r.origem, idBgp: viz.idBgp });
         }
       }
       candidatas[n.id] = lista;

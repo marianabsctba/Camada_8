@@ -21,7 +21,11 @@ import {
   recalcularProtocolos,
   ripDe,
   RIP_ATUALIZACAO_S,
+  RIP_COLETA_S,
+  RIP_EXPIRA_S,
   rodarRip,
+  segTxt,
+  zerarRip,
   roteadoresComMembros,
   roteadoresDoIp,
   sessoesBgp,
@@ -55,12 +59,13 @@ function porta(e: Equipamento, nome: string | undefined): string | null {
 const listaPortas = (e: Equipamento) => e.portas.map((p) => p.nome).join(', ');
 const infTxt = (n: number) => (n === Infinity ? '∞' : String(n));
 
-/** Segundos em texto curto: "90 s" vira "1 min 30 s". */
+/** Segundos em texto curto: 90 vira "1 min 30 s", 95,3 vira "1 min 35,3 s". */
 function tempoRip(s: number): string {
-  if (s < 60) return `${s} s`;
-  const min = Math.floor(s / 60);
-  const resto = s % 60;
-  return resto ? `${min} min ${resto} s` : `${min} min`;
+  const d = Math.round(s * 10) / 10;
+  if (d < 60) return `${segTxt(d).replace(/,0$/, '')} s`;
+  const min = Math.floor(d / 60);
+  const resto = Math.round((d - min * 60) * 10) / 10;
+  return resto ? `${min} min ${segTxt(resto).replace(/,0$/, '')} s` : `${min} min`;
 }
 
 /** Endereço de grupo multicast: 224.0.0.0 a 239.255.255.255. */
@@ -105,15 +110,23 @@ function mostraLsdb(e: Equipamento): Saida {
   return l;
 }
 
-function mostraRip(e: Equipamento): Saida {
+function mostraRip(m: Mundo, e: Equipamento): Saida {
   const cfg = ripDe(e);
   if (!cfg?.ligado) return ['RIP desligado neste roteador. "rip on" para ligar.'];
   const h = cfg.horizonte === 'dividido' ? 'horizonte dividido ligado' : cfg.horizonte === 'envenenado' ? 'envenenamento reverso ligado' : 'horizonte dividido DESLIGADO (roteadores de verdade vêm com ele ligado)';
-  const l = [`RIP ligado, ${h}. Métrica em saltos; 16 é infinito.`, 'DESTINO             SALTOS  VIA'];
+  const agora = (m.flags.rip?.relogio as number | undefined) ?? 0;
+  const l = [
+    `RIP ligado, ${h}, atualizações disparadas ${cfg.disparadas === false ? 'DESLIGADAS (só a periódica leva as notícias)' : 'ligadas'}. Métrica em saltos; 16 é infinito.`,
+    `Relógio do RIP: ${tempoRip(agora)}.${cfg.proxPeriodica !== undefined ? ` Próxima atualização periódica daqui a ${tempoRip(cfg.proxPeriodica - agora)}.` : ''} Rota sem notícia por ${RIP_EXPIRA_S} s expira; em 16, sai da tabela depois de ${RIP_COLETA_S} s.`,
+    'DESTINO             SALTOS  VIA         TEMPORIZADOR',
+  ];
   const t = cfg.tabela ?? {};
   const ent = Object.entries(t).sort(([a], [b]) => a.localeCompare(b));
-  if (!ent.length) l.push('  (tabela vazia: rode "rodar-protocolos" para trocar vetores com os vizinhos)');
-  for (const [d, x] of ent) l.push(`  ${d.padEnd(19)} ${(x.custo >= INFINITO_RIP ? '16 (∞)' : String(x.custo)).padEnd(7)} ${x.custo === 0 ? 'minha' : x.via ?? '-'}`);
+  if (!ent.length) l.push('  (tabela vazia: rode "rodar-protocolos" para o relógio andar e os vizinhos trocarem vetores)');
+  for (const [d, x] of ent) {
+    const tempo = x.coleta !== undefined ? `coleta de lixo apaga em ${tempoRip(x.coleta - agora)}` : x.expira !== undefined ? `renovada há ${tempoRip(agora - (x.renovada ?? agora))}, expira em ${tempoRip(x.expira - agora)}` : x.custo === 0 ? 'rede da própria interface' : '';
+    l.push(`  ${d.padEnd(19)} ${(x.custo >= INFINITO_RIP ? '16 (∞)' : String(x.custo)).padEnd(7)} ${(x.custo === 0 ? 'minha' : (x.via ?? '-')).padEnd(11)} ${tempo}`);
+  }
   l.push('ROTAS INSTALADAS PELO RIP:', ...rotasDoProtocolo(e, 'rip'));
   return l;
 }
@@ -187,13 +200,23 @@ function cmdRip(m: Mundo, e: Equipamento, args: string[]): Saida {
     const cfg = configRip(e);
     cfg.ligado = on;
     if (!on) {
-      delete cfg.tabela;
+      zerarRip(e);
       const outras = ((e.s.rotasDinamicas ?? []) as { origem: string }[]).filter((r) => r.origem !== 'rip');
       if (outras.length) e.s.rotasDinamicas = outras;
       else delete e.s.rotasDinamicas;
       return ['RIP desligado aqui. Os vizinhos só vão notar quando pararem de receber vetores.'];
     }
-    return ['RIP ligado. Ele troca vetores com os vizinhos em rodadas: "rodar-protocolos" (até convergir) ou "rodar-protocolos <n>" para ver rodada a rodada.'];
+    return [`RIP ligado. Ao começar, ele pede a tabela aos vizinhos; depois manda a dele a cada ${RIP_ATUALIZACAO_S} s (com até 5 s de variação sorteada). O relógio anda com "rodar-protocolos" (até a rede ficar quieta) ou "rodar-protocolos <n>" (n intervalos de ${RIP_ATUALIZACAO_S} s).`];
+  }
+  if (sub === 'disparadas') {
+    const v = ligado(a);
+    if (v === null) return ['rip disparadas <on|off>'];
+    configRip(e).disparadas = v;
+    return [
+      v
+        ? 'Atualizações disparadas ligadas (RFC 2453, 3.10.1): quando uma rota muda, o roteador avisa os vizinhos na hora, só com o que mudou, e espera de 1 a 5 s antes de outro aviso desses.'
+        : `Atualizações disparadas desligadas: as notícias só andam na periódica, a cada ${RIP_ATUALIZACAO_S} s. Fica mais lento, e cada passo de uma contagem ao infinito leva uma atualização inteira.`,
+    ];
   }
   if (sub === 'horizonte') {
     const v = a === 'envenenado' || a === 'envenenamento' ? 'envenenado' : ligado(a) === true ? 'dividido' : ligado(a) === false ? 'nenhum' : null;
@@ -207,22 +230,28 @@ function cmdRip(m: Mundo, e: Equipamento, args: string[]): Saida {
           : 'Horizonte dividido desligado: conto tudo a todos. É assim que nasce a contagem ao infinito.',
     ];
   }
-  return ['rip <on|off> | rip horizonte <on|off|envenenado>'];
+  return ['rip <on|off> | rip horizonte <on|off|envenenado> | rip disparadas <on|off>'];
 }
 
 function cmdRodar(m: Mundo, args: string[]): Saida {
   const n = args[0] === undefined ? undefined : Number(args[0]);
-  if (n !== undefined && (!Number.isInteger(n) || n < 1 || n > 100)) return ['rodar-protocolos [rodadas de 1 a 100]. Sem número, roda até convergir.'];
+  if (n !== undefined && (!Number.isInteger(n) || n < 1 || n > 100)) return [`rodar-protocolos [n de 1 a 100]: anda n intervalos de ${RIP_ATUALIZACAO_S} s no relógio do RIP. Sem número, anda até a rede ficar quieta.`];
   const l: string[] = [];
   const temRip = [...m.equipamentos.values()].some((e) => ripDe(e)?.ligado);
   if (temRip) {
     const r = rodarRip(m, n);
-    // Uma rodada é uma atualização periódica do RIP (30 s na RFC 2453).
-    const relogio = r.rodadas ? ` (uns ${tempoRip(r.rodadas * RIP_ATUALIZACAO_S)} no relógio do RIP, uma atualização a cada ${RIP_ATUALIZACAO_S} s)` : '';
-    l.push(`RIP: ${r.rodadas} rodada(s)${relogio}${r.convergiu ? ', convergiu' : ', ainda mudando'}.`, ...r.linhas);
-    // O aviso fala só destas rodadas: depois que a rede se acerta, ele não volta.
-    if (r.contou) l.push('Repare: a métrica subiu de rodada em rodada até 16. Um acreditava no outro, que acreditava no primeiro: contagem ao infinito. O horizonte dividido evita isso no caso em linha.');
-    else if (r.contando) l.push('Atenção: há métrica subindo de rodada em rodada. É uma contagem ao infinito em andamento; rode mais, ou ligue o horizonte dividido em quem conta de volta.');
+    const passou = r.fim - r.inicio;
+    if (!r.linhas.length && r.convergiu && n === undefined) l.push(`RIP: nada mudou, as tabelas já estavam convergidas (relógio em ${tempoRip(r.fim)}).`);
+    else {
+      l.push(
+        `RIP: relógio de ${tempoRip(r.inicio)} a ${tempoRip(r.fim)} (${tempoRip(passou)}), ${r.periodicas} atualização(ões) periódica(s) e ${r.disparadas} disparada(s); ${r.convergiu ? 'convergiu: nenhuma atualização muda mais nada' : 'ainda mudando'}.`,
+        r.linhas.length ? 'LINHA DO TEMPO (instante no relógio do RIP):' : '  nenhuma rota mudou neste intervalo',
+        ...r.linhas,
+      );
+    }
+    // O aviso fala só deste trecho do relógio: depois que a rede se acerta, ele não volta.
+    if (r.contou) l.push('Repare: a métrica subiu de atualização em atualização até 16. Um acreditava no outro, que acreditava no primeiro: contagem ao infinito. O horizonte dividido evita isso no caso em linha.');
+    else if (r.contando) l.push('Atenção: há métrica subindo de atualização em atualização. É uma contagem ao infinito em andamento; rode mais, ou ligue o horizonte dividido em quem conta de volta.');
   }
   recalcularProtocolos(m);
   if (m.flags.ospf) l.push(`OSPF: ${m.flags.ospf.roteadores.length} roteador(es), LSPs inundados com ${m.flags.ospf.copias} cópia(s) nos enlaces (${m.flags.ospf.descartadas} repetidas descartadas), Dijkstra em cada um.`);
@@ -349,7 +378,7 @@ function cmdDerrubar(m: Mundo, e: Equipamento, cmd: string, args: string[]): Sai
   const l = [derrubar ? `${p} derrubada: o enlace caiu, como cabo cortado.` : `${p} de volta: o enlace subiu.`];
   if (ospfDe(e)?.ligado) l.push(`OSPF percebeu na hora (o hello parou de chegar), inundou um LSP novo e recalculou: ${ospfDe(e)!.vizinhos?.length ?? 0} vizinho(s) agora.`);
   if (bgpDe(e)) l.push('BGP: a sessão por essa porta caiu, e as rotas aprendidas por ela foram retiradas.');
-  if (ripDe(e)?.ligado) l.push('RIP: a rota que passava por ali continua na tabela até as próximas rodadas. Rode "rodar-protocolos" e veja o que acontece.');
+  if (ripDe(e)?.ligado) l.push(derrubar ? `RIP: a rede desta porta deixa de ser minha e vai a 16 assim que o relógio andar. Já a rota aprendida por ali ninguém invalida: ela fica na tabela até passar ${RIP_EXPIRA_S} s sem notícia do vizinho. Rode "rodar-protocolos" e veja a linha do tempo.` : 'RIP: a rede desta porta volta a ser minha (0) assim que o relógio andar, e os vizinhos ficam sabendo pelas atualizações.');
   return l;
 }
 
@@ -439,7 +468,7 @@ export function comandosRoteamento(m: Mundo, e: Equipamento, cmd: string, args: 
         case 'lsdb':
           return mostraLsdb(e);
         case 'rip':
-          return mostraRip(e);
+          return mostraRip(m, e);
         case 'bgp':
           return mostraBgp(m, e);
         case 'mpls':

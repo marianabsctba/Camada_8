@@ -105,7 +105,9 @@ function resumoResultado(r: ResultadoFila) {
     marcadosEcn: r.marcadosEcn,
     sinais: r.sinais,
     recusadas: r.recusadas,
-    porFonte: Object.fromEntries(r.porFonte.map((f) => [f.nome, { admitida: f.admitida, entregues: f.entregues, perdidos: f.perdidos, marcados: f.marcados, atrasoMedioMs: ms(f.atrasoMedio), vazaoMbps: Number(f.vazaoMbps.toFixed(3)), fatorFinal: Number(f.fatorFinal.toFixed(3)) }])),
+    reducoes: r.reducoes,
+    sincronia: r.sincronia === null ? null : Number(r.sincronia.toFixed(3)),
+    porFonte: Object.fromEntries(r.porFonte.map((f) => [f.nome, { admitida: f.admitida, tcp: f.tcp, entregues: f.entregues, perdidos: f.perdidos, marcados: f.marcados, sinais: f.sinais, recuos: f.recuos, expiracoes: f.expiracoes, atrasoMedioMs: ms(f.atrasoMedio), vazaoMbps: Number(f.vazaoMbps.toFixed(3)), fatorFinal: Number(f.fatorFinal.toFixed(3)) }])),
   };
 }
 
@@ -117,7 +119,7 @@ function mostraFila(m: Mundo, e: Equipamento): Saida {
   for (const p of portas) {
     const c = t[p]!;
     l.push(`  ${p}: ${capacidadePorta(m, e, p)} Mb/s, buffer ${c.buffer} pacote(s), ${c.red ? `RED ${c.red.min} a ${c.red.max}` : 'descarte no fim da fila'}${c.ecn ? ', ECN' : ''}${c.choke ? ', choke packet' : ''}${c.descarte ? ', descarte de carga' : ''}${c.admissao !== undefined ? `, admissão até ${pct(c.admissao)}` : ''}`);
-    for (const f of c.fontes ?? []) l.push(`      fonte ${f.nome}: ${num(f.mbps)} Mb/s, ${f.tamanho ?? 1000} bytes, rajada ${f.rajada ?? 1}, importância ${f.importancia ?? 1}${f.classe ? `, classe ${f.classe}` : ''}${f.ecn === false ? ', não entende ECN' : ''}${f.responde === false ? ', ignora avisos' : ''}`);
+    for (const f of c.fontes ?? []) l.push(`      fonte ${f.nome}: ${num(f.mbps)} Mb/s, ${f.tamanho ?? 1000} bytes, rajada ${f.rajada ?? 1}, importância ${f.importancia ?? 1}${f.classe ? `, classe ${f.classe}` : ''}${f.responde === false ? ', sem controle de congestionamento (ignora perda e aviso)' : `, TCP${f.ecn === false ? ' sem ECN' : ' com ECN'}`}`);
   }
   return l;
 }
@@ -158,7 +160,7 @@ function cmdFila(m: Mundo, e: Equipamento, args: string[]): Saida {
       if (v === null) return [`fila <porta> ${a1} <on|off>`];
       if (v) c[a1] = true;
       else delete c[a1];
-      const txt = { ecn: 'ECN: em vez de descartar, o roteador marca os 2 bits de congestionamento do cabeçalho IP. O destino devolve o aviso e a origem diminui a taxa, sem perder o pacote.', choke: 'Choke packet: com a fila passando de 3/4 do buffer, o roteador manda um aviso direto para a origem do pacote, que diminui a taxa.', descarte: 'Descarte de carga: com o buffer cheio, o roteador joga fora o pacote menos importante da fila para caber um mais importante.' }[a1];
+      const txt = { ecn: 'ECN: em vez de descartar, o roteador marca os 2 bits de congestionamento do cabeçalho IP. O destino devolve o aviso nas confirmações e a origem TCP corta a janela pela metade, uma vez por ida e volta, sem perder o pacote.', choke: 'Choke packet: com a fila passando de 3/4 do buffer, o roteador manda um aviso direto para a origem do pacote, no máximo um por ida e volta. A origem TCP volta à partida lenta, como mandava a velha redução da fonte do ICMP.', descarte: 'Descarte de carga: com o buffer cheio, o roteador joga fora o pacote menos importante da fila para caber um mais importante.' }[a1];
       return [v ? txt : `${a1} desligado na ${p}.`];
     }
     case 'admissao': {
@@ -216,7 +218,8 @@ function simularPorta(m: Mundo, e: Equipamento, cargaTxt: string | undefined, po
   const resumo = resumoResultado(r);
   const anterior = (m.flags.fila?.simulacoes ?? []) as unknown[];
   m.flags.fila = { equip: e.nome, porta: p, carga, capacidadeMbps: cap, config, fontes, ...resumo, simulacoes: [...anterior, { porta: p, carga, config, fontes, ...resumo }].slice(-30) };
-  return [`SIMULAÇÃO DA FILA DE SAÍDA DA ${p.toUpperCase()} (${r.enviados} pacotes, chegadas aleatórias)`, ...textoFila(config, r).map((x) => '  ' + x)];
+  const comTcp = r.porFonte.some((f) => f.admitida && f.tcp);
+  return [`SIMULAÇÃO DA FILA DE SAÍDA DA ${p.toUpperCase()} (${r.enviados} pacotes em ${tempoTxt(r.duracao)}, ${comTcp ? 'origens TCP que respondem a perda e aviso' : 'chegadas aleatórias sem controle'})`, ...textoFila(config, r).map((x) => '  ' + x)];
 }
 
 function curvaPorta(m: Mundo, e: Equipamento, portaTxt: string | undefined): Saida {

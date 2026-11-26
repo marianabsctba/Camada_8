@@ -1,5 +1,5 @@
 // Protocolos de roteamento nos roteadores do mundo: OSPF (estado de enlace, com áreas), RIP (vetor de distância,
-// em rodadas), BGP (entre sistemas autônomos, com política) e MPLS (caminho por rótulos).
+// com os temporizadores da RFC 2453 num relógio simulado), BGP (entre sistemas autônomos, com política) e MPLS (caminho por rótulos).
 // Os algoritmos estão em rotear.ts; aqui se descobre quem é vizinho de quem pelos cabos e pelas sub-redes,
 // e as rotas aprendidas vão para s.rotasDinamicas, que a tabela de rotas (roteamento.ts) já lê.
 
@@ -17,12 +17,14 @@ import {
   montarLsp,
   montarLspMpls,
   propagarBgp,
-  rodadaVD,
+  avancarRip,
+  RIP_ATUALIZACAO_S,
+  RIP_COLETA_S,
+  RIP_EXPIRA_S,
   rotasEstadoEnlace,
-  vetorPara,
   type Aresta,
   type EntradaLfib,
-  type EntradaVD,
+  type EventoRip,
   type Grafo,
   type Horizonte,
   type Lfib,
@@ -30,8 +32,10 @@ import {
   type NoBgp,
   type Relacao,
   type ResultadoBgp,
+  type RelogioRip,
   type ResultadoDijkstra,
-  type TabelasVD,
+  type RotaRip,
+  type RoteadorRip,
 } from './rotear';
 import { ipTexto, lerCidr, lerIp, type Cidr } from './util';
 
@@ -291,10 +295,11 @@ export function calcularOspf(m: Mundo): ResultadoOspf {
 
 /* ---------- RIP ---------- */
 
-export interface ConfigRip {
+/** Configuração e estado do RIP num roteador: a tabela com os temporizadores fica aqui mesmo (RoteadorRip). */
+export interface ConfigRip extends RoteadorRip {
   ligado: boolean;
   horizonte: Horizonte;
-  tabela?: Record<string, EntradaVD>;
+  tabela?: Record<string, RotaRip>;
 }
 
 export function ripDe(e: Equipamento): ConfigRip | undefined {
@@ -305,42 +310,51 @@ export function configRip(e: Equipamento): ConfigRip {
   return (e.s.rip ??= { ligado: false, horizonte: 'nenhum' }) as ConfigRip;
 }
 
-export const INFINITO_RIP = 16;
+/** Apaga o estado do RIP de um roteador (tabela e temporizadores), como se o processo reiniciasse. */
+export function zerarRip(e: Equipamento): void {
+  const c = ripDe(e);
+  if (!c) return;
+  delete c.tabela;
+  delete c.proxPeriodica;
+  delete c.seguraAte;
+  delete c.pendente;
+}
 
-/**
- * Temporizadores do RIP (RFC 2453, seção 3.8): atualização periódica a cada 30 s, rota expira depois de 180 s sem
- * notícia e, já em 16, fica mais 120 s sendo anunciada como inalcançável antes de sair da tabela (coleta de lixo).
- * Aproximação declarada do laboratório: uma rodada é uma atualização periódica (30 s). Porta derrubada invalida na
- * hora as rotas que saíam por ela (a RFC permite isso quando a interface cai), sem esperar os 180 s; a coleta de lixo
- * não apaga a linha, para o 16 continuar visível. As atualizações disparadas (seção 3.10.1) não mudam o desenho da
- * contagem ao infinito: só fazem cada passo dela levar segundos em vez de 30 s.
- */
-export const RIP_ATUALIZACAO_S = 30;
-export const RIP_EXPIRA_S = 180;
-export const RIP_COLETA_S = 120;
+export const INFINITO_RIP = 16;
+export { RIP_ATUALIZACAO_S, RIP_COLETA_S, RIP_EXPIRA_S } from './rotear';
 
 /** O que o laboratório guarda sobre o RIP em m.flags.rip. */
 export interface EstadoRip {
-  /** Rodadas com alguma mudança, desde o começo. */
-  rodadas: number;
+  /** Relógio do RIP, em segundos desde que o primeiro roteador ligou o protocolo. */
+  relogio: number;
+  /** Estado do sorteio das variações de tempo (mesmo dia, mesma linha do tempo). */
+  sorteio: number;
   /** Métricas finitas que subiram no episódio atual (desde a última convergência). */
   subidas: number;
   /** Rotas que viraram 16 no episódio atual. */
   infinitos: number;
   /** No episódio atual, alguma rota foi empurrada de 15 para 16 por um vizinho que ainda anunciava 15: contou até o fim. */
   contouAoInfinito: boolean;
-  /** Agora: na última rodada alguma métrica finita subiu (a contagem está andando). */
+  /** Agora: na última execução alguma métrica finita subiu e a rede ainda não parou (a contagem está andando). */
   contando: boolean;
   /** Histórico: quantos episódios terminaram em contagem ao infinito (não volta a zero). */
   contagens: number;
-  /** A última rodada passou sem ninguém mudar nada. */
+  /** Nenhuma atualização futura muda métrica ou próximo salto. */
   convergiu?: boolean;
   metricas?: Record<string, Record<string, number>>;
 }
 
-export function estadoRip(m: Mundo): EstadoRip {
+/** Semente do sorteio tirada dos nomes dos roteadores: o mesmo dia dá sempre a mesma linha do tempo. */
+function sementeRip(nomes: string[]): number {
+  let h = 2166136261;
+  for (const c of nomes.join(',')) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0;
+  return h;
+}
+
+export function estadoRip(m: Mundo, nomes: string[] = []): EstadoRip {
   const f = (m.flags.rip ??= {}) as Partial<EstadoRip>;
-  f.rodadas ??= 0;
+  f.relogio ??= 0;
+  f.sorteio ??= sementeRip(nomes);
   f.subidas ??= 0;
   f.infinitos ??= 0;
   f.contouAoInfinito ??= false;
@@ -349,7 +363,7 @@ export function estadoRip(m: Mundo): EstadoRip {
   return f as EstadoRip;
 }
 
-function instalarRip(m: Mundo, e: Equipamento): void {
+function instalarRip(e: Equipamento): void {
   const t = ripDe(e)?.ligado ? (ripDe(e)!.tabela ?? {}) : {};
   const novas: RotaDinamica[] = [];
   for (const [d, x] of Object.entries(t)) {
@@ -357,104 +371,110 @@ function instalarRip(m: Mundo, e: Equipamento): void {
     novas.push({ destino: d, via: ipTexto(x.aresta.ipPara), origem: 'rip', metrica: x.custo, nota: `${x.custo} salto(s) via ${x.via}` });
   }
   instalar(e, 'rip', novas.sort((a, b) => a.destino.localeCompare(b.destino)));
-  void m;
-}
-
-export interface RodadaRip {
-  mudou: boolean;
-  linhas: string[];
-  /** Nesta rodada alguma rota chegou a 16 contando (o vizinho ainda dizia 15). */
-  contou: boolean;
 }
 
 const metricaTxt = (n: number | undefined) => (n === undefined ? 'nada' : n >= INFINITO_RIP ? '16 (infinito)' : String(n));
 
+/** Segundos com uma casa e vírgula: 95.3 vira "95,3". */
+export const segTxt = (s: number) => s.toFixed(1).replace('.', ',');
+
+/** Uma linha da linha do tempo do RIP. */
+function textoEvento(x: EventoRip): string {
+  const por = x.por === 'resposta' ? `resposta do ${x.de} ao pedido de tabela` : x.por ? `${x.por} do ${x.de}` : '';
+  const pre = `  ${segTxt(x.t).padStart(7)} s  ${x.roteador}: `;
+  switch (x.tipo) {
+    case 'partida':
+      return `${pre}RIP começou; pediu a tabela aos vizinhos`;
+    case 'aprendeu':
+      return `${pre}${x.destino} nova, ${x.depois} via ${x.via} (${por})`;
+    case 'melhorou':
+    case 'subiu':
+      return `${pre}${x.destino} ${metricaTxt(x.antes)} → ${x.depois} via ${x.via} (${por})`;
+    case 'infinito':
+      return `${pre}${x.destino} ${metricaTxt(x.antes)} → 16 (infinito): o ${x.de} anunciou ${x.contou ? '15' : '16'} na ${x.por}; coleta de lixo em ${RIP_COLETA_S} s`;
+    case 'expirou':
+      return `${pre}${x.destino} ${metricaTxt(x.antes)} → 16 (infinito): ${RIP_EXPIRA_S} s sem notícia do ${x.via}; coleta de lixo em ${RIP_COLETA_S} s`;
+    case 'perdeu-rede':
+      return `${pre}${x.destino} 0 → 16 (infinito): a interface caiu e a rede deixou de ser minha; coleta de lixo em ${RIP_COLETA_S} s`;
+    case 'rede-voltou':
+      return `${pre}${x.destino} ${metricaTxt(x.antes)} → 0: a interface voltou`;
+    case 'apagou':
+      return `${pre}${x.destino} apagada da tabela pela coleta de lixo`;
+  }
+}
+
+export interface ExecucaoRip {
+  inicio: number;
+  fim: number;
+  convergiu: boolean;
+  linhas: string[];
+  /** Nesta execução alguma rota chegou a 16 contando (o vizinho ainda dizia 15). */
+  contou: boolean;
+  /** Há métrica subindo e a rede ainda não parou. */
+  contando: boolean;
+  periodicas: number;
+  disparadas: number;
+  eventos: EventoRip[];
+}
+
 /**
- * Uma rodada do RIP: todo roteador com RIP manda o vetor (destino e saltos) a cada vizinho ao mesmo tempo,
- * e cada um refaz a tabela. Rede que o próprio roteador tem fica com 0; um vizinho a mais, 1; 16 é infinito.
+ * Faz o relógio do RIP andar (RFC 2453; os temporizadores estão em avancarRip, rotear.ts). Sem n, até a rede
+ * ficar quieta: nenhuma atualização muda mais nada e nenhuma coleta de lixo pendente (no máximo 1 h de relógio).
+ * Com n, anda n intervalos de 30 s e para onde estiver.
  *
- * O estado da contagem ao infinito reflete a rede atual: a primeira rodada com mudança depois de uma convergência
+ * O estado da contagem ao infinito reflete a rede atual: a primeira mudança de rota depois de uma convergência
  * abre um episódio novo e zera subidas, infinitos e contouAoInfinito. Assim, depois de ligar o horizonte dividido
  * ou de o enlace voltar, o aviso some quando a rede convergir de novo. O histórico fica em "contagens".
  */
-export function rodadaRip(m: Mundo): RodadaRip {
+export function rodarRip(m: Mundo, n?: number): ExecucaoRip {
   const todos = [...m.equipamentos.values()];
-  for (const e of todos) if (!ripDe(e)?.ligado && e.s.rotasDinamicas) instalar(e, 'rip', []);
+  for (const e of todos) {
+    if (ripDe(e)?.ligado && roteadorLigado(e)) continue;
+    if (ripDe(e)) zerarRip(e);
+    if (e.s.rotasDinamicas) instalar(e, 'rip', []);
+  }
   const ligados = todos.filter((e) => ripDe(e)?.ligado && roteadorLigado(e));
-  if (!ligados.length) return { mudou: false, linhas: ['Nenhum roteador com RIP ligado.'], contou: false };
+  const nomes = ligados.map((e) => e.nome).sort();
+  const f = estadoRip(m, nomes);
+  if (!ligados.length) return { inicio: f.relogio, fim: f.relogio, convergiu: true, linhas: ['Nenhum roteador com RIP ligado.'], contou: false, contando: false, periodicas: 0, disparadas: 0, eventos: [] };
   const g: Grafo = {
-    nos: ligados.map((e) => e.nome).sort(),
+    nos: nomes,
     arestas: adjacencias(m, (e) => !!ripDe(e)?.ligado).map((a) => ({ de: a.de, para: a.para, custo: 1, porta: a.porta, portaPara: a.portaPara, ipPara: a.ipPara })),
   };
   const origina: Record<string, string[]> = Object.fromEntries(ligados.map((e) => [e.nome, redesAtivas(m, e).map((r) => r.prefixo)]));
-  const t: TabelasVD = Object.fromEntries(ligados.map((e) => [e.nome, ripDe(e)!.tabela ?? Object.fromEntries(origina[e.nome]!.map((p) => [p, { custo: 0 }]))]));
-  const horizonte = Object.fromEntries(ligados.map((e) => [e.nome, ripDe(e)!.horizonte ?? 'nenhum'])) as Record<string, Horizonte>;
-  const opcoes = { metrica: 'saltos' as const, infinito: INFINITO_RIP, horizonte };
-  const r = rodadaVD(g, t, opcoes, origina);
-  const f = estadoRip(m);
-  // Rede estava parada (ou é a primeira vez) e agora mudou: episódio novo, o aviso velho não vale mais.
-  if (r.mudou && f.convergiu !== false) {
-    f.subidas = 0;
-    f.infinitos = 0;
-    f.contouAoInfinito = false;
-  }
-  const linhas: string[] = [];
-  let subiuAgora = false;
+  const rs: Record<string, RoteadorRip> = Object.fromEntries(ligados.map((e) => [e.nome, ripDe(e)!]));
+  const rel: RelogioRip = { agora: f.relogio, sorteio: f.sorteio };
+  const r = avancarRip(g, origina, rs, rel, n === undefined ? { convergir: true, infinito: INFINITO_RIP } : { ate: f.relogio + n * RIP_ATUALIZACAO_S, infinito: INFINITO_RIP });
+  f.relogio = rel.agora;
+  f.sorteio = rel.sorteio;
+  let subiu = false;
   let contou = false;
-  for (const e of ligados) {
-    const antes = t[e.nome] ?? {};
-    const depois = r.tabelas[e.nome] ?? {};
-    for (const d of [...new Set([...Object.keys(antes), ...Object.keys(depois)])].sort()) {
-      const a = antes[d];
-      const b = depois[d];
-      if (a?.custo === b?.custo && a?.via === b?.via) continue;
-      linhas.push(`  ${e.nome}: ${d} ${metricaTxt(a?.custo)} → ${metricaTxt(b?.custo)}${b?.via && b.custo < INFINITO_RIP ? ` via ${b.via}` : ''}`);
-      if (a && b && a.custo < b.custo && b.custo < INFINITO_RIP && a.custo > 0) {
-        f.subidas++;
-        subiuAgora = true;
-      }
-      if (a && a.custo < INFINITO_RIP && b && b.custo >= INFINITO_RIP) {
-        f.infinitos++;
-        // Contou até o fim: algum vizinho ainda anunciava 15 (15 + 1 = 16). Quem foi para 16 porque o vizinho
-        // calou (horizonte dividido) ou anunciou 16 (envenenamento, queda) não contou nada.
-        const ouviu15 = g.arestas.some((x) => x.de === e.nome && vetorPara(t, x.para, e.nome, opcoes)[d] === INFINITO_RIP - 1);
-        if (ouviu15 && a.custo > 0) contou = true;
-      }
+  for (const x of r.eventos) {
+    if (!x.mudanca) continue;
+    // Rede estava parada (ou é a primeira vez) e agora mudou: episódio novo, o aviso velho não vale mais.
+    if (f.convergiu !== false) {
+      f.subidas = 0;
+      f.infinitos = 0;
+      f.contouAoInfinito = false;
+      f.convergiu = false;
     }
-    ripDe(e)!.tabela = depois;
-    instalarRip(m, e);
+    if (x.tipo === 'subiu' && (x.antes ?? 0) > 0) {
+      f.subidas++;
+      subiu = true;
+    }
+    if ((x.tipo === 'infinito' || x.tipo === 'expirou' || x.tipo === 'perdeu-rede') && (x.antes ?? INFINITO_RIP) < INFINITO_RIP) f.infinitos++;
+    if (x.contou && (x.antes ?? 0) > 0) contou = true;
   }
   if (contou && !f.contouAoInfinito) f.contagens++;
   if (contou) f.contouAoInfinito = true;
-  f.contando = r.mudou && subiuAgora;
-  f.convergiu = !r.mudou;
-  if (r.mudou) f.rodadas++;
-  f.metricas = Object.fromEntries(ligados.map((e) => [e.nome, Object.fromEntries(Object.entries(r.tabelas[e.nome] ?? {}).map(([d, x]) => [d, x.custo]))]));
-  return { mudou: r.mudou, linhas, contou };
-}
-
-/** Roda n rodadas, ou até ninguém mudar (no máximo 40). Devolve o passo a passo e o que aconteceu nestas rodadas. */
-export function rodarRip(m: Mundo, n?: number): { rodadas: number; convergiu: boolean; linhas: string[]; contou: boolean; contando: boolean } {
-  const max = n ?? 40;
-  const linhas: string[] = [];
-  let feitas = 0;
-  let convergiu = false;
-  let contou = false;
-  for (let i = 1; i <= max; i++) {
-    const r = rodadaRip(m);
-    contou ||= r.contou;
-    if (!r.mudou) {
-      convergiu = true;
-      linhas.push(feitas ? `rodada ${i}: ninguém mudou nada. Convergiu.` : 'Nada mudou: as tabelas já estavam convergidas.');
-      break;
-    }
-    feitas++;
-    linhas.push(`rodada ${i}:`, ...r.linhas.slice(0, 16), ...(r.linhas.length > 16 ? [`  ... e mais ${r.linhas.length - 16} mudança(s)`] : []));
-  }
-  const f = estadoRip(m);
-  f.convergiu = convergiu;
-  if (convergiu) f.contando = false;
-  return { rodadas: feitas, convergiu, linhas, contou, contando: f.contando };
+  if (r.estavel) f.convergiu = true;
+  f.contando = subiu && !r.estavel;
+  for (const e of ligados) instalarRip(e);
+  f.metricas = Object.fromEntries(ligados.map((e) => [e.nome, Object.fromEntries(Object.entries(ripDe(e)!.tabela ?? {}).map(([d, x]) => [d, x.custo]))]));
+  const visiveis = r.eventos.filter((x) => x.tipo !== 'partida');
+  const linhas = visiveis.slice(0, 60).map(textoEvento);
+  if (visiveis.length > 60) linhas.push(`  ... e mais ${visiveis.length - 60} acontecimento(s) até ${segTxt(r.fim)} s`);
+  return { inicio: r.inicio, fim: r.fim, convergiu: r.estavel, linhas, contou, contando: f.contando, periodicas: r.periodicas, disparadas: r.disparadas, eventos: r.eventos };
 }
 
 /* ---------- BGP ---------- */
@@ -533,6 +553,12 @@ export interface ResultadoBgpMundo {
 
 const origemAs = (asn: number, caminho: number[]) => caminho[caminho.length - 1] ?? asn;
 
+/** Identificador BGP: sem um configurado, os roteadores usam o maior endereço IPv4 das próprias interfaces. */
+function idBgp(e: Equipamento): number | undefined {
+  const ips = interfacesL3(e).map((i) => i.cidr.endereco >>> 0);
+  return ips.length ? Math.max(...ips) : undefined;
+}
+
 /** BGP no mundo: um roteador por AS, sessões eBGP entre vizinhos diretos. As melhores rotas viram rotas "bgp" na tabela. */
 export function calcularBgp(m: Mundo): ResultadoBgpMundo {
   const todos = [...m.equipamentos.values()];
@@ -540,7 +566,7 @@ export function calcularBgp(m: Mundo): ResultadoBgpMundo {
   const sessoes = sessoesBgp(m);
   const nos: NoBgp[] = todos
     .filter((e) => bgpDe(e) && roteadorLigado(e))
-    .map((e) => ({ id: e.nome, asn: bgpDe(e)!.asn, prefixos: [...bgpDe(e)!.anuncia], sessoes: sessoes.filter((s) => s.de === e.nome && s.estabelecida).map((s) => ({ com: s.com!, relacao: s.relacao })) }));
+    .map((e) => ({ id: e.nome, asn: bgpDe(e)!.asn, prefixos: [...bgpDe(e)!.anuncia], sessoes: sessoes.filter((s) => s.de === e.nome && s.estabelecida).map((s) => ({ com: s.com!, relacao: s.relacao })), idBgp: idBgp(e) }));
   const res = propagarBgp(nos);
   const sequestros: ResultadoBgpMundo['sequestros'] = [];
   for (const n of nos) {
@@ -687,7 +713,7 @@ export function temProtocolos(m: Mundo): boolean {
 
 /**
  * OSPF e BGP reagem rápido a mudança (o hello some, a sessão cai), então são recalculados a cada comando.
- * O RIP não: ele anda em rodadas ("rodar-protocolos"), para dar para ver a contagem ao infinito.
+ * O RIP não: o relógio dele só anda com "rodar-protocolos", para dar para ver os temporizadores e a contagem ao infinito.
  */
 export function recalcularProtocolos(m: Mundo): void {
   let ospf = false;

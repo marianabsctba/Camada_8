@@ -241,7 +241,7 @@ const dia82: Dia = {
   ],
   posMorte: [
     'Antes de você ligar o OSPF no dc, a Olaria e a Serraria mandavam HELLO para o data center e ninguém respondia. Sem vizinho, nada de enlace no mapa, e a prefeitura ficou de fora. Ligado o protocolo, os HELLOs fecharam, o dc mandou o LSP dele, recebeu os três dos bairros e rodou o Dijkstra: o caminho até o Moinho pela Olaria custa 1 + 1 = 2, contra 2 + 2 = 4 pela Serraria. A rota para o posto entrou com métrica 3 (os 2 do caminho mais 1 da rede do posto).',
-    'Quando o trecho caiu, o dc e a Olaria perceberam na hora e publicaram LSPs com sequência maior. Todos receberam, jogaram fora a versão velha e recalcularam. A rota trocou para a Serraria, com métrica 5, sem ninguém digitar rota nenhuma. No vetor de distância, a mesma queda levaria algumas rodadas de troca de vetores; aqui foi uma inundação e um Dijkstra.',
+    'Quando o trecho caiu, o dc e a Olaria perceberam na hora e publicaram LSPs com sequência maior. Todos receberam, jogaram fora a versão velha e recalcularam. A rota trocou para a Serraria, com métrica 5, sem ninguém digitar rota nenhuma. No RIP, a mesma queda levaria até 180 s só para alguém desconfiar da rota velha, e mais uma atualização de 30 s a cada salto para a notícia andar; aqui foi uma inundação e um Dijkstra.',
     'Repare na LSDB: o banco do dc é igual ao de qualquer outro roteador do anel. É isso que torna o estado de enlace previsível: todo mundo calcula sobre o mesmo mapa. Quando o mapa diverge (um LSP que não chegou, uma área mal configurada), começam os problemas, e é por isso que os números de sequência e a idade existem.',
   ],
   passos: [

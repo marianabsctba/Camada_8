@@ -210,7 +210,8 @@ const dia85: Dia = {
       'Congestionamento é quando chega a uma parte da rede mais tráfego do que ela consegue levar. O roteador recebe pacotes pela entrada mais depressa do que consegue mandar pela saída, e os que sobram esperam numa fila, o buffer da porta de saída. Se o excesso é passageiro, a fila absorve e depois esvazia. Se o excesso continua, a fila cresce até encher, e daí em diante cada pacote que chega é jogado fora. É diferente do controle de fluxo, que protege um receptor lento de um transmissor rápido: congestionamento é um problema da rede inteira, de muitas origens disputando o mesmo enlace.',
       'Parece que um buffer gigante resolveria. Não resolve: se a porta recebe 120 % do que consegue mandar, nenhuma fila dá conta, porque ela só cresce. Buffer maior apenas troca perda por atraso, e o pacote que espera tempo demais chega inútil (a origem já desistiu e retransmitiu, mandando mais tráfego para a mesma fila). Mesmo abaixo de 100 %, o atraso não é linear: pela conta de uma fila com chegadas aleatórias, ele cresce devagar até uns 70 %, dobra perto de 90 % e explode quando a carga encosta em 100 %, porque a espera é proporcional a 1 / (1 - carga). Por isso a curva carga × atraso tem aquele joelho, e por isso rede boa trabalha com folga.',
       'As soluções se organizam pela escala de tempo. Em meses ou anos, provisionamento: comprar mais capacidade onde o tráfego cresce. Em horas, roteamento sensível ao tráfego: desviar parte do fluxo por caminhos menos carregados. Por fluxo, controle de admissão: um fluxo novo só entra se couber, e quem não cabe é recusado antes de atrapalhar os outros. Em frações de segundo, estrangulamento do tráfego: o roteador avisa as origens para irem mais devagar, seja com um pacote de aviso mandado de volta (choke packet), seja marcando o próprio pacote com os 2 bits de ECN (notificação explícita de congestionamento) do cabeçalho IP, que o destino devolve à origem. E, se nada disso basta, descarte de carga: jogar pacotes fora, de preferência os menos importantes.',
-      'O RED (detecção aleatória antecipada) é um jeito esperto de descartar. Em vez de esperar o buffer encher e perder tudo de uma vez, o roteador acompanha a média da fila. Abaixo de um limiar mínimo, nada cai. Entre o mínimo e o máximo, cada pacote que chega cai com uma probabilidade pequena e crescente. Acima do máximo, todos caem. A origem que perde um pacote entende que há congestionamento e diminui a taxa cedo, com a fila ainda curta. Com ECN, o RED nem precisa descartar: marca o pacote, ele chega inteiro, e a origem diminui do mesmo jeito.',
+      'Quem diminui a taxa é a origem, e quase sempre ela é TCP. O TCP manda uma janela de pacotes e espera as confirmações; a janela cresce um pacote a cada ida e volta, e quando falta um pacote (o destino confirma de novo o mesmo número três vezes), a origem retransmite e corta a janela pela metade. É o aumento aditivo com redução multiplicativa. Funciona, mas só depois da perda: com descarte no fim da fila, as origens enchem o buffer até transbordar, e a fila vive cheia. Pior, o buffer cheio derruba pacote de todas as origens no mesmo instante, e todas recuam juntas e voltam a crescer juntas: é a sincronização global, que deixa o enlace ocioso enquanto todo mundo se recupera ao mesmo tempo.',
+      'O RED (detecção aleatória antecipada) é um jeito esperto de descartar. Em vez de esperar o buffer encher e perder tudo de uma vez, o roteador acompanha a média da fila. Abaixo de um limiar mínimo, nada cai. Entre o mínimo e o máximo, cada pacote que chega cai com uma probabilidade pequena e crescente. Acima do máximo, todos caem. A origem que perde um pacote corta a janela cedo, com a fila ainda curta, e como o sorteio pega uma origem de cada vez, elas deixam de recuar todas juntas. Com ECN, o RED nem precisa descartar: marca o pacote, ele chega inteiro, o destino devolve o aviso nas confirmações e a origem corta a janela do mesmo jeito, uma vez por ida e volta.',
     ],
   },
   dicas: [
@@ -232,8 +233,8 @@ const dia85: Dia = {
     ];
   },
   posMorte: [
-    'Sem nada configurado, a porta "centro" recebia 120 Mb/s para mandar 100. O buffer de 64 pacotes ficou cheio quase o tempo todo (57,8 pacotes em média), o atraso médio foi a 4,71 ms e 15,3 % dos pacotes caíram no fim da fila, sem olhar se eram do semáforo ou do backup. A curva mostrou por quê: até 70 % de carga o atraso mal se mexe, em 95 % já é quase vinte vezes o de 10 %, e acima de 100 % não existe buffer que chegue.',
-    'Com RED e ECN, o roteador passou a avisar cedo. A média da fila caiu para 6,1 pacotes, 67 pacotes foram marcados em vez de descartados, as origens diminuíram a taxa e a perda caiu para 4,3 %, com atraso médio de 616,7 µs. Mas a porta continuava recebendo mais do que cabia. O controle de admissão resolveu o resto: a 80 % de 100 Mb/s, semáforos e câmeras (60 Mb/s) entraram, e o backup (mais 60) foi recusado na porta. Carga de 60 %, zero perda, 137,6 µs de atraso médio.',
+    'Sem nada configurado, as três origens podiam mandar 120 Mb/s por uma porta de 100. Como são TCP, cada perda fazia uma delas cortar a janela pela metade, e só 0,2 % dos pacotes caiu. Mas elas só recuavam depois de o buffer transbordar: a fila ficou com 41,2 pacotes em média, e o atraso médio foi a 3,45 ms, mais de quarenta vezes o tempo de mandar um pacote. A curva, com tráfego que não recua, mostrou o resto: até 70 % de carga o atraso mal se mexe, em 95 % já é quase vinte vezes o de 10 %, e acima de 100 % não existe buffer que chegue.',
+    'Com RED e ECN, o roteador passou a avisar cedo. A média da fila caiu para 3,6 pacotes e o atraso médio para 477,7 µs: 137 pacotes foram marcados em vez de descartados, e as origens cortaram a janela 145 vezes, quase sempre por aviso. Só 16 pacotes caíram, nas vezes em que a média passou do máximo e o RED descarta até quem entende ECN. O preço apareceu no enlace: com a fila tão curta e as janelas cortadas pela metade, ele ficou ocupado só 71,8 % do tempo. O controle de admissão resolveu o resto: a 80 % de 100 Mb/s, semáforos e câmeras (60 Mb/s) entraram, e o backup (mais 60) foi recusado na porta. Carga de 60 %, zero perda, 93,2 µs de atraso médio.',
     'Repare que cada técnica age numa escala de tempo diferente. ECN e RED respondem em frações de segundo, a admissão decide fluxo a fluxo, e a solução de verdade para o backup é de outra escala: o cartório vai remarcar para as 3h da manhã, que é quando o servidor dorme de verdade. Provisionamento e bom senso também são controle de congestionamento.',
   ],
   passos: [
@@ -250,7 +251,7 @@ const dia85: Dia = {
         if (!f || f.porta !== 'centro') return 'A simulação não foi na porta "centro".';
         return Math.abs(f.carga - 1.2) < 1e-6 ? true : `Você simulou com ${Math.round(f.carga * 100)} %. O rush é 120 %: escreva 1,2 (ou 120 %).`;
       },
-      feito: 'Atraso médio de 4,71 ms, 554 de 3616 pacotes perdidos (15,3 %), fila com 57,8 pacotes em média e 64 no pico: o buffer vive cheio. Cheio, ele segura 64 × 80 µs = 5,12 ms de tráfego, e quem chega depois disso cai.',
+      feito: 'Atraso médio de 3,45 ms, só 55 de 24698 pacotes perdidos (0,2 %), mas fila com 41,2 pacotes em média e 64 no pico. As origens são TCP: a cada perda, cortam a janela pela metade e voltam a crescer, por isso perdem pouco. Só que recuam depois de o buffer transbordar, então a fila vive cheia. Cheio, ele segura 64 × 80 µs = 5,12 ms de tráfego.',
     }),
     passo({
       alvo: ['equip', 'avenida'],
@@ -265,7 +266,7 @@ const dia85: Dia = {
       acao: 'fila-red',
       valores: { porta: 'centro', min: '5', max: '15' },
       instrucao: 'Ligue o RED na porta "centro", com limiar mínimo de 5 pacotes e máximo de 15.',
-      porque: 'Com a média da fila abaixo de 5, nada cai; entre 5 e 15, cai um pacote aqui e outro ali, ao acaso; acima de 15, todos caem. A origem que perde um pacote diminui a taxa antes de o buffer encher.',
+      porque: 'Com a média da fila abaixo de 5, nada cai; entre 5 e 15, cai um pacote aqui e outro ali, ao acaso; acima de 15, todos caem. A origem TCP que perde um pacote corta a janela antes de o buffer encher.',
       conferir: (m) => (cfgPorta(m, 'avenida', 'centro').red ? true : 'O RED da porta "centro" continua desligado.'),
       feito: 'RED ligado. Repare que o máximo (15) fica bem abaixo do buffer (64): a ideia é que a fila nunca chegue perto de encher.',
     }),
@@ -283,9 +284,9 @@ const dia85: Dia = {
       acao: 'fila-simular',
       valores: { porta: 'centro', carga: '1,2' },
       instrucao: 'Simule de novo com 120 % de carga.',
-      porque: 'Mesma carga oferecida, mas agora o roteador avisa cedo e as origens obedecem. Compare atraso, perdas e ocupação com a primeira simulação.',
+      porque: 'Mesma carga oferecida, mas agora o roteador avisa cedo e as origens TCP obedecem: cortam a janela pela metade a cada aviso, no máximo uma vez por ida e volta. Compare atraso, perdas, ocupação e o tempo de enlace ocupado com a primeira simulação.',
       conferir: (m) => (simulouAgora(m, 'avenida', 'centro', 1.2) ? true : 'A simulação precisa ser na porta "centro", com 120 %, depois de ligar RED e ECN.'),
-      feito: 'Atraso médio de 616,7 µs, fila com 6,1 pacotes em média, 67 pacotes marcados com ECN e perda de 4,3 %. Bem melhor, mas a porta ainda recebe mais do que cabe: o RED segue descartando um pouco.',
+      feito: 'Atraso médio de 477,7 µs, fila com 3,6 pacotes em média, 137 pacotes marcados com ECN e só 16 perdidos (0,1 %), quando a média passou do máximo. Mas o enlace ficou ocupado só 71,8 % do tempo, e as origens seguem pedindo mais do que cabe: cada uma vive cortando a janela.',
     }),
     passo({
       alvo: ['equip', 'avenida'],
@@ -311,14 +312,14 @@ const dia85: Dia = {
       instrucao: 'Simule a hora do rush mais uma vez, com 120 %.',
       porque: 'Os mesmos 120 Mb/s batem na porta, mas agora a porta escolhe quem entra.',
       conferir: (m) => (simulouAgora(m, 'avenida', 'centro', 1.2) ? true : 'A simulação precisa ser na porta "centro", com 120 %, depois de ligar a admissão.'),
-      feito: 'Backup recusado na entrada, carga real de 60 %, zero perda e atraso médio de 137,6 µs. Os semáforos voltaram a conversar com a central.',
+      feito: 'Backup recusado na entrada, carga real de 60 %, zero perda e atraso médio de 93,2 µs. Ninguém precisou recuar, e os semáforos voltaram a conversar com a central.',
     }),
   ],
   aula: {
     cartoes: [
       {
         titulo: 'Mais entrando do que saindo',
-        texto: ['Três origens somam 120 Mb/s, e a porta de saída manda 100. O que sobra espera no buffer; quando o buffer enche, cai. Não importa quão rápido o roteador seja por dentro: o gargalo é o enlace de saída.'],
+        texto: ['Três origens podem somar 120 Mb/s, e a porta de saída manda 100. O que sobra espera no buffer; quando o buffer enche, cai, e a origem TCP que perdeu corta a janela. Não importa quão rápido o roteador seja por dentro: o gargalo é o enlace de saída.'],
         visual: {
           tipo: 'diagrama',
           nos: [
@@ -383,13 +384,13 @@ const dia85: Dia = {
       },
       {
         titulo: 'RED com limiares 5 e 15',
-        texto: ['A probabilidade de descarte (ou de marcação ECN) depende da média da fila, não do tamanho dela no instante. Assim uma rajada curta passa, e um congestionamento que persiste é avisado cedo. Com ECN, o pacote sorteado é marcado nos 2 bits de baixo do byte de serviço diferenciado do IPv4 em vez de cair.'],
+        texto: ['A probabilidade de descarte (ou de marcação ECN) depende da média da fila, não do tamanho dela no instante. Assim uma rajada curta passa, e um congestionamento que persiste é avisado cedo. A cada pacote que passa sem sorteio, a chance sobe um pouco, para os descartes virem espalhados e não em rajada. Com ECN, o pacote sorteado é marcado nos 2 bits de baixo do byte de serviço diferenciado do IPv4 em vez de cair.'],
         visual: {
           tipo: 'tabela',
           cabecalho: ['Média da fila', 'Chance de cair (ou ser marcado)'],
           linhas: [
             ['abaixo de 5', 'zero'],
-            ['10 (no meio do caminho)', '5 % (metade do pmáx de 10 %)'],
+            ['10 (no meio do caminho)', '5 % (metade do pmáx de 10 %), um pouco mais a cada pacote poupado'],
             ['quase 15', 'perto de 10 %'],
             ['15 ou mais', 'todos'],
           ],

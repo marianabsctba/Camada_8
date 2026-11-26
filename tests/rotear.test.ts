@@ -15,6 +15,7 @@ import {
   grafo,
   inundar,
   inundarLsps,
+  melhorRotaBgp,
   metricasPorRodada,
   montarLsp,
   montarLspMpls,
@@ -30,6 +31,8 @@ import { adicionar, ligar, novoMundo, pc, roteador, type Mundo } from '../src/mo
 import { ping } from '../src/motor/rede';
 import { escolherRota, traceroute } from '../src/motor/roteamento';
 import { Terminal } from '../src/motor/cli';
+import { rodarRip, RIP_ATUALIZACAO_S, RIP_COLETA_S, RIP_EXPIRA_S } from '../src/motor/protocolos';
+import type { RotaRip } from '../src/motor/rotear';
 import { acoesEquip, executarAcao, padroes } from '../src/motor/acoes';
 import type { Dia } from '../src/conteudo/tipos';
 
@@ -231,6 +234,21 @@ describe('MPLS e BGP puros', () => {
   });
 });
 
+describe('decisão do BGP na ordem da RFC 4271', () => {
+  const base = { prefixo: '203.0.113.0/24', relacao: 'par' as const, prefLocal: 100 };
+  it('preferência local, caminho, ORIGIN, MED do mesmo vizinho e identificador BGP, nessa ordem', () => {
+    const a = { ...base, caminho: [64501, 64510], de: 'x', idBgp: 9 };
+    const b = { ...base, caminho: [64502, 64510], de: 'y', idBgp: 5 };
+    expect(melhorRotaBgp(a, b)).toBe(b);
+    expect(melhorRotaBgp({ ...a, origem: 0 }, { ...b, origem: 2 }).de).toBe('x');
+    // MED só compara rotas do mesmo AS vizinho: de AS diferentes, quem decide é o identificador.
+    expect(melhorRotaBgp({ ...a, med: 0 }, { ...b, med: 50 }).de).toBe('y');
+    const c = { ...base, caminho: [64501, 64510], de: 'z', idBgp: 1, med: 50 };
+    expect(melhorRotaBgp({ ...a, med: 10 }, c).de).toBe('x');
+    expect(melhorRotaBgp({ ...a, prefLocal: 200 }, { ...b, caminho: [64502] }).de).toBe('x');
+  });
+});
+
 /* ---------- No mundo, pelo console ---------- */
 
 
@@ -326,38 +344,43 @@ describe('RIP nos roteadores do mundo', () => {
     m.cabos.delete([...m.cabos.values()].find((c) => c.a.equip === 'r1' && c.a.porta === 'p3')!.id);
     return m;
   }
-  it('converge, e depois de uma queda conta até o infinito sem horizonte dividido', () => {
+  /** RIP ligado nos três; sem as disparadas, cada notícia só anda na periódica e a contagem aparece. */
+  function ligar3(t: Terminal, extra: string[] = [], disparadas = false): void {
+    for (const r of ['r1', 'r2', 'r3']) rodar(t, r, ['rip on', ...(disparadas ? [] : ['rip disparadas off']), ...extra]);
+  }
+  const LAN_B = '203.0.113.0/24';
+  it('converge, e depois de uma queda conta até o infinito sem horizonte dividido nem disparadas', () => {
     const m = linha();
     const t = new Terminal(m, {} as Dia);
-    for (const r of ['r1', 'r2', 'r3']) rodar(t, r, ['rip on']);
+    ligar3(t);
     const s = rodar(t, 'r1', ['rodar-protocolos']);
-    expect(s).toMatch(/Convergiu/);
+    expect(s).toMatch(/convergiu/);
     expect(ping(m, 'a', ip('203.0.113.10'), 1).recebidos).toBe(1);
-    expect(rodar(t, 'r1', ['mostra rip'])).toMatch(/203\.0\.113\.0\/24 +2 +r2/);
+    expect(rodar(t, 'r1', ['mostra rip'])).toMatch(/203\.0\.113\.0\/24 +2 +r2 +renovada há/);
     // r3 perde a LAN do b: r2 e r1 ficam se enganando até 16.
     rodar(t, 'r3', ['derrubar p3']);
     const q = rodar(t, 'r1', ['rodar-protocolos 3']);
-    expect(q).toMatch(/rodada 1:/);
+    expect(q).toMatch(/LINHA DO TEMPO/);
     rodar(t, 'r1', ['rodar-protocolos']);
     expect(m.flags.rip.contouAoInfinito).toBe(true);
-    expect(m.flags.rip.metricas.r1['203.0.113.0/24'] ?? 16).toBe(16);
+    expect(m.flags.rip.metricas.r1[LAN_B] ?? 16).toBe(16);
   });
   it('com horizonte dividido a queda se espalha sem contar até o infinito', () => {
     const m = linha();
     const t = new Terminal(m, {} as Dia);
-    for (const r of ['r1', 'r2', 'r3']) rodar(t, r, ['rip on', 'rip horizonte on']);
+    ligar3(t, ['rip horizonte on']);
     rodar(t, 'r1', ['rodar-protocolos']);
     rodar(t, 'r3', ['derrubar p3']);
     const r = rodar(t, 'r1', ['rodar-protocolos']);
     expect(m.flags.rip.contouAoInfinito).toBe(false);
     expect(m.flags.rip.subidas).toBe(0);
-    expect(r).toMatch(/Convergiu/);
+    expect(r).toMatch(/convergiu/);
     expect(r).not.toMatch(/contagem ao infinito/);
   });
   it('o aviso de contagem ao infinito some quando a rede se acerta (enlace de volta, depois horizonte dividido)', () => {
     const m = linha();
     const t = new Terminal(m, {} as Dia);
-    for (const r of ['r1', 'r2', 'r3']) rodar(t, r, ['rip on']);
+    ligar3(t);
     rodar(t, 'r1', ['rodar-protocolos']);
     rodar(t, 'r3', ['derrubar p3']);
     const contou = rodar(t, 'r1', ['rodar-protocolos']);
@@ -368,11 +391,11 @@ describe('RIP nos roteadores do mundo', () => {
     // O enlace volta: a boa notícia corre, e o estado deixa de dizer que contou.
     rodar(t, 'r3', ['levantar p3']);
     const volta = rodar(t, 'r1', ['rodar-protocolos']);
-    expect(volta).toMatch(/Convergiu/);
+    expect(volta).toMatch(/convergiu/);
     expect(volta).not.toMatch(/contagem ao infinito/);
     expect(m.flags.rip.contouAoInfinito).toBe(false);
     expect(m.flags.rip.contando).toBe(false);
-    expect(m.flags.rip.metricas.r1['203.0.113.0/24']).toBe(2);
+    expect(m.flags.rip.metricas.r1[LAN_B]).toBe(2);
     // Com horizonte dividido, a próxima queda se espalha sem aviso; o histórico guarda só a primeira contagem.
     for (const r of ['r1', 'r2', 'r3']) rodar(t, r, ['rip horizonte on']);
     rodar(t, 'r3', ['derrubar p3']);
@@ -385,18 +408,76 @@ describe('RIP nos roteadores do mundo', () => {
   it('contagem interrompida no meio: avisa que está contando e para de avisar depois do horizonte dividido', () => {
     const m = linha();
     const t = new Terminal(m, {} as Dia);
-    for (const r of ['r1', 'r2', 'r3']) rodar(t, r, ['rip on']);
+    ligar3(t);
     rodar(t, 'r1', ['rodar-protocolos']);
     rodar(t, 'r3', ['derrubar p3']);
     expect(rodar(t, 'r1', ['rodar-protocolos 4'])).toMatch(/contagem ao infinito em andamento/);
     expect(m.flags.rip.contando).toBe(true);
     for (const r of ['r1', 'r2']) rodar(t, r, ['rip horizonte on']);
     const fim = rodar(t, 'r1', ['rodar-protocolos']);
-    expect(fim).toMatch(/Convergiu/);
+    expect(fim).toMatch(/convergiu/);
     expect(fim).not.toMatch(/contagem ao infinito/);
     expect(m.flags.rip.contando).toBe(false);
     expect(m.flags.rip.contouAoInfinito).toBe(false);
-    expect(m.flags.rip.metricas.r1['203.0.113.0/24'] ?? 16).toBe(16);
+    expect(m.flags.rip.metricas.r1[LAN_B] ?? 16).toBe(16);
+  });
+  it('temporizadores da RFC 2453: a rota aprendida fica 180 s, vai a 16 e a coleta de lixo a apaga 120 s depois', () => {
+    const m = linha();
+    const t = new Terminal(m, {} as Dia);
+    ligar3(t, ['rip horizonte on']);
+    rodar(t, 'r1', ['rodar-protocolos']);
+    // Corta o cabo entre r2 e r3: ninguém avisa o r2 de que a rota para a LAN do b morreu.
+    rodar(t, 'r2', ['derrubar p2']);
+    const r2 = m.equipamentos.get('r2')!;
+    const renovada = (r2.s.rip.tabela[LAN_B] as RotaRip).renovada!;
+    const um = rodarRip(m, 1);
+    expect(m.flags.rip.metricas.r2[LAN_B]).toBe(1);
+    // A rede da própria porta caída, essa sim, vai a 16 na hora.
+    expect(um.eventos.some((x) => x.roteador === 'r2' && x.tipo === 'perdeu-rede' && x.destino === '10.0.23.0/30' && x.t === um.inicio)).toBe(true);
+    const r = rodarRip(m);
+    const expirou = r.eventos.find((x) => x.roteador === 'r2' && x.destino === LAN_B && x.tipo === 'expirou')!;
+    expect(expirou.t).toBeCloseTo(renovada + RIP_EXPIRA_S, 6);
+    const apagou = r.eventos.find((x) => x.roteador === 'r2' && x.destino === LAN_B && x.tipo === 'apagou')!;
+    expect(apagou.t).toBeCloseTo(expirou.t + RIP_COLETA_S, 6);
+    // O r1 soube pela periódica do r2, que anunciou 16 durante a coleta de lixo.
+    const r1 = r.eventos.find((x) => x.roteador === 'r1' && x.destino === LAN_B && x.tipo === 'infinito')!;
+    expect(r1.t).toBeGreaterThanOrEqual(expirou.t);
+    expect(r1.t - expirou.t).toBeLessThanOrEqual(RIP_ATUALIZACAO_S + 5);
+    expect(r.convergiu).toBe(true);
+    expect(m.flags.rip.metricas.r2[LAN_B]).toBeUndefined();
+  });
+  it('periódica sorteada entre 25 e 35 s, e o mesmo mundo dá a mesma linha do tempo', () => {
+    const linhaDoTempo = () => {
+      const m = linha();
+      const t = new Terminal(m, {} as Dia);
+      ligar3(t);
+      rodar(t, 'r1', ['rodar-protocolos']);
+      rodar(t, 'r3', ['derrubar p3']);
+      const r = rodarRip(m);
+      for (const n of ['r1', 'r2', 'r3']) {
+        const falta = (m.equipamentos.get(n)!.s.rip.proxPeriodica as number) - m.flags.rip.relogio;
+        expect(falta).toBeGreaterThan(0);
+        expect(falta).toBeLessThanOrEqual(35);
+      }
+      // Cada passo da contagem é uma periódica do vizinho: nunca dois passos do mesmo roteador a menos de 25 s.
+      const passos = r.eventos.filter((x) => x.roteador === 'r1' && x.destino === LAN_B && x.tipo === 'subiu');
+      for (let i = 1; i < passos.length; i++) expect(passos[i]!.t - passos[i - 1]!.t).toBeGreaterThanOrEqual(25 - 1e-9);
+      return r.linhas.join('\n');
+    };
+    expect(linhaDoTempo()).toBe(linhaDoTempo());
+  });
+  it('com as atualizações disparadas, a queda chega a todos em segundos e ninguém conta', () => {
+    const m = linha();
+    const t = new Terminal(m, {} as Dia);
+    ligar3(t, [], true);
+    rodar(t, 'r1', ['rodar-protocolos']);
+    rodar(t, 'r3', ['derrubar p3']);
+    const r = rodarRip(m);
+    const r1 = r.eventos.find((x) => x.roteador === 'r1' && x.destino === LAN_B && x.tipo === 'infinito')!;
+    expect(r1.por).toBe('disparada');
+    expect(r1.t - r.inicio).toBeLessThanOrEqual(5);
+    expect(r.disparadas).toBeGreaterThan(0);
+    expect(m.flags.rip.contouAoInfinito).toBe(false);
   });
 });
 

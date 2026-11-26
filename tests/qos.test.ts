@@ -1,7 +1,7 @@
 // Congestionamento, qualidade de serviço e SDN do ato 4: fila de saída, RED, ECN, admissão, choke, descarte de
 // carga, baldes, escalonamento, DSCP na captura, regras de fluxo e telemetria. Primeiro puros, depois no mundo.
 import { describe, expect, it } from 'vitest';
-import { admitir, atrasoMD1, curvaCarga, fonteDeCarga, simularFila } from '../src/motor/fila';
+import { admitir, atrasoMD1, curvaCarga, fonteDeCarga, janelaInicial, RTO_MIN_S, simularFila } from '../src/motor/fila';
 import { byteServico, escalonar, lerDscp, nomeDscp, simularBalde, tempoRajada } from '../src/motor/qos';
 import { buscar, decidir, instalarRegra, lerAcoes, lerCasamento } from '../src/motor/sdn';
 import { filaConfere, temQos } from '../src/motor/cliQos';
@@ -53,15 +53,55 @@ describe('fila de saída e congestionamento', () => {
     expect(tail.perdasBuffer).toBeGreaterThan(0);
     expect(tail.perdasRed).toBe(0);
     expect(red.perdasRed).toBeGreaterThan(0);
-    expect(red.perdasBuffer).toBe(0);
-    expect(red.ocupacaoMax).toBeLessThan(50);
+    // Com a média lenta (peso 0,002), só a subida do começo ainda pega o buffer cheio.
+    expect(red.perdasBuffer).toBeLessThan(red.perdasRed / 100);
+    expect(red.ocupacaoMedia).toBeLessThan(tail.ocupacaoMedia / 2);
     expect(red.atrasoMedio).toBeLessThan(tail.atrasoMedio);
   });
 
-  it('ECN marca em vez de descartar, e a origem obedece e diminui a taxa', () => {
+  it('TCP em laço fechado: a perda no fim da fila faz a origem cortar a janela, e a perda fica pequena', () => {
+    // A mesma porta, a mesma taxa pedida: sem controle, o excesso vira perda; com TCP, a origem recua.
+    // Buffer de 20: a janela máxima do receptor (65 pacotes) passa do caminho (40) mais o buffer, e algo cai.
+    const udp = simularFila({ buffer: 20 }, [{ nome: 'x', mbps: 130, responde: false }], { capacidadeMbps: cap });
+    const tcp = simularFila({ buffer: 20 }, [{ nome: 'x', mbps: 130 }], { capacidadeMbps: cap });
+    const f = tcp.porFonte[0]!;
+    expect(f.tcp).toBe(true);
+    expect(udp.taxaPerda).toBeGreaterThan(0.2);
+    expect(tcp.perdasBuffer).toBeGreaterThan(0);
+    expect(tcp.taxaPerda).toBeLessThan(0.02);
+    expect(f.recuos).toBeGreaterThan(0);
+    expect(f.retransmitidos).toBeGreaterThanOrEqual(f.perdidos);
+    // Mesmo cortada pela metade, a janela ainda enche quase todo o caminho: o enlace segue ocupado.
+    expect(tcp.utilizacao).toBeGreaterThan(0.8);
+    expect(f.vazaoMbps).toBeLessThanOrEqual(cap);
+  });
+
+  it('janela inicial da RFC 3390 e piso do temporizador', () => {
+    expect(janelaInicial(1000)).toBe(4);
+    expect(janelaInicial(1460)).toBe(3);
+    expect(janelaInicial(1500)).toBe(2);
+    expect(RTO_MIN_S).toBe(0.2);
+  });
+
+  it('RED dessincroniza: com descarte no fim da fila as origens recuam juntas; com RED, cada uma na sua hora', () => {
+    const quatro = Array.from({ length: 4 }, (_, i) => ({ nome: `f${i}`, mbps: 40 }));
+    const tail = simularFila({ buffer: 64 }, quatro, { capacidadeMbps: cap });
+    const red = simularFila({ buffer: 64, red: { min: 5, max: 30 } }, quatro, { capacidadeMbps: cap });
+    expect(tail.sincronia).not.toBeNull();
+    expect(red.sincronia).not.toBeNull();
+    expect(red.sincronia!).toBeLessThan(tail.sincronia! - 0.1);
+    expect(red.perdasRed).toBeGreaterThan(red.perdasBuffer);
+    expect(red.ocupacaoMedia).toBeLessThan(tail.ocupacaoMedia / 4);
+    for (const f of red.porFonte) expect(f.recuos + f.expiracoes).toBeGreaterThan(0);
+  });
+
+  it('ECN marca em vez de descartar, e a origem obedece e diminui a taxa, no máximo uma vez por ida e volta', () => {
     const r = simularFila({ buffer: 50, red: { min: 5, max: 30, pmax: 0.2 }, ecn: true }, [{ nome: 'tcp', mbps: 110 }], { capacidadeMbps: cap });
     expect(r.marcadosEcn).toBeGreaterThan(0);
     expect(r.porFonte[0]!.sinais).toBeGreaterThan(0);
+    expect(r.porFonte[0]!.sinais).toBeLessThan(r.marcadosEcn);
+    // Uma redução por janela de dados: nunca mais reduções do que idas e voltas na simulação.
+    expect(r.porFonte[0]!.sinais).toBeLessThanOrEqual(r.duracao / r.rtt);
     expect(r.porFonte[0]!.fatorFinal).toBeLessThan(1);
     // Fonte que não entende ECN: o RED volta a descartar.
     const surda = simularFila({ buffer: 50, red: { min: 5, max: 30, pmax: 0.2 }, ecn: true }, [{ nome: 'velha', mbps: 110, ecn: false }], { capacidadeMbps: cap });
