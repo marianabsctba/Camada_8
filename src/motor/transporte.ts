@@ -347,7 +347,7 @@ export function conectar(m: Mundo, e: Equipamento, ipN: number, porta: number): 
   const cfg = configTcp(e);
   const iC = isn(m);
   const iS = isn(m);
-  const r = simularConexao({ ida: c.ida, volta: c.volta, escutando: d.como === 'escuta', isnCliente: iC, isnServidor: iS, fechamento: 'nenhum', mss: cfg.mss, escala: cfg.escala || undefined, janela: Math.min(65535, cfg.janela) });
+  const r = simularConexao({ ida: c.ida, volta: c.volta, escutando: d.como === 'escuta', isnCliente: iC, isnServidor: iS, fechamento: 'nenhum', mss: cfg.mss, escala: cfg.escala || undefined, janela: Math.min(65535, cfg.janela), portaCliente: portaLocal, portaServidor: porta });
   linhas.push(...r.linhas.filter((l) => !l.includes('servidor: socket')));
   if (!r.aberta) {
     linhas.push(primitiva(m, e, `connect(${fd}) falha: conexão recusada (RST)`));
@@ -371,7 +371,7 @@ export function fecharConexao(m: Mundo, e: Equipamento, modo: 'cliente' | 'servi
   const cx = e.s.conexao as Conexao | undefined;
   if (!cx) return ['Nenhuma conexão aberta. Use "conectar <ip> <porta>".'];
   const srv = m.equipamentos.get(cx.servidor);
-  const r = simularConexao({ ida: cx.rtt / 2, volta: cx.rtt / 2, escutando: true, isnCliente: cx.isnCliente, isnServidor: cx.isnServidor, fechamento: modo, jaAberta: true, dados: (e.s.enviados as number | undefined) ?? 0 });
+  const r = simularConexao({ ida: cx.rtt / 2, volta: cx.rtt / 2, escutando: true, isnCliente: cx.isnCliente, isnServidor: cx.isnServidor, fechamento: modo, jaAberta: true, dados: (e.s.enviados as number | undefined) ?? 0, portaCliente: cx.portaLocal, portaServidor: cx.porta });
   const linhas = [primitiva(m, e, modo === 'servidor' ? `(o servidor fecha primeiro; quando o FIN chegar, a aplicação daqui chama close(${cx.fdCliente}))` : `close(${cx.fdCliente})${modo === 'simultaneo' ? ' (e o servidor também, ao mesmo tempo)' : ''}`), ...r.linhas];
   const lista = soquetesDe(e);
   const meu = lista.find((s) => s.fd === cx.fdCliente);

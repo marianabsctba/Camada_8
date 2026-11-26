@@ -221,6 +221,9 @@ export interface OpcoesConexao {
   escala?: number;
   /** Começa com a conexão já aberta (os dois em ESTABLISHED) e só encerra. */
   jaAberta?: boolean;
+  /** Portas de cada lado (padrão 49152 no cliente e 80 no servidor). */
+  portaCliente?: number;
+  portaServidor?: number;
 }
 
 export interface ResultadoConexao {
@@ -249,7 +252,7 @@ export function simularConexao(o: OpcoesConexao): ResultadoConexao {
   const est = { cliente: 'CLOSED' as EstadoTcp, servidor: 'CLOSED' as EstadoTcp };
   const seq = { cliente: isnC, servidor: isnS };
   const ack = { cliente: 0, servidor: 0 };
-  const portas = { cliente: 49152, servidor: 80 };
+  const portas = { cliente: o.portaCliente ?? 49152, servidor: o.portaServidor ?? 80 };
   const ir = (quem: 'cliente' | 'servidor', ev: EventoTcp, segmento?: string): Transicao | null => {
     const t = transitar(est[quem], ev);
     if (!t) return null;
