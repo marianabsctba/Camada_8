@@ -304,3 +304,18 @@ describe('802.11: arquitetura e camadas físicas', () => {
     expect(frequenciaCanal24(14)).toBe(2484);
   });
 });
+
+describe('associar no console (dia Canal lotado)', () => {
+  it('mostra beacon, autenticação e associação com o BSSID do AP', async () => {
+    const { porRef } = await import('../src/conteudo/dias');
+    const dia = porRef(16)!;
+    const t = new Terminal(dia.montar(), dia);
+    const passiva = t.executar('associar').join('\n');
+    expect(passiva).toContain('beacon');
+    expect(passiva).toContain('02:00:5e:16:00:01');
+    expect(passiva).toContain('association response');
+    const ativa = t.executar('associar ativa').join('\n');
+    expect(ativa).toContain('probe request');
+    expect(ativa).not.toMatch(/^  beacon/m);
+  });
+});

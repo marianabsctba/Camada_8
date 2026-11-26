@@ -5,7 +5,7 @@ import { avaliarE1, avaliarModem, BITS_POR_SIMBOLO, snrWifi, type UsoSlot } from
 import { avaliar, coaxDados, CORES, lerCor, ORBITAS, perdaElemento, radioDados, wiremap, type Cor } from './fisico';
 import { acharPorta, adicionar, caboNaPorta, lerPonta, ligar, TRANSCEPTORES, type Cabo, type Captura, type ElementoCoax, type Equipamento, type Fibra, type Meio, type Mundo } from './mundo';
 import { calcularStp, ehTronco, emTempestade, idPonte, limparTabelas, ping, prioridade, stpLigado, tabelaMac, vazao, type PapelPorta } from './rede';
-import { PROTOCOLOS_MAC, simularCanal, type EstadoMac, type ProtocoloMac } from './mac';
+import { entrarNaRede, INTERVALO_BEACON_MS, PROTOCOLOS_MAC, simularCanal, type EstadoMac, type ProtocoloMac } from './mac';
 import { simularArq, type ConfigArq, type Linha } from './arq';
 import { amostraDaLinha, hex, transmitir, type ConfigEnlace } from './enlace';
 import { fmt, ipTexto, lerCidr, lerIp, lerNumero, rngSemente, type Cidr } from './util';
@@ -496,6 +496,21 @@ const CAMPO: Record<string, Comando> = {
         e.antena.altura = v;
       } else return ['Eixo: azimute ou altura.'];
       return [`Antena de ${e.nome}: azimute ${fmt(e.antena.azimute, 0)}°, altura ${fmt(e.antena.altura, 0)} m.`];
+    },
+  },
+  associar: {
+    uso: 'associar [passiva|ativa]',
+    descricao: 'mostra, quadro a quadro, um cliente achando o AP e entrando no BSS (beacon ou probe, autenticação, associação)',
+    grupo: 'bancada',
+    rodar: (t, [modo]) => {
+      const ap = [...t.mundo.equipamentos.values()].find((e) => e.tipo === 'ap' && e.s.bssid);
+      if (!ap) return ['Nenhum ponto de acesso com BSSID por aqui.'];
+      const varredura = modo === 'ativa' ? 'ativa' : 'passiva';
+      const cliente = '02:00:5e:16:00:99';
+      const bss = { ssid: String(ap.s.ssid), bssid: String(ap.s.bssid), canal: Number(ap.s.canal ?? 1), modo: 'infraestrutura' as const };
+      const linhas = [`BSS "${bss.ssid}" (BSSID ${bss.bssid}), canal ${bss.canal}, beacon a cada ${fmt(INTERVALO_BEACON_MS, 1)} ms. Varredura ${varredura}:`];
+      for (const q of entrarNaRede(bss, cliente, varredura)) linhas.push(`  ${q.quadro.padEnd(21)} (subtipo ${String(q.subtipo).padStart(2)})  ${q.de} → ${q.para}`, `      ${q.explicacao}`);
+      return linhas;
     },
   },
   espectro: {
