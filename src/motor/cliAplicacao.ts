@@ -40,6 +40,12 @@ import {
   simularCdn,
   simularP2P,
   descreverMensagemDns,
+  valorRegistro,
+  etagDe,
+  resumo32,
+  dataHttp,
+  vazaoNoTempo,
+  atrasoMinimo,
   type EspacoNomes,
   type MensagemCorreio,
   type RegistroDns,
@@ -49,7 +55,7 @@ import {
   type TipoRegistro,
 } from './aplicacao';
 import { caminhoTransporte, demultiplexar, escutar, ipPrincipal, portaEfemera, soquetesDe, type CaminhoMundo, type InundacaoSyn, type Protocolo } from './transporte';
-import { idsDe, inspecionarConteudo } from './filtro';
+import { anotarFlag, idsDe, inspecionarConteudo, refrescarFiltros } from './filtro';
 import {
   abrirMensagem,
   apertoTls,
@@ -207,6 +213,7 @@ export function inspecionarNoCaminho(m: Mundo, c: CaminhoMundo, origem: string, 
     const ids = r && idsDe(r);
     if (!ids) continue;
     const d = inspecionarConteudo(ids, { origem: lerIp(origem) ?? 0, destino: lerIp(destino) ?? 0, protocolo: 6 }, conteudo);
+    refrescarFiltros(m, r!);
     if (d.texto) linhas.push(`  ${nome}: ${d.texto}`);
     if (d.bloquear) return { bloqueio: `${nome}: ${d.texto}`, linhas };
   }
@@ -343,7 +350,7 @@ export interface Resolucao {
 }
 
 function linhaRegistro(r: RegistroDns): string {
-  return `${r.nome.padEnd(28)} ${String(r.ttl).padStart(6)} IN ${r.tipo.padEnd(5)} ${r.tipo === 'MX' ? `${r.prioridade ?? 10} ` : ''}${r.valor}`;
+  return `${r.nome.padEnd(28)} ${String(r.ttl).padStart(6)} IN ${r.tipo.padEnd(5)} ${valorRegistro(r)}`;
 }
 
 /** Resolve um nome no mundo: o cliente pergunta ao resolvedor configurado (UDP 53), e o resolvedor faz o resto, com cache. */
@@ -428,8 +435,8 @@ function cmdDig(m: Mundo, e: Equipamento, args: string[], curto = false): Saida 
   if (!nome || !TIPOS.includes(tipo)) return ['dig <nome> [A|AAAA|NS|MX|CNAME|TXT|PTR|SOA]'];
   const res = resolverNoMundo(m, e, nome, tipo);
   const r = res.r;
-  m.flags.dns = { de: e.nome, nome: normalizarNome(nome), tipo, resolvedor: res.resolvedor?.nome ?? null, ok: res.ok, codigo: r?.codigo ?? 'SEM RESPOSTA', respostas: (r?.respostas ?? []).filter((x) => x.tipo === tipo).map((x) => x.valor), origem: r?.origem ?? null, consultas: r?.consultas ?? 0, tempoMs: r ? r4(r.tempo) : null, dnssec: res.dnssec ?? null, forjado: !!res.forjado };
-  if (res.dnssec && res.dnssec !== 'sem assinatura') m.flags.dnssec = { ...(m.flags.dnssec ?? {}), consulta: { nome: normalizarNome(nome), tipo, resultado: res.dnssec, resolvedor: res.resolvedor?.nome } };
+  anotarFlag(m, 'dns', { de: e.nome, nome: normalizarNome(nome), tipo, resolvedor: res.resolvedor?.nome ?? null, ok: res.ok, codigo: r?.codigo ?? 'SEM RESPOSTA', respostas: (r?.respostas ?? []).filter((x) => x.tipo === tipo).map((x) => x.valor), origem: r?.origem ?? null, consultas: r?.consultas ?? 0, tempoMs: r ? r4(r.tempo) : null, dnssec: res.dnssec ?? null, forjado: !!res.forjado });
+  if (res.dnssec && res.dnssec !== 'sem assinatura') anotarFlag(m, 'dnssec', { ...(m.flags.dnssec ?? {}), consulta: { nome: normalizarNome(nome), tipo, resultado: res.dnssec, resolvedor: res.resolvedor?.nome } });
   if (!r) return res.linhas;
   if (curto) {
     const v = r.respostas.filter((x) => x.tipo === tipo || x.tipo === 'CNAME');
@@ -565,17 +572,17 @@ function cmdNavegar(m: Mundo, e: Equipamento, args: string[]): Saida {
   const b = nav.buscar(mapa, args[0]!, relogio(m));
   const base = { de: e.nome, url: args[0], nome: u.nome, https };
   if (b.origem === 'cache') {
-    m.flags.http = { ...base, ok: true, estado: b.resposta.estado, origem: 'cache', ip: null, servidor: null, cookies: { ...(nav.cookies.get(u.nome) ?? {}) }, bytes: 0 };
+    anotarFlag(m, 'http', { ...base, ok: true, estado: b.resposta.estado, origem: 'cache', ip: null, servidor: null, cookies: { ...(nav.cookies.get(u.nome) ?? {}) }, bytes: 0 });
     return [...b.passos, `${b.resposta.estado} ${b.resposta.frase} (do cache, sem DNS, sem TCP, sem nada na rede).`, '', cortar(b.resposta.corpo, 300)];
   }
   if (ctx.falha) {
-    m.flags.http = { ...base, ok: false, motivo: ctx.falha, origem: 'rede' };
-    if (https && ctx.tls) m.flags.tls = { ...base, ok: false, motivo: ctx.tls.motivo, certificado: ctx.tls.certificado, cadeia: ctx.tls.cadeia.motivo ?? null, versao: '1.3' };
+    anotarFlag(m, 'http', { ...base, ok: false, motivo: ctx.falha, origem: 'rede' });
+    if (https && ctx.tls) anotarFlag(m, 'tls', { ...base, ok: false, motivo: ctx.tls.motivo, certificado: ctx.tls.certificado, cadeia: ctx.tls.cadeia.motivo ?? null, versao: '1.3' });
     return [...linhas, `A página não carregou (${{ dns: 'o nome não resolveu', recusada: 'conexão recusada', 'sem caminho': 'sem resposta no caminho', certificado: 'certificado inválido', 'sem-http': 'o serviço não é web' }[ctx.falha] ?? ctx.falha}).`];
   }
   const a = ctx.ida!.a!;
   if (ctx.bloqueio) {
-    m.flags.http = { ...base, ok: false, motivo: 'ips', origem: 'rede', bloqueio: ctx.bloqueio };
+    anotarFlag(m, 'http', { ...base, ok: false, motivo: 'ips', origem: 'rede', bloqueio: ctx.bloqueio });
     return [...linhas, 'O IPS derrubou a conexão (mandou RST para os dois lados): o pedido nunca chegou ao servidor.'];
   }
   const req = ctx.req ? serializarRequisicao(ctx.req) : '';
@@ -591,8 +598,8 @@ function cmdNavegar(m: Mundo, e: Equipamento, args: string[]): Saida {
   if (r.corpo) l.push('', cortar(r.corpo, 400));
   if (https) l.push('', `NO FIO (o que um farejador vê): TLS 1.3 para ${u.nome} (o nome vai no SNI), registro cifrado ${fio.slice(0, 64)}... Caminho, cookies e conteúdo ficaram ilegíveis.`);
   else l.push('', 'NO FIO: tudo acima passa em claro. Quem estiver num hub, numa porta espelhada ou no meio do caminho lê pedido, cookie e resposta.');
-  m.flags.http = { ...base, ok: true, estado: b.origem === 'validado' ? 304 : r.estado, estadoFinal: r.estado, origem: b.origem, ip: ctx.ida!.ip, porta: u.porta, servidor: a.srv!.nome, cookies: { ...(nav.cookies.get(u.nome) ?? {}) }, enviouCookie: !!ctx.req?.cabecalhos['Cookie'], condicional: !!ctx.req?.cabecalhos['If-None-Match'], rttMs: r4(a.c.rtt * 1000), bytes: r.corpo.length, dns: ctx.ida!.dns ? { origem: ctx.ida!.dns.r?.origem, consultas: ctx.ida!.dns.r?.consultas } : null };
-  if (https) m.flags.tls = { ...base, ok: ctx.tls!.ok, motivo: ctx.tls!.motivo ?? null, versao: '1.3', troca: 'Diffie-Hellman efêmero', cifra: 'AES-128 em modo contador', certificado: ctx.tls!.certificado, cadeia: ctx.tls!.cadeia.motivo ?? 'valida', dh: ctx.tls!.dh, fioCifrado: fio.slice(0, 64), legivel: false, sni: u.nome };
+  anotarFlag(m, 'http', { ...base, ok: true, estado: b.origem === 'validado' ? 304 : r.estado, estadoFinal: r.estado, origem: b.origem, ip: ctx.ida!.ip, porta: u.porta, servidor: a.srv!.nome, cookies: { ...(nav.cookies.get(u.nome) ?? {}) }, enviouCookie: !!ctx.req?.cabecalhos['Cookie'], condicional: !!ctx.req?.cabecalhos['If-None-Match'], rttMs: r4(a.c.rtt * 1000), bytes: r.corpo.length, dns: ctx.ida!.dns ? { origem: ctx.ida!.dns.r?.origem, consultas: ctx.ida!.dns.r?.consultas } : null });
+  if (https) anotarFlag(m, 'tls', { ...base, ok: ctx.tls!.ok, motivo: ctx.tls!.motivo ?? null, versao: '1.3', troca: 'Diffie-Hellman efêmero', cifra: 'AES-128 em modo contador', certificado: ctx.tls!.certificado, cadeia: ctx.tls!.cadeia.motivo ?? 'valida', dh: ctx.tls!.dh, fioCifrado: fio.slice(0, 64), legivel: false, sni: u.nome });
   return l;
 }
 
@@ -648,12 +655,12 @@ function cmdCorreioEnviar(m: Mundo, e: Equipamento, args: string[], seguro: bool
   linhas.push('1. Submissão ao seu servidor (porta 587):', ...sub.linhas.map((x) => '  ' + x));
   const base = { de: conta.endereco, para, assunto, pgp: seguro };
   if (!sub.ok) {
-    m.flags.correio = { ...base, entregue: false, motivo: 'submissão' };
+    anotarFlag(m, 'correio', { ...base, entregue: false, motivo: 'submissão' });
     return [...linhas, 'A mensagem ficou na caixa de saída.'];
   }
   const srv = sub.srv!;
   if (!servicosDe(srv)?.correio) {
-    m.flags.correio = { ...base, entregue: false, motivo: 'servidor sem correio' };
+    anotarFlag(m, 'correio', { ...base, entregue: false, motivo: 'servidor sem correio' });
     return [...linhas, `${srv.nome} não é servidor de correio.`];
   }
   const data = dataDoMundo(m);
@@ -710,8 +717,8 @@ function cmdCorreioEnviar(m: Mundo, e: Equipamento, args: string[], seguro: bool
     linhas.push(`Entregue na caixa de ${para} em ${destino.nome}. Cabeçalhos Received (de baixo para cima, o caminho):`, ...cabecalhos(msg, 'Received').map((x) => '  Received: ' + x));
   } else linhas.push('Não entregue.');
   const final = tentativas.find((x) => x.resultado === 'entregue' || x.resultado === 'local');
-  m.flags.correio = { ...base, entregue, servidor: srv.nome, destino: destino?.nome ?? null, mx: final?.mx ?? null, ipMx: final?.ip ?? null, prioridade: final?.prioridade ?? null, tentativas, received: cabecalhos(msg, 'Received').length };
-  if (seguro) m.flags.pgp = { ...(m.flags.pgp ?? {}), de: conta.endereco, para, assinada: true, cifrada: true, entregue };
+  anotarFlag(m, 'correio', { ...base, entregue, servidor: srv.nome, destino: destino?.nome ?? null, mx: final?.mx ?? null, ipMx: final?.ip ?? null, prioridade: final?.prioridade ?? null, tentativas, received: cabecalhos(msg, 'Received').length });
+  if (seguro) anotarFlag(m, 'pgp', { ...(m.flags.pgp ?? {}), de: conta.endereco, para, assinada: true, cifrada: true, entregue });
   return linhas;
 }
 
@@ -734,7 +741,7 @@ function cmdCorreioLer(m: Mundo, e: Equipamento, args: string[]): Saida {
       if (ab.ok && 'texto' in ab) l.push('  ' + cortar(ab.texto ?? '', 300));
       else l.push(...msg.corpo.split(/\r?\n/).slice(0, 3).map((x) => '  ' + x));
       lidas.push({ de: cabecalho(msg, 'From') ?? '', assunto: cabecalho(msg, 'Subject') ?? '', pgp: true, assinaturaValida: 'assinaturaValida' in ab ? ab.assinaturaValida : undefined });
-      if (ab.ok) m.flags.pgp = { ...(m.flags.pgp ?? {}), lida: { por: conta.endereco, assinaturaValida: (ab as { assinaturaValida?: boolean }).assinaturaValida ?? false } };
+      if (ab.ok) anotarFlag(m, 'pgp', { ...(m.flags.pgp ?? {}), lida: { por: conta.endereco, assinaturaValida: (ab as { assinaturaValida?: boolean }).assinaturaValida ?? false } });
     } else {
       l.push('  ' + cortar(msg.corpo, 300));
       lidas.push({ de: cabecalho(msg, 'From') ?? '', assunto: cabecalho(msg, 'Subject') ?? '', pgp: false });
@@ -743,7 +750,7 @@ function cmdCorreioLer(m: Mundo, e: Equipamento, args: string[]): Saida {
   if (!caixa.length) l.push('Caixa vazia.');
   registrar(m, e, a, 'tcp', proto === 'pop3' ? 110 : 143, caixa.map(serializarMensagem).join('\n\n'), caixa.map(serializarMensagem).join('\n\n'), false, `${proto.toUpperCase()} caixa de ${conta.endereco}`);
   if (proto === 'pop3') caixasDe(a.srv!)[conta.endereco.toLowerCase()] = [];
-  m.flags.correioLido = { endereco: conta.endereco, protocolo: proto, mensagens: lidas.length, lidas, ficaNoServidor: f.ficaNoServidor };
+  anotarFlag(m, 'correioLido', { endereco: conta.endereco, protocolo: proto, mensagens: lidas.length, lidas, ficaNoServidor: f.ficaNoServidor });
   return l;
 }
 
@@ -779,17 +786,21 @@ function cmdAssistir(m: Mundo, e: Equipamento, args: string[]): Saida {
   const linhas: Saida = [];
   const ida = chegar(m, e, u.nome, u.porta, linhas);
   if (ida.falha) {
-    m.flags.streaming = { de: e.nome, url: args[0], ok: false, motivo: ida.falha };
+    anotarFlag(m, 'streaming', { de: e.nome, url: args[0], ok: false, motivo: ida.falha });
     return [...linhas, 'O vídeo não começou.'];
   }
   const srv = ida.a!.srv!;
   const nome = u.caminho.replace(/^\//, '') || 'video';
   const v = servicosDe(srv)?.streaming?.videos?.[nome] ?? { taxa: 4000, duracao: 60 };
-  const base = ida.a!.c.bandaBps / 1000;
-  // A banda que sobra para o vídeo varia segundo a segundo (outros fluxos, Wi-Fi, a janela do TCP).
-  const banda = Array.from({ length: Math.ceil(v.duracao * 3) + 10 }, () => Math.round(base * (0.7 + 0.35 * m.rng())));
+  const c = ida.a!.c;
+  const base = c.bandaBps / 1000;
+  // A banda que sobra para o vídeo varia segundo a segundo (partida lenta, outros fluxos, quedas), mas é sempre a
+  // mesma série para o mesmo servidor, cliente e vídeo: o resultado de cada tentativa é reprodutível.
+  const semente = parseInt(resumo32(`vazao|${srv.nome}|${e.nome}|${nome}|${Math.round(base)}`), 16);
+  const banda = vazaoNoTempo({ base, segundos: Math.ceil(v.duracao * 3) + 10, semente, rtt: c.rtt });
   const media = banda.slice(0, v.duracao).reduce((s, x) => s + x, 0) / Math.max(1, Math.min(v.duracao, banda.length));
-  linhas.push(`Vídeo "${nome}" de ${srv.nome}: ${v.duracao} s a ${v.taxa} kb/s. Banda medida no caminho: gargalo de ${num(base / 1000, 1)} Mb/s em ${ida.a!.c.gargalo.de}:${ida.a!.c.gargalo.porta}, sobrando de ${num(Math.min(...banda) / 1000, 1)} a ${num(Math.max(...banda) / 1000, 1)} Mb/s ao longo do tempo.`);
+  const trecho = banda.slice(0, Math.max(1, v.duracao));
+  linhas.push(`Vídeo "${nome}" de ${srv.nome}: ${num(v.duracao, 0)} s a ${num(v.taxa, 0)} kb/s. Banda medida no caminho: gargalo de ${num(base / 1000, 1)} Mb/s em ${c.gargalo.de}:${c.gargalo.porta}; para o vídeo sobram em média ${num(media / 1000, 1)} Mb/s, de ${num(Math.min(...trecho) / 1000, 1)} a ${num(Math.max(...trecho) / 1000, 1)} Mb/s ao longo do tempo (partida lenta do TCP no primeiro segundo, outros fluxos, quedas).`);
   if (adaptativo) {
     const niveis = [
       { nome: '240p', taxa: Math.round(v.taxa / 8) },
@@ -798,13 +809,30 @@ function cmdAssistir(m: Mundo, e: Equipamento, args: string[]): Saida {
       { nome: '1080p', taxa: v.taxa },
     ];
     const r = simularAdaptativo({ niveis, banda, segmentos: Math.ceil(v.duracao / 2), segmento: 2, inicio: atraso || 2 });
-    m.flags.streaming = { de: e.nome, url: args[0], ok: true, adaptativo: true, taxaKbps: v.taxa, bandaKbps: Math.round(media), atrasoInicial: atraso, travamentos: r.travamentos, tempoTravado: r.tempoTravado, trocas: r.trocas, qualidadeMedia: Math.round(r.qualidadeMedia) };
-    return [...linhas, ...r.passos.slice(0, 20).map((x) => '  ' + x), `Adaptativo: ${r.trocas} troca(s) de qualidade, ${r.travamentos} travamento(s), qualidade média ${Math.round(r.qualidadeMedia)} kb/s.`];
+    anotarFlag(m, 'streaming', { de: e.nome, url: args[0], ok: true, adaptativo: true, taxaKbps: v.taxa, bandaKbps: Math.round(media), atrasoInicial: atraso, travamentos: r.travamentos, tempoTravado: r.tempoTravado, trocas: r.trocas, qualidadeMedia: Math.round(r.qualidadeMedia) });
+    return [...linhas, ...r.passos.slice(0, 20).map((x) => '  ' + x), `Adaptativo: ${r.trocas} troca(s) de qualidade, ${r.travamentos} travamento(s), qualidade média ${num(r.qualidadeMedia, 0)} kb/s.`];
   }
   const r = simularBuffer({ duracao: v.duracao, taxaVideo: v.taxa, banda, atrasoInicial: atraso });
-  m.flags.streaming = { de: e.nome, url: args[0], ok: true, adaptativo: false, taxaKbps: v.taxa, bandaKbps: Math.round(media), atrasoInicial: atraso, travamentos: r.travamentos, tempoTravado: r.tempoTravado, fim: r.fim };
-  const barra = r.linhaDoTempo.filter((_, i) => i % Math.max(1, Math.round(r.linhaDoTempo.length / 30)) === 0).map((x) => (x.estado === 'tocando' ? '>' : x.estado === 'travado' ? 'x' : '.')).join('');
-  return [...linhas, ...r.passos.slice(0, 14).map((x) => '  ' + x), `Linha do tempo (. esperando, > tocando, x travado): ${barra}`, r.travamentos ? `A banda média (${num(media / 1000, 1)} Mb/s) ${media < v.taxa ? 'não alcança' : 'mal alcança'} a taxa do vídeo (${num(v.taxa / 1000, 1)} Mb/s). Mais atraso inicial ajuda nas quedas; banda menor que a taxa, nada resolve a não ser baixar a qualidade ("adaptativo").` : 'Tocou sem travar: o buffer absorveu as variações.'];
+  const minimo = r.travamentos ? atrasoMinimo({ duracao: v.duracao, taxaVideo: v.taxa, banda }) : null;
+  anotarFlag(m, 'streaming', { de: e.nome, url: args[0], ok: true, adaptativo: false, taxaKbps: v.taxa, bandaKbps: Math.round(media), atrasoInicial: atraso, travamentos: r.travamentos, tempoTravado: r.tempoTravado, fim: r.fim, atrasoMinimo: minimo });
+  // Linha do tempo em uns 30 pedaços: o pedaço vira x se travou em algum momento dentro dele.
+  const passo = Math.max(1, Math.round(r.linhaDoTempo.length / 30));
+  let barra = '';
+  for (let i = 0; i < r.linhaDoTempo.length; i += passo) {
+    const pedaco = r.linhaDoTempo.slice(i, i + passo);
+    barra += pedaco.some((x) => x.estado === 'travado') ? 'x' : pedaco.some((x) => x.estado === 'tocando') ? '>' : '.';
+  }
+  let conclusao = 'Tocou sem travar: o buffer absorveu as variações.';
+  if (r.travamentos && minimo !== null) {
+    const espera = `um atraso inicial de ${num(minimo, 0)} s (${num((minimo / v.duracao) * 100, 0)} % da duração)`;
+    conclusao =
+      media >= v.taxa
+        ? `A banda média (${num(media / 1000, 1)} Mb/s) alcança a taxa do vídeo (${num(v.taxa / 1000, 1)} Mb/s), mas varia: faltou reserva para atravessar as quedas. Nesta banda, ${espera} já toca do começo ao fim.`
+        : minimo <= v.duracao * 0.1
+          ? `A banda média (${num(media / 1000, 1)} Mb/s) fica um pouco abaixo da taxa do vídeo (${num(v.taxa / 1000, 1)} Mb/s): a reserva vai diminuindo, mas ${espera} ainda chega ao fim sem travar. Sem esperar tanto, só baixando a qualidade ("adaptativo").`
+          : `A banda média (${num(media / 1000, 1)} Mb/s) não alcança a taxa do vídeo (${num(v.taxa / 1000, 1)} Mb/s): a reserva só diminui. Para tocar liso nesta qualidade seria preciso ${espera}, quase baixar antes de ver. O que resolve é baixar a qualidade ("adaptativo").`;
+  }
+  return [...linhas, ...r.passos.slice(0, 14).map((x) => '  ' + x), `Linha do tempo (. esperando, > tocando, x travado): ${barra}`, conclusao];
 }
 
 function cdnDoMundo(m: Mundo): { e: Equipamento; cfg: NonNullable<ServicosEquip['cdn']> } | null {
@@ -825,7 +853,7 @@ function cmdCdn(m: Mundo, e: Equipamento, args: string[]): Saida {
     const espectadores = lerNumero(args[1] ?? '') ?? 2000;
     const taxa = lerNumero(args[2] ?? '') ?? 5;
     const r = simularCdn({ origem, bordas, publico: Object.keys(CIDADES).map((cidade) => ({ cidade, espectadores })), taxaPorEspectador: taxa, capacidadeEnlacePrincipal: x?.cfg.capacidade ?? 10000 });
-    m.flags.cdn = { ...(m.flags.cdn ?? {}), simulacao: { espectadores, taxa, origem, bordas, semCdn: r.semCdn, comCdn: r.comCdn } };
+    anotarFlag(m, 'cdn', { ...(m.flags.cdn ?? {}), simulacao: { espectadores, taxa, origem, bordas, semCdn: r.semCdn, comCdn: r.comCdn } });
     return [...r.passos, ...r.porCidade.map((p) => `  ${p.cidade.padEnd(16)} borda ${p.borda.padEnd(14)} RTT ${num(p.rttCom, 1)} ms (sem CDN: ${num(p.rttSem, 1)} ms)`)];
   }
   const nome = args[0] ?? x?.cfg.nome;
@@ -833,7 +861,7 @@ function cmdCdn(m: Mundo, e: Equipamento, args: string[]): Saida {
   const cidade = args.slice(1).join(' ') || (e.s.cidade as string | undefined) || 'Curitiba';
   if (!CIDADES[cidade]) return [`Cidade desconhecida. Use uma destas: ${Object.keys(CIDADES).join(', ')}.`];
   const d = dnsCdn(nome, cidade, bordas);
-  m.flags.cdn = { ...(m.flags.cdn ?? {}), nome: normalizarNome(nome), cidade, borda: d.borda, nomeCdn: d.nomeCdn, rttMs: r4(d.rtt), bordas, maisPerto: bordaMaisPerto(cidade, bordas) };
+  anotarFlag(m, 'cdn', { ...(m.flags.cdn ?? {}), nome: normalizarNome(nome), cidade, borda: d.borda, nomeCdn: d.nomeCdn, rttMs: r4(d.rtt), bordas, maisPerto: bordaMaisPerto(cidade, bordas) });
   return [`CDN ${x ? `configurada em ${x.e.nome}` : 'de exemplo'}: origem em ${origem}, bordas em ${bordas.join(', ')}.`, ...d.passos];
 }
 
@@ -845,7 +873,7 @@ function cmdP2p(m: Mundo, e: Equipamento, args: string[]): Saida {
     const chave = args.slice(1).join(' ') || 'aula.mp4';
     const nos = [3, 17, 42, 77, 101, 150, 199, 230];
     const r = dhtResponsavel(chave, nos);
-    m.flags.p2p = { ...(m.flags.p2p ?? {}), dht: { chave, id: r.id, responsavel: r.responsavel } };
+    anotarFlag(m, 'p2p', { ...(m.flags.p2p ?? {}), dht: { chave, id: r.id, responsavel: r.responsavel } });
     return r.passos;
   }
   if (sub === 'comparar') {
@@ -853,7 +881,7 @@ function cmdP2p(m: Mundo, e: Equipamento, args: string[]): Saida {
     const usMbps = lerNumero(args[2] ?? '') ?? (e.portas[0]?.velocidades.at(-1) ?? 100);
     const uMbps = lerNumero(args[3] ?? '') ?? 10;
     const linhas = compararDistribuicao([1, 10, 100, 1000], { F: mb * 8e6, us: usMbps * 1e6, dmin: 100e6, u: uMbps * 1e6 });
-    m.flags.p2p = { ...(m.flags.p2p ?? {}), comparacao: { mb, usMbps, uMbps, linhas } };
+    anotarFlag(m, 'p2p', { ...(m.flags.p2p ?? {}), comparacao: { mb, usMbps, uMbps, linhas } });
     return [`Arquivo de ${mb} MB, servidor sobe ${usMbps} Mb/s, cada par sobe ${uMbps} Mb/s e desce até 100 Mb/s.`, '   N   cliente-servidor     P2P', ...linhas.map((x) => `${String(x.N).padStart(5)} ${num(x.clienteServidor, 1).padStart(14)} s ${num(x.p2p, 1).padStart(10)} s`), 'No cliente-servidor o tempo cresce com N; no P2P cada par que recebe também serve, e o tempo para de crescer.'];
   }
   const nums = args.slice(sub === 'simular' ? 1 : 0).filter((x) => /^\d+$/.test(x)).map(Number);
@@ -863,11 +891,43 @@ function cmdP2p(m: Mundo, e: Equipamento, args: string[]): Saida {
   const politica = args.includes('aleatorio') ? 'aleatorio' : 'mais-raro';
   const olho = !args.includes('sem-olho');
   const r = simularP2P({ pares, pedacos, conexoes, politica, olhoPorOlho: olho, semente: Math.floor(m.rng() * 1e6) });
-  m.flags.p2p = { ...(m.flags.p2p ?? {}), enxame: { pares, pedacos, conexoes, politica, olhoPorOlho: olho, rodadas: r.rodadas, transferencias: r.transferencias } };
+  anotarFlag(m, 'p2p', { ...(m.flags.p2p ?? {}), enxame: { pares, pedacos, conexoes, politica, olhoPorOlho: olho, rodadas: r.rodadas, transferencias: r.transferencias } });
   return r.passos;
 }
 
 /* ---------- Configurar serviços pelo console ---------- */
+
+/**
+ * Separa por espaços, mas o que vem entre aspas é uma palavra só, como a character-string do arquivo de zona
+ * (RFC 1035, §5.1): "v=spf1 mx -all" vira um valor, e \" ou \\ dentro das aspas viram o próprio caractere.
+ * O console junta espaços repetidos antes de chegar aqui; dentro das aspas fica um espaço só.
+ */
+export function lerPalavras(txt: string): string[] | string {
+  const out: string[] = [];
+  let i = 0;
+  while (i < txt.length) {
+    if (txt[i] === ' ') {
+      i++;
+      continue;
+    }
+    if (txt[i] === '"') {
+      let v = '';
+      i++;
+      while (i < txt.length && txt[i] !== '"') {
+        if (txt[i] === '\\' && i + 1 < txt.length) i++;
+        v += txt[i++];
+      }
+      if (i >= txt.length) return 'Faltou fechar as aspas.';
+      i++;
+      out.push(v);
+      continue;
+    }
+    let v = '';
+    while (i < txt.length && txt[i] !== ' ') v += txt[i++];
+    out.push(v);
+  }
+  return out;
+}
 
 function ligadoTxt(v: string | undefined): boolean | null {
   return v === 'on' || v === 'liga' || v === 'sim' ? true : v === 'off' || v === 'desliga' || v === 'nao' ? false : null;
@@ -879,7 +939,7 @@ function mostraServicos(e: Equipamento): Saida {
   const l = [`SERVIÇOS DE ${e.nome} (${ipPrincipal(e) ?? 'sem IP'})`];
   if (s.dns) {
     l.push(`  DNS: ${s.dns.zona ? `autoritativo para ${normalizarNome(s.dns.zona)}` : 'sem zona'}${s.dns.recursivo ? ', resolvedor recursivo com cache' : ''}${s.dns.dnssec ? ', zona assinada (DNSSEC)' : ''}${s.dns.validar ? ', valida DNSSEC' : ''}${s.dns.portasAleatorias ? ', portas de origem aleatórias' : ''}`);
-    for (const r of s.dns.registros ?? []) l.push(`    ${r.nome} ${r.ttl ?? 300} ${r.tipo} ${r.prioridade !== undefined ? r.prioridade + ' ' : ''}${r.valor}`);
+    for (const r of s.dns.registros ?? []) l.push(`    ${r.nome} ${r.ttl ?? 300} ${r.tipo} ${valorRegistro({ ...r, ttl: r.ttl ?? 300 })}`);
     const c = e.s._cacheDns as CacheDns | undefined;
     if (c) l.push(`    cache: ${c.tamanho(0)} entrada(s) guardada(s)`);
   }
@@ -915,11 +975,22 @@ function cmdServico(m: Mundo, e: Equipamento, args: string[]): Saida {
           if (resto[1]) d.nome = normalizarNome(resto[1]);
           return fim([`${e.nome} agora é autoritativo para ${String(d.zona).replace(/\.$/, '')}. A zona mãe ganha a delegação (NS e cola) sozinha.`]);
         case 'registro': {
-          const [nome, t, valor, ttl, pri] = resto;
+          const partes = lerPalavras(resto.join(' '));
+          const uso = ['servico dns registro <nome> <A|AAAA|NS|MX|CNAME|TXT|PTR> <valor> [ttl] [prioridade do MX]. Texto com espaços vai entre aspas: servico dns registro @ TXT "v=spf1 mx -all"'];
+          if (typeof partes === 'string') return [partes, ...uso];
+          const [nome, t, valor, ttlTxt, priTxt] = partes;
           const tp = (t ?? '').toUpperCase() as TipoRegistro;
-          if (!nome || !TIPOS.includes(tp) || !valor) return ['servico dns registro <nome> <A|AAAA|NS|MX|CNAME|TXT|PTR> <valor> [ttl] [prioridade do MX]'];
-          (d.registros ??= []).push({ nome, tipo: tp, valor, ttl: ttl ? Number(ttl) : undefined, prioridade: pri ? Number(pri) : tp === 'MX' ? 10 : undefined });
-          return fim([`Registro ${nome} ${tp} ${valor} na zona ${d.zona ? d.zona.replace(/\.$/, '') : '(ainda sem zona)'}.`]);
+          if (!nome || !TIPOS.includes(tp) || valor === undefined || (valor === '' && tp !== 'TXT')) return uso;
+          const ttl = ttlTxt ? Number(ttlTxt) : undefined;
+          const pri = priTxt ? Number(priTxt) : undefined;
+          // TTL é inteiro de 32 bits sem sinal (RFC 2181, §8); a preferência do MX, de 16 bits (RFC 1035, §3.3.9).
+          if (ttl !== undefined && (!Number.isInteger(ttl) || ttl < 0 || ttl > 2147483647)) return ['O TTL é um número inteiro de segundos, de 0 a 2147483647.'];
+          if (pri !== undefined && (!Number.isInteger(pri) || pri < 0 || pri > 65535)) return ['A prioridade do MX é um inteiro de 0 a 65535 (menor é mais preferido).'];
+          if (tp === 'TXT' && new TextEncoder().encode(valor).length > 255) return ['Cada texto de um TXT cabe em 255 bytes (character-string, RFC 1035, §3.3). Divida em dois registros.'];
+          if ((tp === 'A' && lerIp(valor) === null) || (tp === 'MX' && lerIp(valor) !== null)) return [tp === 'A' ? `Um registro A guarda um IPv4, e "${valor}" não é.` : 'O MX aponta para um nome (que tem o seu A), nunca direto para um IP (RFC 2181, §10.3).'];
+          (d.registros ??= []).push({ nome, tipo: tp, valor, ttl, prioridade: tp === 'MX' ? (pri ?? 10) : undefined });
+          const mostra = tp === 'TXT' ? `"${valor.replace(/(["\\])/g, '\\$1')}"` : tp === 'MX' ? `${pri ?? 10} ${valor}` : valor;
+          return fim([`Registro ${nome} ${tp} ${mostra} na zona ${d.zona ? d.zona.replace(/\.$/, '') : '(ainda sem zona)'}.`]);
         }
         case 'recursivo':
         case 'validar':
@@ -927,15 +998,17 @@ function cmdServico(m: Mundo, e: Equipamento, args: string[]): Saida {
         case 'portas-aleatorias': {
           const b = ligadoTxt(resto[0]);
           if (b === null) return [`servico dns ${op} <on|off>`];
+          if (op === 'dnssec' && b && !d.zona) return ['Só se assina uma zona que este servidor serve: primeiro "servico dns zona <zona>".'];
+          if ((op === 'validar' || op === 'portas-aleatorias') && b && !d.recursivo) return [`${op === 'validar' ? 'Quem valida DNSSEC' : 'Quem sorteia a porta de origem'} é o resolvedor, que pergunta aos outros servidores: primeiro "servico dns recursivo on".`];
           if (op === 'recursivo') d.recursivo = b;
           else if (op === 'validar') d.validar = b;
           else if (op === 'dnssec') d.dnssec = b;
           else d.portasAleatorias = b;
           const txt: Record<string, string> = {
             recursivo: b ? 'Resolvedor recursivo: os clientes perguntam aqui e este servidor vai da raiz até a resposta, guardando tudo no cache pelo TTL.' : 'Sem recursão: só responde pela própria zona.',
-            validar: b ? 'O resolvedor passa a conferir as assinaturas DNSSEC: resposta de zona assinada sem assinatura certa é descartada.' : 'O resolvedor aceita qualquer resposta que pareça certa (id e porta batendo).',
-            dnssec: b ? `Zona ${d.zona ?? '?'} assinada: cada conjunto de registros ganha RRSIG com a chave da zona (DNSKEY), e o resumo da chave vai para a zona mãe (DS).` : 'Zona sem assinatura.',
-            'portas-aleatorias': b ? 'Cada consulta sai de uma porta de origem sorteada: quem quiser forjar resposta precisa acertar o id (16 bits) e a porta.' : 'Consultas saem sempre da porta 53: só o id de 16 bits protege contra resposta forjada.',
+            validar: b ? 'O resolvedor passa a conferir as assinaturas DNSSEC: resposta de zona assinada sem assinatura certa é descartada (RFC 4035, §5).' : 'O resolvedor aceita qualquer resposta que pareça certa (id e porta batendo).',
+            dnssec: b ? `Zona ${d.zona ?? '?'} assinada: cada conjunto de registros ganha RRSIG com a chave da zona (DNSKEY), e o resumo da chave vai para a zona mãe (DS). RFC 4033 a 4035.` : 'Zona sem assinatura.',
+            'portas-aleatorias': b ? 'Cada consulta sai de uma porta de origem sorteada: quem quiser forjar resposta precisa acertar o id (16 bits) e a porta, mais uns 16 bits (RFC 5452).' : 'Consultas saem sempre da porta 53: só o id de 16 bits protege contra resposta forjada.',
           };
           return fim([txt[op]!]);
         }
@@ -945,7 +1018,7 @@ function cmdServico(m: Mundo, e: Equipamento, args: string[]): Saida {
             c.limpar();
             return ['Cache do resolvedor esvaziado.'];
           }
-          return [`Cache do resolvedor: ${c.tamanho(relogio(m))} entrada(s) viva(s) no relógio ${relogio(m)} s.`];
+          return [`Cache do resolvedor: ${c.tamanho(relogio(m))} entrada(s) viva(s) no relógio ${String(relogio(m)).replace(".", ",")} s.`];
         }
       }
       if (!op) return fim([]);
@@ -956,15 +1029,25 @@ function cmdServico(m: Mundo, e: Equipamento, args: string[]): Saida {
       if (op === 'pagina') {
         const [caminho, ...texto] = resto;
         if (!caminho?.startsWith('/') || !texto.length) return ['servico web pagina <caminho> <conteúdo...>. Ex.: servico web pagina /promo Promoção de hoje'];
-        (w.paginas ??= {})[caminho] = { ...(w.paginas[caminho] ?? {}), conteudo: texto.join(' '), modificado: relogio(m) };
-        return fim([`Página ${caminho} publicada (ETag novo: quem tiver cópia velha recebe 200 com a nova, não 304).`]);
+        const antiga = w.paginas?.[caminho];
+        const conteudo = texto.join(' ');
+        if (antiga && antiga.conteudo === conteudo) {
+          // Mesmo conteúdo: mesmo ETag e mesma Last-Modified, e quem tem cópia continua recebendo 304.
+          return fim([`Página ${caminho} já estava com esse conteúdo: ETag ${etagDe(conteudo)} e Last-Modified ${dataHttp(antiga.modificado ?? 0)} continuam os mesmos, e quem tem cópia continua recebendo 304.`]);
+        }
+        (w.paginas ??= {})[caminho] = { ...(antiga ?? {}), conteudo, modificado: relogio(m) };
+        return fim([
+          antiga
+            ? `Página ${caminho} mudou: ETag novo ${etagDe(conteudo)} (era ${etagDe(antiga.conteudo)}), Last-Modified ${dataHttp(relogio(m))}. Quem tiver a cópia velha recebe 200 com a nova, não 304.`
+            : `Página ${caminho} publicada: ETag ${etagDe(conteudo)} (resumo do conteúdo), Last-Modified ${dataHttp(relogio(m))}.`,
+        ]);
       }
       if (op === 'validade') {
         const [caminho, seg] = resto;
         const n = Number(seg);
         if (!caminho || !w.paginas?.[caminho] || !Number.isFinite(n) || n < 0) return ['servico web validade <caminho já publicado> <segundos>'];
         w.paginas[caminho]!.maxAge = n;
-        return fim([`Cache-Control: max-age=${n} para ${caminho}: o navegador usa a cópia sem perguntar durante ${n} s.`]);
+        return fim([`Cache-Control: max-age=${n} para ${caminho}: o navegador usa a cópia sem perguntar durante ${String(n).replace(".", ",")} s.`]);
       }
       if (op === 'https') {
         const v = resto[0] ?? 'on';
@@ -1041,7 +1124,7 @@ export function comandosAplicacao(m: Mundo, e: Equipamento, cmd: string, args: s
     case 'esperar': {
       const n = lerNumero(args[0] ?? '');
       if (n === null || n < 0 || n > 864000) return ['esperar <segundos>: o relógio do mundo anda (o TTL do DNS e a validade do cache HTTP contam por ele).'];
-      return [`Relógio do mundo: ${avancarRelogio(m, n)} s.`];
+      return [`Relógio do mundo: ${String(avancarRelogio(m, n)).replace(".", ",")} s.`];
     }
     case 'navegar':
       return cmdNavegar(m, e, args);
@@ -1070,7 +1153,8 @@ export function comandosAplicacao(m: Mundo, e: Equipamento, cmd: string, args: s
 }
 
 export const AJUDA_APLICACAO = [
-  'servicos | servico dns zona <zona> | servico dns registro <nome> <tipo> <valor> [ttl] [prioridade] | servico dns recursivo <on|off>',
+  'servicos | servico dns zona <zona> | servico dns registro <nome> <tipo> <valor ou "texto entre aspas"> [ttl] [prioridade] | servico dns recursivo <on|off>',
+  'servico dns dnssec <on|off> | servico dns validar <on|off> | servico dns portas-aleatorias <on|off> | servico dns cache [limpar]',
   'servico web [pagina <caminho> <texto>] [validade <caminho> <s>] [https <on|off|vencido|autoassinado|nome-errado|revogado>]',
   'servico correio <domínio> [caixas] | servico streaming <nome> <kb/s> [s] | servico cdn <origem>, <borda>, ... | servico <tipo> off',
   'resolvedor <ip> | dig <nome> [tipo] | nslookup <nome> | esperar <s>',
@@ -1087,17 +1171,69 @@ const escolha = (nome: string, rotulo: string, opcoes: Opcao[], padrao?: string)
 const numero = (nome: string, rotulo: string, unidade?: string, padrao?: string): Campo => ({ nome, rotulo, tipo: 'numero', unidade, padrao });
 const texto = (nome: string, rotulo: string, padrao: string): Campo => ({ nome, rotulo, tipo: 'texto', padrao });
 
-function nomesConhecidos(m: Mundo): { a: string[]; web: string[]; dominiosCorreio: string[] } {
+interface NomesConhecidos {
+  /** Nomes com registro A. */
+  a: string[];
+  /** Todo nome das zonas do mundo: o ápice de cada zona e os nomes de todos os registros (A, CNAME, MX, TXT...). */
+  todos: string[];
+  /** Endereços das páginas publicadas, por esquema, pelos nomes que levam a cada servidor web. */
+  paginas: { http: string[]; https: string[] };
+  /** Endereços dos vídeos servidos, pelos nomes que levam a cada servidor de streaming. */
+  videos: string[];
+  dominiosCorreio: string[];
+}
+
+function nomesConhecidos(m: Mundo): NomesConhecidos {
   const a: string[] = [];
-  const web: string[] = [];
+  const todos: string[] = [];
   const dominiosCorreio: string[] = [];
+  /** nome → IP (do A) ou nome canônico (do CNAME), para achar o servidor de cada nome. */
+  const enderecos = new Map<string, string>();
+  const apelidos = new Map<string, string>();
+  const semPonto = (x: string) => x.replace(/\.$/, '');
+  const juntar = (lista: string[], x: string) => {
+    if (!lista.includes(x)) lista.push(x);
+  };
   for (const e of m.equipamentos.values()) {
     const s = servicosDe(e);
-    if (s?.dns?.zona) for (const r of s.dns.registros ?? []) if (r.tipo === 'A') a.push(absoluto(r.nome, normalizarNome(s.dns.zona)).replace(/\.$/, ''));
+    if (s?.dns?.zona) {
+      const zona = normalizarNome(s.dns.zona);
+      if (zona !== '.') juntar(todos, semPonto(zona));
+      for (const r of s.dns.registros ?? []) {
+        const nome = semPonto(absoluto(r.nome, zona));
+        if (!nome) continue;
+        juntar(todos, nome);
+        if (r.tipo === 'A') {
+          juntar(a, nome);
+          if (!enderecos.has(nome)) enderecos.set(nome, r.valor);
+        }
+        if (r.tipo === 'CNAME') apelidos.set(nome, semPonto(r.valor.includes('.') ? normalizarNome(r.valor) : absoluto(r.valor, zona)));
+      }
+    }
     if (s?.correio) dominiosCorreio.push(s.correio.dominio);
   }
-  for (const n of a) if (/^(www|site|web|loja|video)/.test(n)) web.push(n);
-  return { a, web: web.length ? web : a, dominiosCorreio };
+  // Quem atende em cada nome: segue o apelido (até 8 voltas, como o resolvedor) e procura o dono do IP.
+  const servidorDe = (nome: string): Equipamento | undefined => {
+    let n = nome;
+    for (let k = 0; k < 8 && !enderecos.has(n) && apelidos.has(n); k++) n = apelidos.get(n)!;
+    const ip = lerIp(enderecos.get(n) ?? '');
+    return ip === null ? undefined : donoDoIp(m, ip)?.e;
+  };
+  const paginas = { http: [] as string[], https: [] as string[] };
+  const videos: string[] = [];
+  for (const nome of [...a, ...apelidos.keys()]) {
+    const srv = servidorDe(nome);
+    const s = srv && servicosDe(srv);
+    if (!s) continue;
+    if (s.web) {
+      for (const caminho of Object.keys(s.web.paginas ?? { '/': {} })) {
+        juntar(paginas.http, `http://${nome}${caminho}`);
+        if (s.web.https) juntar(paginas.https, `https://${nome}${caminho}`);
+      }
+    }
+    if (s.streaming) for (const v of Object.keys(s.streaming.videos ?? { video: {} })) juntar(videos, `http://${nome}/${v}`);
+  }
+  return { a, todos, paginas, videos, dominiosCorreio };
 }
 
 /** Ações da camada de aplicação: no PC, usar e configurar serviços. Só aparecem com m.flags.aplicacao ou serviço configurado. */
@@ -1105,8 +1241,13 @@ export function acoesAplicacao(m: Mundo, e: Equipamento): Acao[] {
   if (e.tipo !== 'pc') return [];
   const ctx = e.nome;
   const n = nomesConhecidos(m);
-  const nome = (rotulo = 'Nome') => (n.a.length ? escolha('nome', rotulo, n.a.map((x) => op(x))) : texto('nome', rotulo, 'www.loja.exemplo'));
-  const url = (esquema: string, caminho = '/') => (n.web.length ? escolha('url', 'Endereço', n.web.map((x) => op(`${esquema}://${x}${caminho}`))) : texto('url', 'Endereço', `${esquema}://www.loja.exemplo${caminho}`));
+  const nome = (rotulo = 'Nome') => (n.todos.length ? escolha('nome', rotulo, n.todos.map((x) => op(x))) : texto('nome', rotulo, 'www.loja.exemplo'));
+  // Sem página publicada que se ache pelo DNS, os nomes que parecem de site (como antes).
+  const parecemSite = n.a.filter((x) => /^(www|site|web|loja|video)/.test(x));
+  const sites = parecemSite.length ? parecemSite : n.a;
+  const lista = (rotulo: string, opcoes: string[], padrao: string) => (opcoes.length ? escolha('url', rotulo, opcoes.map((x) => op(x))) : texto('url', rotulo, padrao));
+  const url = (esquema: 'http' | 'https') => lista('Endereço', n.paginas[esquema].length ? n.paginas[esquema] : n.paginas.http.length ? n.paginas.http.map((x) => x.replace(/^http:/, `${esquema}:`)) : sites.map((x) => `${esquema}://${x}/`), `${esquema}://www.loja.exemplo/`);
+  const video = () => lista('Endereço do vídeo', n.videos.length ? n.videos : sites.map((x) => `http://${x}/video`), 'http://video.loja.exemplo/video');
   const conta = e.s.correio as ContaCorreio | undefined;
   const servidores: Opcao[] = [];
   for (const x of m.equipamentos.values()) {
@@ -1125,7 +1266,7 @@ export function acoesAplicacao(m: Mundo, e: Equipamento): Acao[] {
     { id: 'ap-correio-conta', rotulo: 'Configurar a conta de correio', ajuda: 'Seu endereço e o servidor de correio do seu domínio. Ele recebe o que você manda (submissão) e guarda o que chega para você.', contexto: ctx, campos: [texto('end', 'Endereço', conta?.endereco ?? `${e.nome}@${n.dominiosCorreio[0] ?? 'loja.exemplo'}`), texto('srv', 'IP do servidor', conta?.servidor ?? '203.0.113.25')], comandos: (v) => [`correio conta ${v.end} ${v.srv}`] },
     { id: 'ap-correio-enviar', rotulo: 'Mandar um e-mail', ajuda: 'Submissão ao seu servidor, consulta MX do domínio de destino, SMTP entre servidores (EHLO, MAIL FROM, RCPT TO, DATA) e um Received a cada salto.', contexto: ctx, campos: [texto('para', 'Para', `contato@${n.dominiosCorreio.find((d) => d !== conta?.endereco.split('@')[1]) ?? n.dominiosCorreio[0] ?? 'escola.exemplo'}`), texto('assunto', 'Assunto', 'Teste'), texto('corpo', 'Texto', 'Olá! Mensagem de teste.')], comandos: (v) => [`correio enviar ${v.para} ${v.assunto || 'Teste'} | ${v.corpo || ''}`] },
     { id: 'ap-correio-ler', rotulo: 'Ler a caixa de correio', ajuda: 'IMAP deixa as mensagens no servidor e sincroniza; POP3 baixa e apaga. Nos dois, os cabeçalhos Received contam o caminho.', contexto: ctx, campos: [escolha('proto', 'Protocolo', [op('imap', 'IMAP'), op('pop3', 'POP3')])], comandos: (v) => [`correio ler ${v.proto}`] },
-    { id: 'ap-assistir', rotulo: 'Assistir a um vídeo', ajuda: 'O vídeo chega na banda medida do caminho. O reprodutor espera o atraso inicial enchendo o buffer; se a banda cair abaixo da taxa do vídeo, o buffer seca e trava.', contexto: ctx, campos: [url('http', '/video'), numero('atraso', 'Atraso inicial', 's', '2'), escolha('modo', 'Modo', [op('fixo', 'qualidade fixa'), op('adaptativo', 'adaptativo (troca de qualidade)')])], comandos: (v) => [`assistir ${v.url} ${v.atraso || 2}${v.modo === 'adaptativo' ? ' adaptativo' : ''}`] },
+    { id: 'ap-assistir', rotulo: 'Assistir a um vídeo', ajuda: 'O vídeo chega na banda medida do caminho. O reprodutor espera o atraso inicial enchendo o buffer; se a banda cair abaixo da taxa do vídeo, o buffer seca e trava.', contexto: ctx, campos: [video(), numero('atraso', 'Atraso inicial', 's', '2'), escolha('modo', 'Modo', [op('fixo', 'qualidade fixa'), op('adaptativo', 'adaptativo (troca de qualidade)')])], comandos: (v) => [`assistir ${v.url} ${v.atraso || 2}${v.modo === 'adaptativo' ? ' adaptativo' : ''}`] },
     { id: 'ap-cdn', rotulo: 'Consultar a CDN', ajuda: 'O site delega o nome por CNAME para a CDN, e o DNS da CDN escolhe a borda mais perto do resolvedor de quem pergunta.', contexto: ctx, campos: [texto('nome', 'Nome', 'video.loja.exemplo'), escolha('cidade', 'Cidade de quem pergunta', Object.keys(CIDADES).map((x) => op(x)), 'Curitiba')], comandos: (v) => [`cdn ${v.nome || 'video.loja.exemplo'} ${v.cidade}`] },
     { id: 'ap-cdn-simular', rotulo: 'Transmissão ao vivo com e sem CDN', ajuda: 'Milhares de espectadores em várias cidades: sem CDN, cada um puxa da origem; com CDN, cada borda puxa uma cópia e reparte.', contexto: ctx, campos: [numero('n', 'Espectadores por cidade', undefined, '2000'), numero('taxa', 'Taxa por espectador', 'Mb/s', '5')], comandos: (v) => [`cdn simular ${v.n || 2000} ${v.taxa || 5}`] },
     { id: 'ap-p2p', rotulo: 'Enxame P2P', ajuda: 'Uma semente e vários pares trocando pedaços em rodadas: mais raro primeiro e olho por olho (envia para quem mais lhe mandou).', contexto: ctx, campos: [numero('pares', 'Pares', undefined, '8'), numero('pedacos', 'Pedaços', undefined, '16'), escolha('pol', 'Política', [op('raro', 'mais raro primeiro'), op('aleatorio', 'aleatória')])], comandos: (v) => [`p2p simular ${v.pares || 8} ${v.pedacos || 16} 4${v.pol === 'aleatorio' ? ' aleatorio' : ''}`] },
@@ -1133,7 +1274,22 @@ export function acoesAplicacao(m: Mundo, e: Equipamento): Acao[] {
     { id: 'ap-p2p-dht', rotulo: 'Tabela de dispersão distribuída', ajuda: 'Sem rastreador central: a chave vira um número e fica no nó de menor distância XOR.', contexto: ctx, campos: [texto('chave', 'Chave', 'aula.mp4')], comandos: (v) => [`p2p dht ${v.chave || 'aula.mp4'}`] },
     { id: 'ap-servicos', rotulo: 'Ver os serviços desta máquina', ajuda: 'DNS, web, correio, streaming e CDN que rodam aqui, com as portas abertas.', contexto: ctx, comandos: () => ['servicos', 'soquetes'] },
     { id: 'ap-servico-dns', rotulo: 'Servir uma zona de DNS', ajuda: 'Esta máquina vira autoritativa para a zona. A zona mãe ganha a delegação sozinha. Depois acrescente registros A, MX, CNAME...', contexto: ctx, campos: [texto('zona', 'Zona', s?.dns?.zona?.replace(/\.$/, '') ?? 'loja.exemplo'), escolha('rec', 'Também resolver para os clientes (recursivo)?', [op('off', 'não'), op('on', 'sim')], s?.dns?.recursivo ? 'on' : 'off')], comandos: (v) => [`servico dns zona ${v.zona || 'loja.exemplo'}`, `servico dns recursivo ${v.rec}`] },
-    { id: 'ap-servico-dns-registro', rotulo: 'Acrescentar registro de DNS', ajuda: 'A liga nome a IPv4; MX diz o servidor de correio (menor número, mais preferido); CNAME é apelido; TXT é texto livre. O TTL diz quanto tempo os caches podem guardar.', contexto: ctx, campos: [texto('nome', 'Nome', 'www'), escolha('tipo', 'Tipo', ['A', 'MX', 'CNAME', 'TXT', 'NS', 'AAAA'].map((x) => op(x))), texto('valor', 'Valor', ipPrincipal(e) ?? '203.0.113.10'), numero('ttl', 'TTL', 's', '300')], comandos: (v) => [`servico dns registro ${v.nome || 'www'} ${v.tipo} ${v.valor || ipPrincipal(e) || '203.0.113.10'} ${v.ttl || 300}`] },
+    {
+      id: 'ap-servico-dns-registro',
+      rotulo: 'Acrescentar registro de DNS',
+      ajuda: 'A liga nome a IPv4; MX diz o servidor de correio (menor prioridade, mais preferido); CNAME é apelido; TXT é texto livre, com espaços se quiser. O TTL diz quanto tempo os caches podem guardar.',
+      contexto: ctx,
+      campos: [texto('nome', 'Nome (@ é a própria zona)', 'www'), escolha('tipo', 'Tipo', ['A', 'MX', 'CNAME', 'TXT', 'NS', 'AAAA'].map((x) => op(x))), texto('valor', 'Valor', ipPrincipal(e) ?? '203.0.113.10'), numero('ttl', 'TTL', 's', '300'), numero('prioridade', 'Prioridade (só MX)', undefined, '10')],
+      comandos: (v) => {
+        const valor = v.valor || (v.tipo === 'TXT' ? '' : ipPrincipal(e) || '203.0.113.10');
+        // TXT vai sempre entre aspas, com aspas e barras de dentro escapadas: o espaço deixa de separar campos.
+        const campo = v.tipo === 'TXT' ? `"${valor.replace(/(["\\])/g, '\\$1')}"` : valor;
+        return [`servico dns registro ${v.nome || 'www'} ${v.tipo} ${campo} ${v.ttl || 300}${v.tipo === 'MX' ? ` ${v.prioridade || 10}` : ''}`];
+      },
+    },
+    { id: 'ap-servico-dns-dnssec', rotulo: 'Assinar a zona (DNSSEC)', ajuda: 'Cada conjunto de registros ganha uma assinatura (RRSIG) feita com a chave da zona (DNSKEY), e o resumo da chave vai para a zona mãe (DS). Só adianta para quem valida.', contexto: ctx, campos: [escolha('v', 'Assinatura', [op('on', 'zona assinada'), op('off', 'sem assinatura')], s?.dns?.dnssec ? 'off' : 'on')], comandos: (v) => [`servico dns dnssec ${v.v}`] },
+    { id: 'ap-servico-dns-validar', rotulo: 'Validar DNSSEC no resolvedor', ajuda: 'O resolvedor confere a assinatura de cada resposta de zona assinada, subindo pelos DS até a raiz. Resposta forjada não tem assinatura que confira: é descartada.', contexto: ctx, campos: [escolha('v', 'Validação', [op('on', 'ligada'), op('off', 'desligada')], s?.dns?.validar ? 'off' : 'on')], comandos: (v) => [`servico dns validar ${v.v}`] },
+    { id: 'ap-servico-dns-portas', rotulo: 'Portas de origem aleatórias no resolvedor', ajuda: 'Cada consulta do resolvedor sai de uma porta sorteada: quem quiser forjar a resposta precisa acertar o id e a porta, uns 32 bits em vez de 16.', contexto: ctx, campos: [escolha('v', 'Portas aleatórias', [op('on', 'ligadas'), op('off', 'desligadas')], s?.dns?.portasAleatorias ? 'off' : 'on')], comandos: (v) => [`servico dns portas-aleatorias ${v.v}`] },
     { id: 'ap-servico-web', rotulo: 'Publicar uma página', ajuda: 'Servidor web na porta 80. Cada página tem ETag (resumo do conteúdo): mudou o conteúdo, mudou o ETag, e o 304 deixa de valer.', contexto: ctx, campos: [texto('caminho', 'Caminho', '/'), texto('conteudo', 'Conteúdo', 'Bem-vindo à loja do laboratório'), numero('validade', 'Validade no cache', 's', '0')], comandos: (v) => [`servico web pagina ${v.caminho || '/'} ${v.conteudo || 'Bem-vindo'}`, `servico web validade ${v.caminho || '/'} ${v.validade || 0}`] },
     { id: 'ap-servico-https', rotulo: 'Ligar HTTPS', ajuda: 'Certificado na porta 443. Escolha um problema para ver o aviso do navegador: vencido, autoassinado, de outro nome ou revogado.', contexto: ctx, campos: [escolha('tipo', 'Certificado', TIPOS_CERTIFICADO.map((x) => op(x, { valido: 'válido', vencido: 'vencido', autoassinado: 'autoassinado', 'nome-errado': 'de outro nome', revogado: 'revogado' }[x])))], comandos: (v) => [`servico web https ${v.tipo}`] },
     { id: 'ap-servico-correio', rotulo: 'Servir correio de um domínio', ajuda: 'SMTP na 25, submissão na 587, IMAP na 143, POP3 na 110. Para receber de outros servidores, o domínio precisa de MX no DNS.', contexto: ctx, campos: [texto('dominio', 'Domínio', s?.correio?.dominio ?? 'loja.exemplo'), texto('caixas', 'Caixas (vazio: qualquer uma)', '')], comandos: (v) => [`servico correio ${v.dominio || 'loja.exemplo'}${v.caixas ? ` ${v.caixas.replace(/\s+/g, '')}` : ''}`] },

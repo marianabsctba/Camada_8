@@ -191,7 +191,7 @@ function viagemTransporte(m: Mundo, de: Equipamento, origem: number, destino: nu
   const p = novoPacote(m, { origem, destino, ttl: de.ttl, dados, icmp: { tipo: 0, codigo: 0, id: porta, seq: 0 } });
   p.protocolo = proto === 'tcp' ? 6 : 17;
   if (l4) p.l4 = { ...l4, flags: proto === 'tcp' ? l4.flags : undefined };
-  // O "id" carrega a porta que o NAT olha: a de origem na ida, a de destino na volta.
+  // As portas vão no cabeçalho L4, que é o que o NAPT traduz (RFC 3022); o "id" só repete a porta de origem.
   p.tamanho = 20 + (proto === 'tcp' ? 20 : 8) + dados;
   p.fragmentos = [{ identificacao: p.identificacao, deslocamento: 0, dados: p.tamanho - 20, mf: false }];
   return viajar(m, de.nome, p);
@@ -222,7 +222,8 @@ export function caminhoTransporte(m: Mundo, origemNome: string, ipDestinoN: numb
   if (!ida || !ida.entregue) return { ...base, ...seg(ida), falha: falhaViagem(ida!) };
   const servidor = m.equipamentos.get(ida.onde)!;
   const ipVisto = ipTexto(ida.pacote.origem);
-  const portaVista = ida.pacote.icmp.id;
+  // A porta de origem que o servidor vê: a do cabeçalho L4, depois de qualquer NAPT no caminho (RFC 3022).
+  const portaVista = ida.pacote.l4?.origem ?? ida.pacote.icmp.id;
   let volta: Viagem | null = null;
   for (let k = 0; k < 5; k++) {
     volta = viagemTransporte(m, servidor, ipDestinoN, ida.pacote.origem, proto, portaVista, 0, { origem: portaDestino, destino: portaVista, flags: 'SYN+ACK' });

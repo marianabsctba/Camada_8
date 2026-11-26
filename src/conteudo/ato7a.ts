@@ -2,7 +2,7 @@
 // O centro de operações, à noite: anatomia de um ataque (8.1 e 8.2), firewall e IDS (8.3) e
 // os primeiros segredos da criptografia (8.4 e 8.5). Os ataques rodam só no laboratório da cidade.
 
-import { avaliarFirewall, firewallDe, idsDe, type ConfigFirewall, type InfoPacote } from '../motor/filtro';
+import { avaliarFirewall, firewallDe, ultimoQue, type InfoPacote, type RegistroFlag } from '../motor/filtro';
 import { adicionar, comutador, ligar, novoMundo, pc, roteador, type Equipamento, type Mundo } from '../motor/mundo';
 import type { InundacaoSyn } from '../motor/transporte';
 import { lerCidr, lerIp } from '../motor/util';
@@ -358,17 +358,24 @@ const dia120: Dia = {
  * ref 121: Firewall (8.3)
  * ====================================================================== */
 
-function firewall(m: Mundo): ConfigFirewall | undefined {
-  return firewallDe(equip(m, 'borda'));
+/** O firewall da borda como o motor resume em m.flags.firewallPor (sempre com os números de agora). */
+function firewall(m: Mundo): RegistroFlag | undefined {
+  const f = (m.flags.firewallPor as Record<string, RegistroFlag> | undefined)?.borda;
+  return f && !f.desligado ? f : undefined;
+}
+
+function idsBorda(m: Mundo): RegistroFlag | undefined {
+  const i = (m.flags.idsPor as Record<string, RegistroFlag> | undefined)?.borda;
+  return i && !i.desligado ? i : undefined;
 }
 
 function alertasVarredura(m: Mundo): number {
-  return (idsDe(equip(m, 'borda'))?.alertas ?? []).filter((a) => a.nome === 'varredura de portas').length;
+  return idsBorda(m)?.porNome?.['varredura de portas'] ?? 0;
 }
 
-/** Julga um pacote numa cópia do firewall da borda, sem mexer no de verdade. */
+/** Julga um pacote numa cópia do firewall da borda (a configuração inteira, não o resumo), sem mexer no de verdade. */
 function julgar(m: Mundo, pacotes: [InfoPacote, string][]): string[] {
-  const fw = firewall(m);
+  const fw = firewallDe(equip(m, 'borda'));
   if (!fw) return pacotes.map(() => 'permitir');
   const copia = structuredClone(fw);
   return pacotes.map(([p, em]) => avaliarFirewall(copia, p, em).acao);
@@ -404,7 +411,7 @@ const dia121: Dia = {
   montar: () => laboratorio(7121),
   objetivo: (m) => {
     const fw = firewall(m);
-    const saida = !!fw?.regras.some((r) => r.acao === 'permitir' && r.origem === '192.168.1.0/24');
+    const saida = !!fw?.regras.some((r: RegistroFlag) => r.acao === 'permitir' && r.origem === '192.168.1.0/24');
     const v = varredura(m);
     const n = alertasVarredura(m);
     return [
@@ -430,8 +437,8 @@ const dia121: Dia = {
       porque: 'Antes de fechar a porta, é preciso dizer quem pode sair. A origem é o prefixo da rede interna.',
       conferir: (m) => {
         const fw = firewall(m);
-        if (fw?.regras.some((r) => r.acao === 'permitir' && r.origem === '192.168.1.0/24')) return true;
-        if (fw?.regras.some((r) => !r.origem || r.origem === 'qualquer')) return 'Uma regra com origem "qualquer" permite tudo, inclusive quem vem de fora: não serve de porteiro. Apague-a e use a rede de dentro.';
+        if (fw?.regras.some((r: RegistroFlag) => r.acao === 'permitir' && r.origem === '192.168.1.0/24')) return true;
+        if (fw?.regras.some((r: RegistroFlag) => !r.origem || r.origem === 'qualquer')) return 'Uma regra com origem "qualquer" permite tudo, inclusive quem vem de fora: não serve de porteiro. Apague-a e use a rede de dentro.';
         return 'A regra precisa ter como origem a rede de dentro, 192.168.1.0/24.';
       },
       feito: 'Regra 1: PERMITIR qualquer de 192.168.1.0/24. Por enquanto não muda nada, porque a política padrão ainda é permitir.',
@@ -480,7 +487,7 @@ const dia121: Dia = {
       valores: { modo: 'ids' },
       instrucao: 'Ligue o IDS na borda, no modo que só observa e alerta.',
       porque: 'O firewall não percebe a varredura: cada SYN, sozinho, é um pacote permitido. Quem percebe o padrão (muitas portas diferentes da mesma origem) é o IDS.',
-      conferir: (m) => (idsDe(equip(m, 'borda'))?.modo === 'ids' ? true : 'O IDS da borda ainda não está no modo IDS.'),
+      conferir: (m) => (idsBorda(m)?.modo === 'ids' ? true : 'O IDS da borda ainda não está no modo IDS.'),
       feito: 'IDS ligado: varredura a partir de 10 portas, inundação a partir de 200 SYN/s, anomalia acima de 5000 pacotes/s, e quatro assinaturas de conteúdo.',
     }),
     passo({
@@ -632,9 +639,9 @@ const d122D: Pergunta[] = [
   { id: '2', texto: 'De que cor é o caderno onde está a senha do rádio?', confere: (r) => normal(r).includes('AZUL') },
 ];
 
+/** Alguma quebra de César do dia achou essa chave (o histórico guarda todas, não só a última conta). */
 function quebrou(m: Mundo, chave: number): boolean {
-  const c = m.flags.cripto as { op?: string; chave?: number } | undefined;
-  return c?.op === 'quebrar-cesar' && c.chave === chave;
+  return !!ultimoQue(m, 'cripto', (c) => c.op === 'quebrar-cesar' && c.chave === chave);
 }
 
 const dia122: Dia = {

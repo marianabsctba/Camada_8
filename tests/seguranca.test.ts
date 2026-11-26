@@ -6,7 +6,8 @@ import { adicionar, aparelho, comutador, ligar, novoMundo, pc, roteador, type Mu
 import { Terminal } from '../src/motor/cli';
 import { acoesEquip, executarAcao, padroes } from '../src/motor/acoes';
 import { temSeguranca } from '../src/motor/cliSeguranca';
-import { avaliarFirewall, lerRegra, novoFirewall, novoIds, inspecionarPacote } from '../src/motor/filtro';
+import { anotarFlag, avaliarFirewall, historicoDe, LIMITE_HISTORICO, lerRegra, novoFirewall, novoIds, inspecionarPacote, ultimoQue } from '../src/motor/filtro';
+import { configurarNat, nat, novoPacote, viajar } from '../src/motor/roteamento';
 import { quebrarAperto, cadeiaDoServidor, conferirCadeia, apertoTls, decifrarRegistro, cifrarRegistro, protegerMensagem, abrirMensagem } from '../src/motor/seguranca';
 import { lerCidr, lerIp } from '../src/motor/util';
 import type { Dia } from '../src/conteudo/tipos';
@@ -435,5 +436,158 @@ describe('porta espelhada e ping pelo firewall', () => {
     rodar(t, 'r1', ['firewall estado on']);
     expect(rodar(t, 'ana', ['ping 203.0.113.10 1'])).toMatch(/ttl=/);
     expect(rodar(t, 'caio', ['ping 192.168.1.10 1'])).toMatch(/firewall/);
+  });
+});
+
+describe('estado fresco, histórico e o firewall que confere o aperto de mão', () => {
+  const tcp = (de: string, para: string, po: number, pd: number, flags: string) => ({ origem: ip(de), destino: ip(para), protocolo: 6, portaOrigem: po, portaDestino: pd, flags });
+
+  it('tabela de estado só nasce do SYN e só se estabelece com o SYN+ACK de volta (RFC 9293)', () => {
+    const fw = novoFirewall();
+    fw.padrao = 'negar';
+    fw.comEstado = true;
+    fw.regras.push({ ...(lerRegra(['permitir', 'de', '192.168.1.0/24']) as object), id: 1, contador: 0 } as never);
+    // Um SYN+ACK ou ACK de fora, sem ninguém ter chamado, não pertence a conversa nenhuma.
+    expect(avaliarFirewall(fw, tcp('203.0.113.10', '192.168.1.10', 80, 40000, 'SYN+ACK'), 'p2').acao).toBe('negar');
+    // ACK de dentro passa pela regra, mas não abre conversa.
+    avaliarFirewall(fw, tcp('192.168.1.10', '203.0.113.10', 40001, 80, 'ACK'), 'p1');
+    expect(fw.conexoes).toHaveLength(0);
+    expect(avaliarFirewall(fw, tcp('203.0.113.10', '192.168.1.10', 80, 40001, 'ACK'), 'p2').acao).toBe('negar');
+    // O SYN abre, o SYN+ACK de volta estabelece.
+    avaliarFirewall(fw, tcp('192.168.1.10', '203.0.113.10', 40000, 80, 'SYN'), 'p1');
+    expect(fw.estados?.['tcp 192.168.1.10:40000 > 203.0.113.10:80']).toBe('syn-enviado');
+    // Na volta, enquanto espera o SYN+ACK, um SYN puro do outro lado não é resposta.
+    expect(avaliarFirewall(fw, tcp('203.0.113.10', '192.168.1.10', 80, 40000, 'SYN'), 'p2').acao).toBe('negar');
+    expect(avaliarFirewall(fw, tcp('203.0.113.10', '192.168.1.10', 80, 40000, 'SYN+ACK'), 'p2')).toMatchObject({ acao: 'permitir', por: 'estado' });
+    expect(fw.estados?.['tcp 192.168.1.10:40000 > 203.0.113.10:80']).toBe('estabelecida');
+    expect(avaliarFirewall(fw, tcp('203.0.113.10', '192.168.1.10', 80, 40000, 'ACK'), 'p2').por).toBe('estado');
+    // Estabelecida, SYN de fora com as mesmas portas é outra abertura: cai nas regras.
+    expect(avaliarFirewall(fw, tcp('203.0.113.10', '192.168.1.10', 80, 40000, 'SYN'), 'p2').acao).toBe('negar');
+    // RST encerra a conversa.
+    avaliarFirewall(fw, tcp('203.0.113.10', '192.168.1.10', 80, 40000, 'RST'), 'p2');
+    expect(fw.conexoes).toHaveLength(0);
+    expect(avaliarFirewall(fw, tcp('203.0.113.10', '192.168.1.10', 80, 40000, 'ACK'), 'p2').acao).toBe('negar');
+  });
+
+  it('firewall e IDS: a flag acompanha o tráfego, não só o último comando; log e alertas renovam', () => {
+    const m = mundoAplicacao();
+    const t = new Terminal(m, {} as Dia);
+    rodar(t, 'r2', ['firewall regra permitir tcp para 203.0.113.10 porta 80', 'firewall estado on', 'ids ids']);
+    expect(m.flags.firewall.contadores.permitidos).toBe(0);
+    expect(m.flags.ids.alertas).toBe(0);
+    rodar(t, 'ana', ['varrer 203.0.113.10 1-30']);
+    // Sem nenhum comando no r2, as flags já mostram o que passou.
+    expect(m.flags.firewall.contadores.permitidos).toBeGreaterThan(0);
+    expect(m.flags.firewallPor.r2.conversas).toBeGreaterThan(0);
+    expect(m.flags.ids.alertas).toBe(1);
+    expect(m.flags.idsPor.r2.porNome['varredura de portas']).toBe(1);
+    // Um comando em outro roteador muda a flag principal, mas o r2 continua fresco em firewallPor.
+    rodar(t, 'r1', ['firewall']);
+    expect(m.flags.firewall.roteador).toBe('r1');
+    rodar(t, 'ana', ['navegar http://www.loja.exemplo/']);
+    expect(m.flags.firewall.roteador).toBe('r1');
+    expect(m.flags.firewallPor.r2.contadores.permitidos).toBeGreaterThan(m.flags.historico.firewall[0].contadores.permitidos);
+    rodar(t, 'r2', ['firewall log']);
+    expect(m.flags.firewall.roteador).toBe('r2');
+    rodar(t, 'r1', ['ids']);
+    rodar(t, 'r2', ['ids alertas']);
+    expect(m.flags.ids).toMatchObject({ roteador: 'r2', alertas: 1 });
+  });
+
+  it('histórico por tipo: várias contas no mesmo dia ficam guardadas, com limite', () => {
+    const m = mundoAplicacao();
+    m.flags.seguranca = true;
+    const t = new Terminal(m, {} as Dia);
+    rodar(t, 'ana', ['cesar 3 NOVE', 'quebrar-cesar DWDTXH DR DPDQKHFHU', 'sha256 camada 8']);
+    expect(m.flags.cripto.op).toBe('sha256');
+    expect(historicoDe(m, 'cripto').map((x) => x.op)).toEqual(['cesar', 'quebrar-cesar', 'sha256']);
+    expect(ultimoQue(m, 'cripto', (x) => x.op === 'quebrar-cesar')?.chave).toBe(3);
+    for (let i = 0; i < LIMITE_HISTORICO + 5; i++) anotarFlag(m, 'teste', { i });
+    expect(historicoDe(m, 'teste')).toHaveLength(LIMITE_HISTORICO);
+    expect(historicoDe(m, 'teste')[0]!.i).toBe(5);
+    // O histórico guarda cópias: mexer na flag depois não muda o que foi anotado.
+    m.flags.teste.i = -1;
+    expect(historicoDe(m, 'teste').at(-1)!.i).toBe(LIMITE_HISTORICO + 4);
+  });
+
+  it('VPN: vpnPor mostra as duas pontas e acompanha os contadores quando o tráfego passa', () => {
+    const m = novoMundo(3);
+    m.flags.seguranca = true;
+    adicionar(m, pc('a', { ip: lerCidr('192.168.1.10/24')!, gateway: '192.168.1.1' }));
+    adicionar(m, pc('b', { ip: lerCidr('192.168.2.10/24')!, gateway: '192.168.2.1' }));
+    adicionar(m, roteador('ra', { interfaces: { lan: '192.168.1.1/24', wan: '198.51.100.1/30' }, rotas: [{ destino: '0.0.0.0/0', via: '198.51.100.2' }] }));
+    adicionar(m, roteador('rb', { interfaces: { wan: '198.51.100.2/30', lan: '192.168.2.1/24' }, rotas: [{ destino: '0.0.0.0/0', via: '198.51.100.1' }] }));
+    ligar(m, { equip: 'a', porta: 'eth0' }, { equip: 'ra', porta: 'lan' }, 'cat6', 5);
+    ligar(m, { equip: 'ra', porta: 'wan' }, { equip: 'rb', porta: 'wan' }, 'cat6', 5);
+    ligar(m, { equip: 'rb', porta: 'lan' }, { equip: 'b', porta: 'eth0' }, 'cat6', 5);
+    const t = new Terminal(m, {} as Dia);
+    rodar(t, 'ra', ['vpn x 198.51.100.2 192.168.1.0/24 192.168.2.0/24 segredo-longo']);
+    expect(m.flags.vpnPor.ra[0]).toMatchObject({ ativo: false });
+    rodar(t, 'rb', ['vpn y 198.51.100.1 192.168.2.0/24 192.168.1.0/24 segredo-longo']);
+    // Criar o espelho em rb também sobe o túnel de ra, sem comando nenhum em ra.
+    expect(m.flags.vpnPor.ra[0]).toMatchObject({ ativo: true, cifrados: 0 });
+    rodar(t, 'a', ['ping 192.168.2.10']);
+    expect(m.flags.vpnPor.ra[0].cifrados).toBeGreaterThan(0);
+    expect(m.flags.vpnPor.rb[0].decifrados).toBeGreaterThan(0);
+    expect(m.flags.vpn).toMatchObject({ roteador: 'rb', ativo: true });
+    expect(m.flags.vpn.decifrados).toBeGreaterThan(0);
+  });
+});
+
+describe('NAPT (RFC 3022)', () => {
+  function mundoNat(): Mundo {
+    const m = novoMundo(9);
+    adicionar(m, pc('a', { ip: lerCidr('192.168.1.10/24')!, gateway: '192.168.1.1' }));
+    adicionar(m, pc('a2', { ip: lerCidr('192.168.1.11/24')!, gateway: '192.168.1.1' }));
+    adicionar(m, pc('b', { ip: lerCidr('203.0.113.10/24')!, gateway: '203.0.113.1' }));
+    const r1 = adicionar(m, roteador('r1', { interfaces: { p1: '192.168.1.1/24', p2: '198.51.100.1/30' }, rotas: [{ destino: '0.0.0.0/0', via: '198.51.100.2' }] }));
+    adicionar(m, roteador('r2', { interfaces: { p1: '198.51.100.2/30', p2: '203.0.113.1/24' }, rotas: [{ destino: '10.0.0.0/24', via: '203.0.113.2' }] }));
+    adicionar(m, roteador('r3', { interfaces: { p1: '203.0.113.2/24', p2: '10.0.0.1/24' }, rotas: [{ destino: '0.0.0.0/0', via: '203.0.113.1' }] }));
+    adicionar(m, comutador('sw', { portas: 4 }));
+    adicionar(m, comutador('sw2', { portas: 4 }));
+    configurarNat(r1, ['p1'], 'p2');
+    ligar(m, { equip: 'a', porta: 'eth0' }, { equip: 'sw', porta: 'p1' }, 'cat6', 5);
+    ligar(m, { equip: 'a2', porta: 'eth0' }, { equip: 'sw', porta: 'p2' }, 'cat6', 5);
+    ligar(m, { equip: 'sw', porta: 'p3' }, { equip: 'r1', porta: 'p1' }, 'cat6', 5);
+    ligar(m, { equip: 'r1', porta: 'p2' }, { equip: 'r2', porta: 'p1' }, 'cat6', 5);
+    ligar(m, { equip: 'r2', porta: 'p2' }, { equip: 'sw2', porta: 'p1' }, 'cat6', 5);
+    ligar(m, { equip: 'b', porta: 'eth0' }, { equip: 'sw2', porta: 'p2' }, 'cat6', 5);
+    ligar(m, { equip: 'r3', porta: 'p1' }, { equip: 'sw2', porta: 'p3' }, 'cat6', 5);
+    return m;
+  }
+  const udp = (m: Mundo, de: string, para: string, po: number, pd: number, ttl = 64) => {
+    const p = novoPacote(m, { origem: ip(de), destino: ip(para), ttl, dados: 0, icmp: { tipo: 0, codigo: 0, id: 7777, seq: 0 } });
+    p.protocolo = 17;
+    p.l4 = { origem: po, destino: pd };
+    return p;
+  };
+
+  it('traduz a porta do cabeçalho UDP/TCP, não o id do ICMP; duas máquinas com a mesma porta ganham portas externas diferentes', () => {
+    const m = mundoNat();
+    const v1 = viajar(m, 'a', udp(m, '192.168.1.10', '203.0.113.10', 40000, 53));
+    expect(v1.entregue).toBe(true);
+    expect(v1.pacote).toMatchObject({ origem: ip('198.51.100.1'), l4: { origem: 40000, destino: 53 } });
+    // O id do ICMP não tem nada com o UDP e não é mexido.
+    expect(v1.pacote.icmp.id).toBe(7777);
+    const v2 = viajar(m, 'a2', udp(m, '192.168.1.11', '203.0.113.10', 40000, 53));
+    const externa = v2.pacote.l4!.origem;
+    expect(externa).not.toBe(40000);
+    expect(nat(m.equipamentos.get('r1')!)!.tabela.filter((x) => x.protocolo === 'udp')).toHaveLength(2);
+    // A resposta para a porta externa do segundo chega ao a2, na porta 40000.
+    const volta = viajar(m, 'b', udp(m, '203.0.113.10', '198.51.100.1', 53, externa));
+    expect(volta).toMatchObject({ entregue: true, onde: 'a2' });
+    expect(volta.pacote.l4).toMatchObject({ origem: 53, destino: 40000 });
+  });
+
+  it('erro ICMP de fora volta para quem causou, com o pacote embutido traduzido (RFC 3022, §4.3)', () => {
+    const m = mundoNat();
+    viajar(m, 'a', udp(m, '192.168.1.10', '203.0.113.10', 40000, 53));
+    // TTL curto: morre no r3, que devolve "tempo esgotado" ao endereço externo do NAT.
+    const v = viajar(m, 'a2', udp(m, '192.168.1.11', '10.0.0.9', 40000, 33434, 3));
+    expect(v.icmpErro).toMatchObject({ tipo: 11, nome: 'r3' });
+    const e = v.icmpErro!.viagem;
+    expect(e).toMatchObject({ entregue: true, onde: 'a2' });
+    expect(e.pacote.embutido).toMatchObject({ origem: ip('192.168.1.11'), portaOrigem: 40000, portaDestino: 33434, protocolo: 17 });
+    expect(e.eventos.join('\n')).toMatch(/pacote embutido traduzido/);
   });
 });

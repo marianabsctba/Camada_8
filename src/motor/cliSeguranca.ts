@@ -6,11 +6,13 @@
 
 import type { Acao, Campo, Opcao } from './acoes';
 import type { Equipamento, Mundo } from './mundo';
-import { donoDoIp, ehRoteador, interfacesL3, novoPacote, viajar } from './roteamento';
+import { donoDoIp, ehRoteador, estadoTunel, interfacesL3, novoPacote, refrescarVpns, viajar } from './roteamento';
 import { caminho } from './rede';
 import { ipTexto, lerIp, lerNumero } from './util';
 import { caminhoTransporte, demultiplexar, portaEfemera, PORTAS_CONHECIDAS, soquetesDe, type InundacaoSyn, type Protocolo } from './transporte';
 import {
+  anotarFiltro,
+  anotarFlag,
   firewallDe,
   idsDe,
   inspecionarTaxa,
@@ -19,9 +21,11 @@ import {
   novoFirewall,
   novoIds,
   prefixoOuIp,
+  refrescarFiltros,
+  resumoFirewall,
+  resumoIds,
   SOBRA_ESP,
   textoRegra,
-  tuneisDe,
   type ConfigFirewall,
   type ConfigIds,
   type TunelVpn,
@@ -138,7 +142,7 @@ function cmdVarrer(m: Mundo, e: Equipamento, args: string[]): Saida {
   if (bloqueio) l.push(`Quem barrou: ${bloqueio}`);
   if (alertas.length) l.push('No caminho, o IDS viu:', ...alertas.map((x) => '  ' + x));
   l.push('Defesa: deixar aberto só o necessário (firewall com política padrão negar), e um IDS que perceba muitas portas distintas da mesma origem.');
-  m.flags.ataque = { tipo: 'varredura', de: e.nome, alvo: ip, proto, portas: portas.length, abertas: abertas.map((x) => x.porta), fechadas, filtradas: filtradas.length, alertas: alertas.length };
+  anotarFlag(m, 'ataque', { tipo: 'varredura', de: e.nome, alvo: ip, proto, portas: portas.length, abertas: abertas.map((x) => x.porta), fechadas, filtradas: filtradas.length, alertas: alertas.length });
   m.flags.varredura = m.flags.ataque;
   return l;
 }
@@ -169,7 +173,7 @@ function cmdFarejar(m: Mundo, e: Equipamento): Saida {
   }
   if (!v.vistas.length) l.push('Nada capturado ainda: ou ninguém usou a rede, ou o tráfego não passa por aqui.');
   if (segredos.length) l.push(`EM CLARO, DÁ PARA LER: ${segredos.join(' | ')}. Por isso senha só por HTTPS, correio por TLS, e rede sensível sem hub.`);
-  m.flags.ataque = { tipo: 'farejamento', de: e.nome, como: v.como, quadros: v.vistas.length, emClaro: claros, cifrados, segredos };
+  anotarFlag(m, 'ataque', { tipo: 'farejamento', de: e.nome, como: v.como, quadros: v.vistas.length, emClaro: claros, cifrados, segredos });
   m.flags.farejar = m.flags.ataque;
   return l;
 }
@@ -201,13 +205,13 @@ function envenenar(m: Mundo, atk: Equipamento, vitima: Equipamento, ipFingido: n
   const dai = nos.map((n) => m.equipamentos.get(n)!).find((x) => x.tipo === 'switch' && x.s.inspecaoArp);
   if (dai) {
     l.push(`${dai.nome} faz inspeção de ARP: confere cada resposta ARP com a tabela de quem recebeu qual IP (do DHCP). "${ipTexto(ipFingido)} está em ${atk.mac}" não bate: quadro descartado e porta registrada.`);
-    m.flags.defesaArp = { tipo: 'inspecao', switch: dai.nome, bloqueou: true };
+    anotarFlag(m, 'defesaArp', { tipo: 'inspecao', switch: dai.nome, bloqueou: true });
     return false;
   }
   const est = vitima.s.arpEstatico as Record<number, string> | undefined;
   if (est?.[ipFingido]) {
     l.push(`${vitima.nome} tem entrada ARP estática para ${ipTexto(ipFingido)} (${est[ipFingido]}): ignora a resposta falsa.`);
-    m.flags.defesaArp = { tipo: 'estatico', vitima: vitima.nome, bloqueou: true };
+    anotarFlag(m, 'defesaArp', { tipo: 'estatico', vitima: vitima.nome, bloqueou: true });
     return false;
   }
   ((vitima.s.arpFalso ??= {}) as Record<number, string>)[ipFingido] = atk.nome;
@@ -230,7 +234,7 @@ function cmdArpFalso(m: Mundo, e: Equipamento, args: string[]): Saida {
   const volta = ida ? envenenar(m, e, fing, ipV, l) : false;
   e.s.repassar = !derrubar;
   if (ida) l.push(derrubar ? `${e.nome} recebe e joga fora: ${vit.nome} fica sem rede (negação de serviço).` : `${e.nome} recebe, copia e repassa: ${vit.nome} nem percebe, e tudo que vai${volta ? ' e volta' : ''} em claro passa por aqui. Use "farejar".`, 'Defesa: entrada ARP estática nos pontos críticos ("arp-estatico <ip>"), inspeção de ARP no switch ("inspecao-arp on") e, acima de tudo, cifrar (TLS, VPN): o homem no meio vê, mas não lê.');
-  m.flags.ataque = { tipo: 'arp', de: e.nome, vitima: vit.nome, fingido: ipTexto(ipF), ok: ida, ambosSentidos: volta, repassa: !derrubar };
+  anotarFlag(m, 'ataque', { tipo: 'arp', de: e.nome, vitima: vit.nome, fingido: ipTexto(ipF), ok: ida, ambosSentidos: volta, repassa: !derrubar });
   return l;
 }
 
@@ -243,7 +247,7 @@ function cmdArpEstatico(m: Mundo, e: Equipamento, args: string[]): Saida {
   ((e.s.arp ??= {}) as Record<number, string>)[ipN] = dono.e.mac;
   const falso = e.s.arpFalso as Record<number, string> | undefined;
   if (falso) delete falso[ipN];
-  m.flags.defesaArp = { tipo: 'estatico', equip: e.nome, ip: ipTexto(ipN), mac: dono.e.mac };
+  anotarFlag(m, 'defesaArp', { tipo: 'estatico', equip: e.nome, ip: ipTexto(ipN), mac: dono.e.mac });
   return [`Entrada estática: ${ipTexto(ipN)} é ${dono.e.mac} (${dono.e.nome}). Dá trabalho manter, por isso fica para o gateway e os servidores importantes.`];
 }
 
@@ -269,7 +273,7 @@ function cmdIpFalso(m: Mundo, e: Equipamento, args: string[]): Saida {
     const dono = donoDoIp(m, forjado);
     l.push(`Chegou em ${v.onde}. A resposta (SYN+ACK) vai para ${ipTexto(forjado)}: ${dono ? `${dono.e.nome}, que não pediu nada e responde RST` : 'ninguém tem esse endereço, a resposta se perde'}.`, `${e.nome} nunca vê a resposta: falsificar a origem serve para esconder quem ataca (inundação, reflexão), não para conversar.`);
   }
-  m.flags.ataque = { tipo: 'ip-falso', de: e.nome, origemForjada: ipTexto(forjado), alvo: ipTexto(destino), porta, entregue: v.entregue, bloqueadoPor: v.bloqueadoPor ?? null };
+  anotarFlag(m, 'ataque', { tipo: 'ip-falso', de: e.nome, origemForjada: ipTexto(forjado), alvo: ipTexto(destino), porta, entregue: v.entregue, bloqueadoPor: v.bloqueadoPor ?? null });
   return l;
 }
 
@@ -297,6 +301,7 @@ function inundarServidor(m: Mundo, atk: Equipamento, ipN: number, porta: number,
     if (!ids) continue;
     const origem = falsificado ? lerIp('198.51.100.' + (1 + Math.floor(m.rng() * 250)))! : lerIp(c.ipLocal)!;
     const d = inspecionarTaxa(ids, { origem, destino: ipN, protocolo: 6, portaDestino: porta, flags: 'SYN' }, taxa, true);
+    refrescarFiltros(m, r);
     if (d.texto) l.push(`${nome}: ${d.texto}`);
     if (d.bloquear) {
       if (falsificado) l.push(`  Mas cada SYN vem de uma origem diferente (falsificada): bloquear uma origem não segura as outras. O remédio aqui é SYN cookie no servidor e limpeza de tráfego no provedor.`);
@@ -338,7 +343,7 @@ function cmdInundar(m: Mundo, e: Equipamento, args: string[]): Saida {
   const taxa = lerNumero(args[2] ?? '') ?? 1000;
   if (ipN === null || !Number.isInteger(porta) || taxa <= 0) return ['inundar <ip> <porta> [SYN por segundo] [falsificado]'];
   const r = inundarServidor(m, e, ipN, porta, taxa, args.includes('falsificado'), 'Inundação de SYN');
-  m.flags.ataque = { tipo: 'syn', ...r.flags };
+  anotarFlag(m, 'ataque', { tipo: 'syn', ...r.flags });
   return r.l;
 }
 
@@ -357,12 +362,14 @@ function cmdDdos(m: Mundo, e: Equipamento, args: string[]): Saida {
   const perdaLegit = ocup > 1 ? 1 - 1 / ocup : 0;
   const l = [...r.l, `Banda: ${num(mbps, 1)} Mb/s de SYN chegando, no enlace de ${cap} Mb/s até o servidor: ${pct(Math.min(ocup, 9.99))} de ocupação.${ocup > 1 ? ` O enlace satura: ${pct(perdaLegit)} do tráfego legítimo se perde antes de chegar, e nem SYN cookie salva (o cano está cheio).` : ''}`, 'As máquinas zumbis são computadores de terceiros, infectados sem que quem os usa saiba. Contra volume, só o provedor e serviços de limpeza de tráfego, longe do servidor.'];
   for (const nome of c.roteadores) {
-    const ids = idsDe(m.equipamentos.get(nome)!);
+    const r = m.equipamentos.get(nome)!;
+    const ids = idsDe(r);
     if (!ids) continue;
     const d = inspecionarTaxa(ids, { origem: lerIp('198.51.100.200')!, destino: ipN, protocolo: 6, portaDestino: porta }, total, false);
+    refrescarFiltros(m, r);
     if (d.texto) l.push(`${nome}: ${d.texto}`);
   }
-  m.flags.ataque = { tipo: 'ddos', ...r.flags, zumbis, porZumbi, mbps: Number(mbps.toFixed(3)), capacidadeMbps: cap, ocupacao: Number(ocup.toFixed(4)), perdaLegitima: Number(perdaLegit.toFixed(4)) };
+  anotarFlag(m, 'ataque', { tipo: 'ddos', ...r.flags, zumbis, porZumbi, mbps: Number(mbps.toFixed(3)), capacidadeMbps: cap, ocupacao: Number(ocup.toFixed(4)), perdaLegitima: Number(perdaLegit.toFixed(4)) });
   return l;
 }
 
@@ -385,7 +392,7 @@ function cmdPararAtaque(m: Mundo, e: Equipamento): Saida {
     l.push(`${nome}: as meio abertas vencem e a fila esvazia.`);
   }
   delete e.s.ataquesSyn;
-  m.flags.ataque = { tipo: 'parado', de: e.nome };
+  anotarFlag(m, 'ataque', { tipo: 'parado', de: e.nome });
   return l.length ? l : ['Nenhum ataque em andamento a partir daqui.'];
 }
 
@@ -429,8 +436,8 @@ function cmdEnvenenarDns(m: Mundo, e: Equipamento, args: string[]): Saida {
     envenenado = true;
     l.push(`Uma acertou: o resolvedor guardou "${normalizarNome(nome)} A ${falso}" por 86400 s. Todo cliente dele agora vai para ${falso}.${assinada ? ' A zona é assinada, mas o resolvedor não confere (servico dns validar on resolveria).' : ' A zona não é assinada: não havia como perceber.'}`, 'Se o site usar HTTPS, o navegador ainda percebe: o servidor falso não tem certificado válido para esse nome.');
   }
-  m.flags.ataque = { tipo: 'dns', de: e.nome, resolvedor: R.nome, nome: normalizarNome(nome), ipFalso: falso, tentativas, probabilidade: Number(prob.toFixed(6)), portasAleatorias: !!cfg.portasAleatorias, envenenado, rejeitadaPorDnssec: rejeitada };
-  m.flags.dnssec = { zona, assinada, validar: !!cfg.validar, rejeitada, resolvedor: R.nome };
+  anotarFlag(m, 'ataque', { tipo: 'dns', de: e.nome, resolvedor: R.nome, nome: normalizarNome(nome), ipFalso: falso, tentativas, probabilidade: Number(prob.toFixed(6)), portasAleatorias: !!cfg.portasAleatorias, envenenado, rejeitadaPorDnssec: rejeitada });
+  anotarFlag(m, 'dnssec', { zona, assinada, validar: !!cfg.validar, rejeitada, resolvedor: R.nome });
   return l;
 }
 
@@ -459,7 +466,7 @@ function cmdWifiPc(m: Mundo, e: Equipamento, args: string[]): Saida {
         e.s.wifiConectado = ssid;
         e.s.senhaWifi = senha;
       }
-      m.flags.wifi = { ...(m.flags.wifi ?? {}), ssid, seguranca: wifiDe(ap)!.seguranca, conectado: r.ok, por: e.nome };
+      anotarFlag(m, 'wifi', { ...(m.flags.wifi ?? {}), ssid, seguranca: wifiDe(ap)!.seguranca, conectado: r.ok, por: e.nome });
       return r.linhas;
     }
     case 'desautenticar': {
@@ -478,7 +485,7 @@ function cmdWifiPc(m: Mundo, e: Equipamento, args: string[]): Saida {
       const a = wifiDe(ap)!.ultimoAperto;
       if (!a) return ['Ninguém se associou desde que você chegou. Espere alguém conectar, ou "wifi desautenticar <ssid>".'];
       e.s.capturaWifi = { ...a };
-      m.flags.ataque = { tipo: 'wifi-captura', de: e.nome, ssid, seguranca: a.seguranca };
+      anotarFlag(m, 'ataque', { tipo: 'wifi-captura', de: e.nome, ssid, seguranca: a.seguranca });
       return [`Capturado o aperto de mão de ${ssid}: ANonce ${a.anonce}, SNonce ${a.snonce}, MACs ${a.macAp} e ${a.macCliente}${a.mic ? `, MIC ${a.mic.slice(0, 16)}...` : ' (WPA3: o que passou no ar não dá para testar senha fora dali)'}.`];
     }
     case 'quebrar': {
@@ -486,8 +493,8 @@ function cmdWifiPc(m: Mundo, e: Equipamento, args: string[]): Saida {
       if (!a || (ssid && a.ssid !== ssid)) return ['Primeiro "wifi capturar <ssid>".'];
       const lista = resto.length ? resto : DICIONARIO_PEQUENO;
       const r = quebrarAperto(a, lista);
-      m.flags.wifi = { ...(m.flags.wifi ?? {}), quebra: { ssid: a.ssid, seguranca: a.seguranca, senha: r.senha ?? null, testadas: r.testadas, dicionario: lista.length } };
-      m.flags.ataque = { tipo: 'wifi', de: e.nome, ssid: a.ssid, seguranca: a.seguranca, quebrada: !!r.senha, testadas: r.testadas };
+      anotarFlag(m, 'wifi', { ...(m.flags.wifi ?? {}), quebra: { ssid: a.ssid, seguranca: a.seguranca, senha: r.senha ?? null, testadas: r.testadas, dicionario: lista.length } });
+      anotarFlag(m, 'ataque', { tipo: 'wifi', de: e.nome, ssid: a.ssid, seguranca: a.seguranca, quebrada: !!r.senha, testadas: r.testadas });
       return [...r.linhas, r.senha ? 'Defesa: senha longa e aleatória (frase de várias palavras), e WPA3, que não deixa testar senha fora do ar.' : ''].filter(Boolean);
     }
   }
@@ -504,15 +511,11 @@ function cmdWifiAp(m: Mundo, e: Equipamento, args: string[]): Saida {
   const senha = resto.join(' ');
   if (seg !== 'aberta' && senha.length < 8) return ['WPA2 e WPA3 pedem senha de pelo menos 8 caracteres.'];
   e.s.wifi = { ssid: ssid!, seguranca: seg, senha: seg === 'aberta' ? undefined : senha } satisfies ConfigWifi;
-  m.flags.wifi = { ...(m.flags.wifi ?? {}), ssid, seguranca: seg, ap: e.nome, tamanhoSenha: senha.length };
+  anotarFlag(m, 'wifi', { ...(m.flags.wifi ?? {}), ssid, seguranca: seg, ap: e.nome, tamanhoSenha: senha.length });
   return [seg === 'aberta' ? `Rede "${ssid}" aberta: sem senha e sem cifra.` : seg === 'wpa2' ? `Rede "${ssid}" com WPA2: chave derivada da senha e do nome da rede, aperto de mão de 4 vias a cada associação. Senha fraca cai num dicionário.` : `Rede "${ssid}" com WPA3 (SAE): a senha entra numa troca tipo Diffie-Hellman, e o que passa no ar não serve para testar senha fora dali.`];
 }
 
 /* ---------- Firewall, IDS, antifalsificação e VPN no roteador ---------- */
-
-function resumoFw(e: Equipamento, fw: ConfigFirewall) {
-  return { roteador: e.nome, padrao: fw.padrao, comEstado: fw.comEstado, regras: fw.regras.map((r) => ({ id: r.id, texto: textoRegra(r).replace(/\s+/g, ' ').trim(), acao: r.acao, proto: r.proto ?? null, origem: r.origem ?? null, destino: r.destino ?? null, porta: r.porta ?? null, portaOrigem: r.portaOrigem ?? null, estado: r.estado ?? null, entrada: r.entrada ?? null, contador: r.contador })), contadores: { ...fw.contadores }, conversas: fw.conexoes.length };
-}
 
 function mostraFw(e: Equipamento, fw: ConfigFirewall): Saida {
   const l = [`FIREWALL DE ${e.nome}: política padrão ${fw.padrao.toUpperCase()}, filtro com estado ${fw.comEstado ? 'LIGADO' : 'desligado'}`];
@@ -527,12 +530,12 @@ function cmdFirewall(m: Mundo, e: Equipamento, args: string[]): Saida {
   const [sub, ...resto] = args;
   if (sub === 'desliga' || sub === 'off') {
     delete e.s.firewall;
-    m.flags.firewall = { roteador: e.nome, desligado: true };
+    anotarFiltro(m, 'firewall', e, { roteador: e.nome, desligado: true });
     return ['Firewall desligado: tudo passa.'];
   }
   const fw = ((e.s.firewall as ConfigFirewall | undefined) ??= novoFirewall());
   const fim = (l: Saida) => {
-    m.flags.firewall = resumoFw(e, fw);
+    anotarFiltro(m, 'firewall', e, resumoFirewall(e, fw));
     return [...l, ...mostraFw(e, fw)];
   };
   switch (sub) {
@@ -579,9 +582,11 @@ function cmdFirewall(m: Mundo, e: Equipamento, args: string[]): Saida {
       return fim([b ? 'Filtro com estado: o firewall lembra cada conversa que deixou começar e deixa passar a volta dela, sem regra para isso. Quem vem de fora sem ninguém ter chamado continua barrado.' : 'Filtro sem estado: cada pacote é julgado sozinho, e a resposta precisa de regra própria.']);
     }
     case 'log':
-      return [`ÚLTIMAS DECISÕES DE ${e.nome}:`, ...fw.log.slice(-15).map((x) => '  ' + x)];
+      anotarFiltro(m, 'firewall', e, resumoFirewall(e, fw));
+      return [`ÚLTIMAS DECISÕES DE ${e.nome}:`, ...(fw.log.length ? fw.log.slice(-15).map((x) => '  ' + x) : ['  nenhuma ainda: nenhum pacote passou por aqui'])];
     case 'zerar':
       fw.conexoes = [];
+      fw.estados = {};
       fw.contadores = { permitidos: 0, negados: 0, porEstado: 0, porPadrao: 0 };
       for (const r of fw.regras) r.contador = 0;
       return fim(['Contadores e tabela de estado zerados.']);
@@ -589,20 +594,16 @@ function cmdFirewall(m: Mundo, e: Equipamento, args: string[]): Saida {
   return ['firewall [mostra] | regra <permitir|negar> ... | inserir <pos> ... | apagar <id|tudo> | padrao <permitir|negar> | estado <on|off> | log | zerar | desliga'];
 }
 
-function resumoIds(e: Equipamento, ids: ConfigIds) {
-  return { roteador: e.nome, modo: ids.modo, limiarVarredura: ids.limiarVarredura, limiarSyn: ids.limiarSyn, limiarTaxa: ids.limiarTaxa, assinaturas: ids.assinaturas.map((a) => a.nome), alertas: ids.alertas.length, ultimo: ids.alertas[ids.alertas.length - 1] ?? null, bloqueados: [...ids.bloqueados] };
-}
-
 function cmdIds(m: Mundo, e: Equipamento, args: string[]): Saida {
   const [sub, ...resto] = args;
   if (sub === 'off' || sub === 'desliga') {
     delete e.s.ids;
-    m.flags.ids = { roteador: e.nome, desligado: true };
+    anotarFiltro(m, 'ids', e, { roteador: e.nome, desligado: true });
     return ['IDS desligado.'];
   }
   const ids = ((e.s.ids as ConfigIds | undefined) ??= novoIds());
   const fim = (l: Saida) => {
-    m.flags.ids = resumoIds(e, ids);
+    anotarFiltro(m, 'ids', e, resumoIds(e, ids));
     return [...l, `${ids.modo.toUpperCase()} em ${e.nome}: varredura a partir de ${ids.limiarVarredura} portas, inundação a partir de ${ids.limiarSyn} SYN/s, anomalia acima de ${ids.limiarTaxa} pacotes/s; ${ids.assinaturas.length} assinatura(s) de conteúdo (${ids.assinaturas.map((a) => a.nome).join(', ')}); ${ids.alertas.length} alerta(s); bloqueados: ${ids.bloqueados.join(', ') || 'ninguém'}.`];
   };
   switch (sub) {
@@ -630,6 +631,7 @@ function cmdIds(m: Mundo, e: Equipamento, args: string[]): Saida {
       return fim([`Assinatura "${nome}": procura "${padrao.join(' ')}" no conteúdo em claro. Tráfego cifrado passa sem ela ver.`]);
     }
     case 'alertas':
+      anotarFiltro(m, 'ids', e, resumoIds(e, ids));
       return [`ALERTAS DE ${e.nome} (${ids.modo.toUpperCase()}):`, ...(ids.alertas.length ? ids.alertas.slice(-15).map((a) => `  ${a.n}. [${a.tipo}] ${a.nome}: ${a.motivo} (${a.acao})`) : ['  nenhum'])];
     case 'desbloquear':
       ids.bloqueados = resto[0] === 'tudo' ? [] : ids.bloqueados.filter((x) => x !== resto[0]);
@@ -638,27 +640,16 @@ function cmdIds(m: Mundo, e: Equipamento, args: string[]): Saida {
   return ['ids [mostra] | ids <ids|ips> | ids limiar <varredura|syn|taxa> <n> | ids assinatura <nome> <texto> | ids alertas | ids desbloquear <ip|tudo> | ids off'];
 }
 
-function estadoTunel(m: Mundo, e: Equipamento, t: TunelVpn): { ativo: boolean; motivo?: string } {
-  const ipPar = lerIp(t.par);
-  const outro = ipPar === null ? undefined : donoDoIp(m, ipPar)?.e;
-  if (!outro) return { ativo: false, motivo: `ninguém tem o endereço ${t.par}` };
-  const meus = interfacesL3(e).map((i) => ipTexto(i.cidr.endereco));
-  const espelho = Object.values(tuneisDe(outro) ?? {}).find((x) => meus.includes(x.par));
-  if (!espelho) return { ativo: false, motivo: `${outro.nome} não tem túnel apontando para cá` };
-  if (espelho.segredo !== t.segredo) return { ativo: false, motivo: 'o segredo pré-compartilhado é diferente nas duas pontas (a autenticação do IKE falha)' };
-  if (espelho.local !== t.remota || espelho.remota !== t.local) return { ativo: false, motivo: `as redes não batem: aqui ${t.local} ↔ ${t.remota}, lá ${espelho.local} ↔ ${espelho.remota}` };
-  return { ativo: true };
-}
-
 function cmdVpn(m: Mundo, e: Equipamento, args: string[]): Saida {
   const tab = ((e.s.vpn as Record<string, TunelVpn> | undefined) ??= {});
   const [sub] = args;
   const mostra = () => {
     const l: Saida = [];
+    refrescarVpns(m);
     for (const t of Object.values(tab)) {
       const st = estadoTunel(m, e, t);
       l.push(...linhasIke(t, st.ativo, st.motivo), `  pacotes: ${t.contadores.cifrados} cifrado(s) na saída, ${t.contadores.decifrados} decifrado(s) na chegada`);
-      m.flags.vpn = { roteador: e.nome, nome: t.nome, par: t.par, local: t.local, remota: t.remota, ativo: st.ativo, motivo: st.motivo ?? null, cifrados: t.contadores.cifrados, decifrados: t.contadores.decifrados, mtuEfetivo: 1500 - SOBRA_ESP, sobra: SOBRA_ESP };
+      anotarFlag(m, 'vpn', { roteador: e.nome, nome: t.nome, par: t.par, local: t.local, remota: t.remota, ativo: st.ativo, motivo: st.motivo ?? null, cifrados: t.contadores.cifrados, decifrados: t.contadores.decifrados, mtuEfetivo: 1500 - SOBRA_ESP, sobra: SOBRA_ESP });
     }
     return l.length ? l : ['Nenhum túnel. vpn <nome> <ip da outra ponta> <rede daqui> <rede de lá> <segredo>'];
   };
@@ -673,7 +664,7 @@ function cmdVpn(m: Mundo, e: Equipamento, args: string[]): Saida {
     const u = t.ultimo;
     const dentro = `IP ${u.origem} > ${u.destino} protocolo ${u.protocolo}, ${u.tamanho} bytes`;
     const hex = espDe(t, dentro, t.contadores.cifrados);
-    m.flags.vpn = { ...(m.flags.vpn ?? {}), captura: { externo: u.externo, protocolo: 50, legivel: false, cifrado: hex.slice(0, 48) } };
+    anotarFlag(m, 'vpn', { ...(m.flags.vpn ?? {}), captura: { externo: u.externo, protocolo: 50, legivel: false, cifrado: hex.slice(0, 48) } });
     return [
       'O QUE O MEIO DO CAMINHO VÊ (último pacote do túnel):',
       `  IP ${u.externo}, protocolo 50 (ESP), ${u.tamanho + SOBRA_ESP} bytes`,
@@ -697,13 +688,13 @@ function cmdCripto(m: Mundo, e: Equipamento, cmd: string, args: string[]): Saida
       const k = Number(args[0]);
       if (!Number.isInteger(k) || !args[1]) return ['cesar <chave> <texto>'];
       const r = cesar(resto(1), k);
-      m.flags.cripto = { op: 'cesar', chave: k, resultado: r.resultado };
+      anotarFlag(m, 'cripto', { op: 'cesar', chave: k, resultado: r.resultado });
       return [...r.passos, `Cifrado: ${r.resultado}`];
     }
     case 'quebrar-cesar': {
       if (!args[0]) return ['quebrar-cesar <texto cifrado>'];
       const r = quebrarCesar(resto(0));
-      m.flags.cripto = { op: 'quebrar-cesar', chave: r.chave, texto: r.texto };
+      anotarFlag(m, 'cripto', { op: 'quebrar-cesar', chave: r.chave, texto: r.texto });
       return [...r.passos, `Chave mais provável ${r.chave}: ${r.texto}`];
     }
     case 'rsa': {
@@ -713,7 +704,7 @@ function cmdCripto(m: Mundo, e: Equipamento, cmd: string, args: string[]): Saida
         const k = gerarChavesRsa(p, q);
         const c = cifrarRsa(msg, k.publica);
         const d = decifrarRsa(c.resultado, k.privada);
-        m.flags.cripto = { op: 'rsa', n: String(k.n), e: String(k.e), d: String(k.d), cifrado: String(c.resultado), decifrado: String(d.resultado) };
+        anotarFlag(m, 'cripto', { op: 'rsa', n: String(k.n), e: String(k.e), d: String(k.d), cifrado: String(c.resultado), decifrado: String(d.resultado) });
         return [...k.passos, `Cifrar ${msg}: ${c.resultado}. Decifrar: ${d.resultado}.`];
       } catch (x) {
         return [`Não deu: ${(x as Error).message}.`];
@@ -722,13 +713,13 @@ function cmdCripto(m: Mundo, e: Equipamento, cmd: string, args: string[]): Saida
     case 'sha256': {
       if (!args.length) return ['sha256 <texto>'];
       const r = sha256Explicado(resto(0));
-      m.flags.cripto = { op: 'sha256', resumo: r.resumo };
+      anotarFlag(m, 'cripto', { op: 'sha256', resumo: r.resumo });
       return [...r.passos.slice(0, 8), `SHA-256: ${r.resumo}`];
     }
     case 'hmac': {
       if (args.length < 2) return ['hmac <chave> <texto>'];
       const r = hmacExplicado(args[0]!, resto(1));
-      m.flags.cripto = { op: 'hmac', mac: r.mac };
+      anotarFlag(m, 'cripto', { op: 'hmac', mac: r.mac });
       return [...r.passos, `HMAC-SHA-256: ${r.mac}`];
     }
     case 'assinar': {
@@ -738,7 +729,7 @@ function cmdCripto(m: Mundo, e: Equipamento, cmd: string, args: string[]): Saida
       const a = assinarMensagem(resto(0), k.privada);
       const v = verificarAssinatura(resto(0), a.assinatura, k.publica);
       const alterada = verificarAssinatura(resto(0) + '!', a.assinatura, k.publica);
-      m.flags.cripto = { op: 'assinar', de: quem, idChave: idChave(quem), assinatura: String(a.assinatura), confere: v.valida, alteradaConfere: alterada.valida };
+      anotarFlag(m, 'cripto', { op: 'assinar', de: quem, idChave: idChave(quem), assinatura: String(a.assinatura), confere: v.valida, alteradaConfere: alterada.valida });
       return [...a.passos, `Assinatura: ${a.assinatura} (chave ${idChave(quem)})`, ...v.passos, `Com um caractere a mais no texto: ${alterada.valida ? 'confere (colisão do RSA de brinquedo)' : 'não confere mais'}.`];
     }
     case 'verificar-cadeia': {
@@ -748,14 +739,14 @@ function cmdCripto(m: Mundo, e: Equipamento, cmd: string, args: string[]): Saida
       const hoje = diaDoMundo(m);
       const cadeia = cadeiaDoServidor(nome, tipo, hoje);
       const r = conferirCadeia(nome, cadeia, hoje, tipo === 'revogado');
-      m.flags.cripto = { op: 'cadeia', nome, tipo, valida: r.valida, motivo: r.motivo ?? null };
+      anotarFlag(m, 'cripto', { op: 'cadeia', nome, tipo, valida: r.valida, motivo: r.motivo ?? null });
       return [...r.passos, r.valida ? 'Cadeia válida.' : 'Cadeia inválida.'];
     }
     case 'kerberos': {
       const [usuario, digitada, cadastrada, servico] = args;
       if (!usuario || !digitada) return ['kerberos <usuário> <senha digitada> [senha cadastrada] [serviço]'];
       const r = simularKerberos({ usuario, senhaDigitada: digitada, senhaCadastrada: cadastrada ?? digitada, servico: servico ?? 'arquivos', agora: Math.floor(relogio(m) / 60) });
-      m.flags.cripto = { op: 'kerberos', sucesso: r.sucesso, falha: r.falha ?? null, etapas: r.etapas.map((x) => x.nome) };
+      anotarFlag(m, 'cripto', { op: 'kerberos', sucesso: r.sucesso, falha: r.falha ?? null, etapas: r.etapas.map((x) => x.nome) });
       return r.passos;
     }
     case 'dh': {
@@ -763,11 +754,11 @@ function cmdCripto(m: Mundo, e: Equipamento, cmd: string, args: string[]): Saida
       if (a == null || b == null) return ['dh <segredo de Alice> <segredo de Bob> [segredo do atacante]: Diffie-Hellman com p = 23 e g = 5 (e o homem no meio, se der o terceiro)'];
       if (x != null) {
         const r = homemNoMeio(23n, 5n, a, b, x);
-        m.flags.cripto = { op: 'dh-homem-no-meio', chaveAlice: String(r.chaveAlice), chaveBob: String(r.chaveBob) };
+        anotarFlag(m, 'cripto', { op: 'dh-homem-no-meio', chaveAlice: String(r.chaveAlice), chaveBob: String(r.chaveBob) });
         return r.passos;
       }
       const r = diffieHellman(23n, 5n, a, b);
-      m.flags.cripto = { op: 'dh', A: String(r.A), B: String(r.B), chave: String(r.chaveAlice) };
+      anotarFlag(m, 'cripto', { op: 'dh', A: String(r.A), B: String(r.B), chave: String(r.chaveAlice) });
       return r.passos;
     }
     case 'pgp': {
@@ -776,7 +767,7 @@ function cmdCripto(m: Mundo, e: Equipamento, cmd: string, args: string[]): Saida
         if (!conta) return ['Primeiro a conta de correio: correio conta <endereço> <ip do servidor>'];
         e.s.pgp = true;
         const k = chavesPgp(conta.endereco);
-        m.flags.pgp = { ...(m.flags.pgp ?? {}), chave: { endereco: conta.endereco, id: idChave(conta.endereco) } };
+        anotarFlag(m, 'pgp', { ...(m.flags.pgp ?? {}), chave: { endereco: conta.endereco, id: idChave(conta.endereco) } });
         return [`Par de chaves de ${conta.endereco}: id ${idChave(conta.endereco)}, pública (n = ${k.n}, e = ${k.e}). A privada fica só aqui.`, 'A pública vai para quem quiser mandar mensagem cifrada para você (e para conferir o que você assina). Confira a impressão digital por outro canal.'];
       }
       const l = ['CHAVES PÚBLICAS CONHECIDAS'];
@@ -834,7 +825,7 @@ function cmdExecutar(m: Mundo, args: string[]): Saida {
     }
   }
   l.push(caixa ? (bloqueadas.length ? 'O programa mostrou o que queria. Sandbox não deixa ver o que ele é; deixa que ele só faça o que pode.' : 'Nada fora do permitido.') : feitas.length > 1 && p.tenta.some((t) => t.risco) ? 'Rodou com todo o poder de quem executou: leu, mandou e ficou. Código de origem desconhecida só em sandbox, com o mínimo de permissões, e de quem assina o código.' : 'Nada de estranho, desta vez.');
-  m.flags.sandbox = { programa: nome, modo: caixa ? 'sandbox' : 'direto', bloqueadas, feitas };
+  anotarFlag(m, 'sandbox', { programa: nome, modo: caixa ? 'sandbox' : 'direto', bloqueadas, feitas });
   return l;
 }
 
@@ -853,7 +844,7 @@ export function comandosSeguranca(m: Mundo, e: Equipamento, cmd: string, args: s
         const b = ligado(args[0]);
         if (b === null) return [`antifalsificacao <on|off> (agora ${e.s.antiFalsificacao ? 'ligado' : 'desligado'})`];
         e.s.antiFalsificacao = b;
-        m.flags.antiFalsificacao = { roteador: e.nome, ligado: b };
+        anotarFlag(m, 'antiFalsificacao', { roteador: e.nome, ligado: b });
         return [b ? 'Filtro de entrada (BCP 38, verificação do caminho reverso): pacote que chega por uma interface com origem que não seria roteada de volta por ela é descartado.' : 'Filtro antifalsificação desligado.'];
       }
       case 'vpn':
@@ -872,14 +863,14 @@ export function comandosSeguranca(m: Mundo, e: Equipamento, cmd: string, args: s
       }
       if (!e.portas.some((p) => p.nome === args[0])) return [`espelhar <porta que recebe a cópia> | espelhar off. Portas: ${e.portas.map((p) => p.nome).join(', ')}`];
       e.s.espelho = args[0];
-      m.flags.espelho = { switch: e.nome, porta: args[0] };
+      anotarFlag(m, 'espelho', { switch: e.nome, porta: args[0] });
       return [`Porta ${args[0]} espelha tudo que passa por ${e.nome} (SPAN). É para o IDS ou o analisador de tráfego, e é por isso que fica trancada.`];
     }
     if (cmd === 'inspecao-arp' || cmd === 'inspeção-arp') {
       const b = ligado(args[0]);
       if (b === null) return ['inspecao-arp <on|off>'];
       e.s.inspecaoArp = b;
-      m.flags.defesaArp = { tipo: 'inspecao', switch: e.nome, ligado: b };
+      anotarFlag(m, 'defesaArp', { tipo: 'inspecao', switch: e.nome, ligado: b });
       return [b ? 'Inspeção dinâmica de ARP: o switch confere cada resposta ARP com quem recebeu qual IP e descarta as mentirosas.' : 'Inspeção de ARP desligada.'];
     }
     return null;
@@ -914,7 +905,7 @@ export function comandosSeguranca(m: Mundo, e: Equipamento, cmd: string, args: s
         inund.meiasAbertas = 0;
         e.s.soquetes = soquetesDe(e).filter((x) => x.servico !== 'meia aberta (inundação)');
       }
-      m.flags.synCookies = { equip: e.nome, ligado: b };
+      anotarFlag(m, 'synCookies', { equip: e.nome, ligado: b });
       return [b ? 'SYN cookies: quando a fila aperta, o servidor responde o SYN sem guardar nada; o estado vai escondido no número de sequência inicial e volta no ACK. Custa algumas opções do TCP.' : 'SYN cookies desligados.'];
     }
     case 'backlog': {

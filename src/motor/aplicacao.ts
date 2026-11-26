@@ -172,9 +172,14 @@ export function novaConsultaDns(id: number, nome: string, tipo: TipoRegistro, re
   };
 }
 
+/** O valor como no arquivo de zona: TXT entre aspas (character-string, RFC 1035, §5.1), MX com a preferência antes. */
+export function valorRegistro(r: RegistroDns): string {
+  if (r.tipo === 'TXT') return `"${r.valor.replace(/(["\\])/g, '\\$1')}"`;
+  return r.tipo === 'MX' ? `${r.prioridade ?? 10} ${r.valor}` : r.valor;
+}
+
 function linhaRegistro(r: RegistroDns): string {
-  const pri = r.tipo === 'MX' ? `${r.prioridade ?? 10} ` : '';
-  return `${r.nome} ${r.ttl} IN ${r.tipo} ${pri}${r.valor}`;
+  return `${r.nome} ${r.ttl} IN ${r.tipo} ${valorRegistro(r)}`;
 }
 
 /** A mensagem em linhas gerais, no formato de cabeçalho mais quatro seções. */
@@ -361,7 +366,7 @@ export function resolver(
   let codigo: ResultadoResolucao['codigo'] = 'NOERROR';
   let alvo = normalizarNome(nome);
 
-  passos.push(`O cliente pede ${alvo} (${tipo}) ao resolvedor local, com recursão desejada (RTT ${rttCliente} ms).`);
+  passos.push(`O cliente pede ${alvo} (${tipo}) ao resolvedor local, com recursão desejada (RTT ${fmt(rttCliente, 2)} ms).`);
   if (modo === 'recursivo') {
     passos.push('Modo recursivo: cada servidor pergunta ao próximo em nome de quem perguntou, e a resposta volta pelo mesmo caminho.');
   }
@@ -416,7 +421,7 @@ export function resolver(
       const quem = modo === 'recursivo' ? anterior : 'resolvedor local';
       if (resp.respostas.length) {
         passos.push(
-          `${quem} pergunta a ${servidor.nome} (${rtt} ms): resposta autoritativa com ${resp.respostas.map((r) => `${r.tipo} ${r.valor}`).join(', ')}.`,
+          `${quem} pergunta a ${servidor.nome} (${fmt(rtt, 2)} ms): resposta autoritativa com ${resp.respostas.map((r) => `${r.tipo} ${r.valor}`).join(', ')}.`,
         );
         cache?.guardar(resp.respostas, agora);
         respostas.push(...resp.respostas);
@@ -434,7 +439,7 @@ export function resolver(
         cache?.guardar([...ns, ...resp.adicionais], agora);
         const prox = ns.map((r) => espaco.porNome.get(r.valor)).find(Boolean);
         passos.push(
-          `${quem} pergunta a ${servidor.nome} (${rtt} ms): não sabe, mas indica ${ns[0]!.nome} em ${ns.map((r) => r.valor).join(', ')}` +
+          `${quem} pergunta a ${servidor.nome} (${fmt(rtt, 2)} ms): não sabe, mas indica ${ns[0]!.nome} em ${ns.map((r) => r.valor).join(', ')}` +
             (resp.adicionais.length ? ` (cola: ${resp.adicionais.map((r) => r.valor).join(', ')}).` : '.'),
         );
         if (!prox) {
@@ -448,7 +453,7 @@ export function resolver(
       }
       codigo = resp.flags.rcode === 3 ? 'NXDOMAIN' : 'NOERROR';
       passos.push(
-        `${quem} pergunta a ${servidor.nome} (${rtt} ms): ${codigo === 'NXDOMAIN' ? 'o nome não existe (NXDOMAIN)' : `o nome existe, mas não tem ${tipo}`}; o SOA da zona diz por quanto tempo guardar essa negativa.`,
+        `${quem} pergunta a ${servidor.nome} (${fmt(rtt, 2)} ms): ${codigo === 'NXDOMAIN' ? 'o nome não existe (NXDOMAIN)' : `o nome existe, mas não tem ${tipo}`}; o SOA da zona diz por quanto tempo guardar essa negativa.`,
       );
       break externo;
     }
@@ -459,7 +464,7 @@ export function resolver(
     passos.push(`A resposta volta pela mesma cadeia: ${detalhes.map((d) => d.servidor).reverse().join(' → ')} → resolvedor local → cliente.`);
   }
   passos.push(
-    `Total: ${consultas} consulta(s) a servidores, ${fmt(tempo, 1)} ms (o cliente espera ${rttCliente} ms + a soma dos RTTs consultados).`,
+    `Total: ${consultas} consulta(s) a servidores, ${fmt(tempo, 1)} ms (o cliente espera ${fmt(rttCliente, 2)} ms + a soma dos RTTs consultados).`,
   );
   return {
     nome: normalizarNome(nome),
@@ -1369,8 +1374,50 @@ export function lerCookies(cabecalho: string | undefined): Record<string, string
   return r;
 }
 
+/**
+ * ETag forte derivado do conteúdo (RFC 9110, §8.8.3): conteúdo igual dá o mesmo ETag, qualquer mudança dá outro.
+ * O resumo FNV-1a de 32 bits não é criptográfico; basta para um validador (colisão entre versões é improvável).
+ */
 export function etagDe(conteudo: string): string {
   return `"${resumo32(conteudo)}"`;
+}
+
+/** Comparação fraca de ETag (RFC 9110, §8.8.3.2), a que o If-None-Match usa: ignora o prefixo W/. */
+function etagFraco(a: string, b: string): boolean {
+  const tira = (x: string) => x.trim().replace(/^W\//, '');
+  return tira(a) === tira(b);
+}
+
+/** Instante zero do relógio do mundo: 26 de novembro de 2026, 12:00:00 UTC (o mesmo do correio). */
+export const EPOCA_MUNDO_MS = Date.UTC(2026, 10, 26, 12, 0, 0);
+
+const dois = (x: number) => String(x).padStart(2, '0');
+
+/** Data HTTP no formato IMF-fixdate (RFC 9110, §5.6.7) de um instante do relógio do mundo, em segundos. */
+export function dataHttp(segundos: number): string {
+  const d = new Date(EPOCA_MUNDO_MS + Math.floor(segundos) * 1000);
+  return `${DIAS_SEMANA[d.getUTCDay()]}, ${dois(d.getUTCDate())} ${MESES[d.getUTCMonth()]} ${d.getUTCFullYear()} ${dois(d.getUTCHours())}:${dois(d.getUTCMinutes())}:${dois(d.getUTCSeconds())} GMT`;
+}
+
+/**
+ * Lê uma data HTTP e devolve o instante no relógio do mundo, em segundos (pode ser negativo). Aceita o IMF-fixdate e,
+ * como a RFC 9110 (§5.6.7) pede a quem recebe, os dois formatos obsoletos: o da RFC 850 e o do asctime(). Data que
+ * não se lê vira null, e quem recebe ignora o cabeçalho.
+ */
+export function lerDataHttp(txt: string): number | null {
+  const mes = (m: string) => MESES.indexOf(m);
+  let ano: number, mm: number, dia: number, h: number, mi: number, s: number;
+  let x = /^\w{3}, (\d{2}) (\w{3}) (\d{4}) (\d{2}):(\d{2}):(\d{2}) GMT$/.exec(txt.trim());
+  if (x) [dia, mm, ano, h, mi, s] = [Number(x[1]), mes(x[2]!), Number(x[3]), Number(x[4]), Number(x[5]), Number(x[6])];
+  else if ((x = /^\w+, (\d{2})-(\w{3})-(\d{2}) (\d{2}):(\d{2}):(\d{2}) GMT$/.exec(txt.trim()))) {
+    // Ano de dois dígitos: o século que não deixa a data mais de 50 anos no futuro.
+    const yy = Number(x[3]);
+    [dia, mm, ano, h, mi, s] = [Number(x[1]), mes(x[2]!), yy + (2000 + yy > 2026 + 50 ? 1900 : 2000), Number(x[4]), Number(x[5]), Number(x[6])];
+  } else if ((x = /^\w{3} (\w{3}) +(\d{1,2}) (\d{2}):(\d{2}):(\d{2}) (\d{4})$/.exec(txt.trim()))) {
+    [dia, mm, ano, h, mi, s] = [Number(x[2]), mes(x[1]!), Number(x[6]), Number(x[3]), Number(x[4]), Number(x[5])];
+  } else return null;
+  if (mm < 0 || dia < 1 || dia > 31 || h > 23 || mi > 59 || s > 60) return null;
+  return (Date.UTC(ano, mm, dia, h, mi, s) - EPOCA_MUNDO_MS) / 1000;
 }
 
 /** Servidor HTTP/1.1 mínimo. Dá a cada navegador novo um cookie de sessão e responde 304 a quem já tem a versão certa. */
@@ -1419,18 +1466,23 @@ export class ServidorWeb {
       }, req.metodo === 'HEAD' ? '' : g.corpo);
     }
     const etag = etagDe(r.conteudo);
-    const modificado = r.modificado ?? 0;
+    // Datas HTTP têm resolução de 1 s: o que vale é o segundo inteiro (RFC 9110, §8.8.2).
+    const modificado = Math.floor(r.modificado ?? 0);
     const base: Record<string, string> = {
       ...extra,
+      // Servidor com relógio manda Date em toda resposta (RFC 9110, §6.6.1).
+      Date: dataHttp(agora),
       ETag: etag,
-      'Last-Modified': String(modificado),
+      'Last-Modified': dataHttp(Math.min(modificado, Math.floor(agora))),
       'Cache-Control': `max-age=${r.maxAge ?? 0}`,
     };
     const inm = cab['if-none-match'];
-    const ims = cab['if-modified-since'];
-    if ((inm !== undefined && inm === etag) || (inm === undefined && ims !== undefined && Number(ims) >= modificado)) {
-      return novaResposta(304, base);
-    }
+    const ims = cab['if-modified-since'] !== undefined ? lerDataHttp(cab['if-modified-since']) : null;
+    // If-None-Match decide sozinho quando vem (comparação fraca, "*" casa qualquer um); só sem ele o
+    // If-Modified-Since é avaliado, e data ilegível é ignorada (RFC 9110, §13.1.2, §13.1.3 e §13.2.2).
+    const naoMudou =
+      inm !== undefined ? inm.trim() === '*' || inm.split(',').some((x) => etagFraco(x, etag)) : ims !== null && modificado <= ims;
+    if (naoMudou) return novaResposta(304, base);
     return novaResposta(
       200,
       { 'Content-Type': r.tipoMime ?? 'text/html; charset=utf-8', ...base, 'Content-Length': String(r.conteudo.length) },
@@ -1476,7 +1528,9 @@ export class Navegador {
     const mapa = servidores instanceof Map ? servidores : new Map(Object.entries(servidores));
     const servidor = mapa.get(u.nome);
     const passos: string[] = [];
-    const chave = `${u.esquema}://${u.nome}${u.caminho}${u.consultaBruta ? '?' + u.consultaBruta : ''}`;
+    // A chave do cache é a URI do pedido (RFC 9111, §2): esquema, nome e porta (http e https nunca se misturam).
+    // A porta padrão do esquema fica de fora, como na normalização da RFC 3986, §6.2.3.
+    const chave = `${u.esquema}://${u.nome}${u.porta === PORTAS_PADRAO[u.esquema] ? '' : `:${u.porta}`}${u.caminho}${u.consultaBruta ? '?' + u.consultaBruta : ''}`;
     const terceiro = site !== undefined && site !== u.nome;
     const salvo = this.cache.get(chave);
     if (salvo && agora - salvo.recebida < salvo.maxAge) {
@@ -1603,7 +1657,7 @@ export function rttsPagina(dados: {
       break;
   }
   const tempo = rtts * dados.rtt + (n + 1) * (dados.transmissao ?? 0);
-  passos.push(`Total: ${rtts} RTT em ${conexoes} conexão(ões), ${fmt(tempo, 1)} ms com RTT de ${dados.rtt} ms.`);
+  passos.push(`Total: ${rtts} RTT em ${conexoes} conexão(ões), ${fmt(tempo, 1)} ms com RTT de ${fmt(dados.rtt, 2)} ms.`);
   return { rtts, conexoes, tempo, passos };
 }
 
@@ -1742,7 +1796,7 @@ export function taxaAudio(dados: { amostragem: number; bits: number; canais: num
     bytesPorMinuto: (bps * 60) / 8,
     passos: [
       `${dados.amostragem} amostras/s × ${dados.bits} bits × ${dados.canais} canal(is) = ${bps} b/s = ${fmt(bps / 1000, 1)} kb/s.`,
-      `Pela regra de Nyquist, ${dados.amostragem} amostras/s guardam frequências até ${dados.amostragem / 2} Hz.`,
+      `Pela regra de Nyquist, ${dados.amostragem} amostras/s guardam frequências até ${fmt(dados.amostragem / 2, 1)} Hz.`,
       `${dados.bits} bits dão ${niveisQuantizacao(dados.bits)} níveis de quantização.`,
       `Um minuto ocupa ${fmt((bps * 60) / 8 / 1e6, 2)} MB sem compressão.`,
     ],
@@ -1918,13 +1972,82 @@ export function simularBuffer(dados: {
   }
   const fim = arred(k * dt, 3);
   passos.unshift(
-    `Vídeo de ${dados.duracao} s a ${dados.taxaVideo} kb/s; o reprodutor espera ${dados.atrasoInicial} s antes de começar.`,
+    `Vídeo de ${fmt(dados.duracao, 1)} s a ${fmt(dados.taxaVideo, 1)} kb/s; o reprodutor espera ${fmt(dados.atrasoInicial, 1)} s antes de começar.`,
   );
   passos.push(
     `Resultado: ${travamentos} travamento(s), ${fmt(tempoTravado, 1)} s parado; terminou em ${fmt(fim, 1)} s.` +
-      (travamentos ? ' Um atraso inicial maior enche o buffer e absorve as quedas de banda.' : ''),
+      (travamentos ? ' Um atraso inicial maior enche o buffer antes e absorve as quedas de banda.' : ''),
   );
   return { travamentos, tempoTravado: arred(tempoTravado, 3), fim, linhaDoTempo: linha, passos };
+}
+
+/**
+ * Vazão que sobra para um fluxo TCP num enlace compartilhado, segundo a segundo (kb/s), sempre a mesma para a mesma
+ * semente. A banda do gargalo (`base`, kb/s) não chega inteira ao vídeo, e não chega igual todo segundo:
+ * 1. Partida lenta (RFC 5681): a janela começa com 10 segmentos (RFC 6928) e dobra a cada RTT até encher o cano, então
+ *    o primeiro segundo traz bem menos que a banda.
+ * 2. Variação com memória: os outros fluxos do enlace vão e vêm devagar, e um segundo ruim costuma vir junto de outros
+ *    ruins. Modelo AR(1) em torno da média, com coeficiente 0,9 de um segundo para o seguinte.
+ * 3. Quedas: de vez em quando (umas 1,3 vez por minuto) um fluxo novo disputa o enlace ou uma perda faz o TCP cortar a
+ *    janela pela metade (RFC 5681, §3.1), e por 3 a 7 s sobra só de 50 a 65 % do que sobrava.
+ * Nunca passa de 98 % do gargalo (cabeçalhos e confirmações também ocupam o enlace). Aproximação declarada: não é uma
+ * simulação pacote a pacote do TCP, é uma série com o comportamento dele, reprodutível pela semente.
+ */
+export function vazaoNoTempo(d: { base: number; segundos: number; semente: number; rtt?: number; mss?: number; media?: number; desvio?: number; quedasPorMinuto?: number }): number[] {
+  const rnd = rngSemente(d.semente);
+  const normal = () => Math.sqrt(-2 * Math.log(Math.max(rnd(), 1e-12))) * Math.cos(2 * Math.PI * rnd());
+  const phi = 0.9;
+  const sigma = d.desvio ?? 0.06;
+  const media = d.media ?? 0.9;
+  const pQueda = (d.quedasPorMinuto ?? 1.3) / 60;
+  const rtt = Math.max(d.rtt ?? 0.1, 0.001);
+  const mss = d.mss ?? 1460;
+  // Janela da partida lenta em kb/s no instante t: 10 segmentos dobrando a cada RTT.
+  const partida = (t: number) => (10 * mss * 8 * 2 ** (t / rtt)) / rtt / 1000;
+  const out: number[] = [];
+  let x = 0;
+  let queda = 0;
+  let fator = 1;
+  for (let t = 0; t < d.segundos; t++) {
+    x = phi * x + Math.sqrt(1 - phi * phi) * sigma * normal();
+    if (queda === 0 && rnd() < pQueda) {
+      queda = 3 + Math.floor(rnd() * 5);
+      fator = 0.5 + 0.15 * rnd();
+    }
+    const f = Math.min(0.98, Math.max(0.2, media * (1 + x) * (queda > 0 ? fator : 1)));
+    if (queda > 0) queda--;
+    const teto = f * d.base;
+    let v = teto;
+    if (partida(t) < teto) {
+      // Ainda na partida lenta: média do segundo em 20 pedaços.
+      let soma = 0;
+      for (let k = 0; k < 20; k++) soma += Math.min(teto, partida(t + (k + 0.5) / 20));
+      v = soma / 20;
+    }
+    out.push(Math.round(v));
+  }
+  return out;
+}
+
+/**
+ * Menor atraso inicial, em segundos inteiros, com que o vídeo toca do começo ao fim sem travar nessa série de banda.
+ * Mais espera nunca piora (o buffer só fica maior em cada instante), então dá para procurar por bisseção.
+ */
+export function atrasoMinimo(d: { duracao: number; taxaVideo: number; banda: number[] }): number {
+  const total = d.duracao * d.taxaVideo;
+  let acumulado = 0;
+  let hi = 0;
+  while (acumulado < total && hi < 100000) acumulado += bandaEm(d.banda, hi++);
+  hi += 1;
+  const trava = (a: number) => simularBuffer({ duracao: d.duracao, taxaVideo: d.taxaVideo, banda: d.banda, atrasoInicial: a }).travamentos > 0;
+  if (!trava(0)) return 0;
+  let lo = 0;
+  while (hi - lo > 1) {
+    const meio = Math.floor((lo + hi) / 2);
+    if (trava(meio)) lo = meio;
+    else hi = meio;
+  }
+  return hi;
 }
 
 /* ---------- Streaming adaptativo ---------- */
@@ -2052,7 +2175,7 @@ export function simularAdaptativo(dados: {
     anterior = nivel;
   }
   const qualidadeMedia = arred(somaTaxa / Math.max(dados.segmentos, 1), 1);
-  passos.unshift(`Níveis: ${niveis.map((n) => `${n.nome} ${n.taxa} kb/s`).join(', ')}; segmentos de ${seg} s, margem ${margem}.`);
+  passos.unshift(`Níveis: ${niveis.map((n) => `${n.nome} ${n.taxa} kb/s`).join(', ')}; segmentos de ${fmt(seg, 1)} s, margem ${fmt(margem, 2)}.`);
   passos.push(`Resultado: ${trocas} troca(s) de nível, ${travamentos} travamento(s), qualidade média ${fmt(qualidadeMedia, 0)} kb/s.`);
   return { historico, travamentos, tempoTravado: arred(tempoTravado, 3), trocas, qualidadeMedia, passos };
 }
@@ -2073,7 +2196,7 @@ export function atrasoFimAFim(partes: {
     total,
     avaliacao,
     passos: [
-      `Codificação ${partes.codificacao} ms + empacotamento ${partes.empacotamento} ms + rede ${partes.rede} ms + buffer de jitter ${partes.bufferJitter} ms + decodificação ${partes.decodificacao} ms = ${total} ms.`,
+      `Codificação ${fmt(partes.codificacao, 2)} ms + empacotamento ${fmt(partes.empacotamento, 2)} ms + rede ${fmt(partes.rede, 2)} ms + buffer de jitter ${fmt(partes.bufferJitter, 2)} ms + decodificação ${fmt(partes.decodificacao, 2)} ms = ${fmt(total, 2)} ms.`,
       `Para conversa: ${avaliacao}. Em transmissão ao vivo de mão única, alguns segundos de atraso são aceitáveis; numa conversa, não.`,
     ],
   };
@@ -2164,7 +2287,7 @@ export function simularJitter(dados: {
   const falhas = ok.filter((x) => !x).length;
   const passos = [
     `${dados.pacotes} pacotes a cada ${intervalo} ms; atraso de rede entre ${dados.atrasoBase} e ${dados.atrasoBase + dados.variacao} ms; perda de ${fmt(dados.perda * 100, 1)}%.`,
-    `Reprodução fixa em ${dados.atrasoReproducao} ms após o envio: ${perdidosNaRede} perdidos na rede, ${atrasados} chegaram tarde demais e foram descartados.`,
+    `Reprodução fixa em ${fmt(dados.atrasoReproducao, 2)} ms após o envio: ${perdidosNaRede} perdidos na rede, ${atrasados} chegaram tarde demais e foram descartados.`,
   ];
   if (correcao === 'fec') passos.push(`FEC com 1 pacote de paridade a cada ${k} (${fmt(100 / k, 0)}% a mais de banda): recuperou ${recuperadosFec} buraco(s).`);
   if (correcao === 'ocultacao') passos.push(`Ocultação: ${ocultados} buraco(s) disfarçados repetindo o som anterior (funciona para buracos curtos).`);
@@ -2454,7 +2577,7 @@ export function simularCdn(dados: {
     passos: [],
   };
   r.passos.push(
-    `${total} espectadores a ${dados.taxaPorEspectador} Mb/s; origem em ${dados.origem}, enlace principal de ${cap} Mb/s.`,
+    `${total} espectadores a ${fmt(dados.taxaPorEspectador, 2)} Mb/s; origem em ${dados.origem}, enlace principal de ${cap} Mb/s.`,
     `Sem CDN: ${fmt(trafSem, 0)} Mb/s saindo da origem (${fmt(r.semCdn.ocupacao * 100, 1)}% do enlace)` +
       (trafSem > cap ? ', o enlace não aguenta e todo mundo trava.' : '.') +
       ` Atraso médio ${fmt(r.semCdn.atrasoMedio, 1)} ms.`,

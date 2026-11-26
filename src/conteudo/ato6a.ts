@@ -805,7 +805,7 @@ const dia114: Dia = {
         if (temRegistro(m, '@', 'A') || temRegistro(m, '@', 'CNAME')) return 'Esse tipo não diz nada sobre correio. O registro que indica o servidor de correio de um domínio é o MX.';
         return 'A zona do estádio ainda não tem MX.';
       },
-      feito: 'estadio.fimdelinha.exemplo MX 10 correio.estadio.fimdelinha.exemplo. O 10 é a prioridade, posta pelo servidor como padrão: com dois MX, o de menor número é tentado primeiro.',
+      feito: 'estadio.fimdelinha.exemplo MX 10 correio.estadio.fimdelinha.exemplo. O 10 é a prioridade (o valor que já vem no campo): com dois MX, o de menor número é tentado primeiro.',
     }),
     passo({
       alvo: ['equip', 'correio-est'],

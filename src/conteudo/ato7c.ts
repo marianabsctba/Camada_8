@@ -4,6 +4,7 @@
 
 import { adicionar, comutador, ligar, novoMundo, pc, roteador, type Mundo } from '../motor/mundo';
 import { cacheDoResolvedor } from '../motor/cliAplicacao';
+import { refrescarVpns } from '../motor/roteamento';
 import { calcularBgp, type ConfigBgp } from '../motor/protocolos';
 import { lerCidr } from '../motor/util';
 import { item, registroPing, todasRespondidas } from './comum';
@@ -34,7 +35,7 @@ const CONTATO = 'contato@loja.exemplo';
 
 /**
  * A rede da escola (192.168.1.0/24, switch sw): ana, bia, dns1 (o resolvedor antigo, com porta fixa e sem validar
- * DNSSEC), dns2 (o resolvedor novo), mxesc (correio da escola) e a bancada do laboratório (espiao, na porta p5).
+ * DNSSEC), dns2 (o resolvedor novo, que vem sem as defesas ligadas), mxesc (correio da escola) e a bancada do laboratório (espiao, na porta p5).
  * r1 e r2 levam à rede pública 203.0.113.0/24, com a loja (DNS assinado e web), o correio da loja e caio.
  */
 function mundoCorreioWeb(o: { semente: number; desafio: boolean }): Mundo {
@@ -47,7 +48,7 @@ function mundoCorreioWeb(o: { semente: number; desafio: boolean }): Mundo {
   host('dns1', '192.168.1.53/24', '192.168.1.1', 'Resolvedor antigo da escola (porta fixa, sem validar DNSSEC)');
   host('mxesc', '192.168.1.25/24', '192.168.1.1', 'Servidor de correio da escola');
   host('espiao', '192.168.1.66/24', '192.168.1.1', 'Bancada de testes do centro de operações');
-  host('dns2', '192.168.1.54/24', '192.168.1.1', o.desafio ? 'Resolvedor novo (valida DNSSEC; as portas aleatórias ainda não foram ligadas)' : 'Resolvedor novo (portas aleatórias e validação DNSSEC)');
+  host('dns2', '192.168.1.54/24', '192.168.1.1', o.desafio ? 'Resolvedor novo, reinstalado (recursivo, sem as defesas)' : 'Resolvedor novo, recém-instalado (recursivo, defesas ainda desligadas)');
   host('loja', '203.0.113.10/24', '203.0.113.1', 'Servidor da loja: DNS de loja.exemplo e o site');
   host('correio', '203.0.113.25/24', '203.0.113.1', 'Servidor de correio da loja');
   host('caio', '203.0.113.30/24', '203.0.113.1', 'PC do atendimento da loja');
@@ -75,7 +76,8 @@ function mundoCorreioWeb(o: { semente: number; desafio: boolean }): Mundo {
     web: { paginas: { '/': { conteudo: '<h1>Loja do laboratório</h1>' } }, https: o.desafio ? 'vencido' : 'valido' },
   };
   s('dns1').servicos = { dns: { zona: 'escola.exemplo', recursivo: true, registros: [{ nome: '@', tipo: 'MX', valor: 'mx', prioridade: 5 }, { nome: 'mx', tipo: 'A', valor: '192.168.1.25' }] } };
-  s('dns2').servicos = { dns: { recursivo: true, validar: true, portasAleatorias: !o.desafio } };
+  // As defesas do dns2 (portas aleatórias e validação DNSSEC) ficam por conta de quem joga.
+  s('dns2').servicos = { dns: { recursivo: true } };
   s('mxesc').servicos = { correio: { dominio: 'escola.exemplo' } };
   s('correio').servicos = { correio: { dominio: 'loja.exemplo', caixas: ['contato'] } };
   for (const n of ['ana', 'bia', 'mxesc', 'espiao', 'loja', 'correio', 'caio']) s(n).dns = DNS_VELHO;
@@ -106,6 +108,20 @@ function cartaSegura(m: Mundo, de: string): boolean {
 function cacheForjado(m: Mundo, resolvedor: string, nome = 'www.loja.exemplo'): string | undefined {
   const cache = cacheDoResolvedor(m.equipamentos.get(resolvedor)!) as unknown as { entradas: Map<string, { registro: { valor: string; forjado?: boolean } }[]> };
   return cache.entradas.get(`${nome}. A`)?.find((x) => x.registro.forjado)?.registro.valor;
+}
+
+function dnsDe(m: Mundo, nome: string): { recursivo?: boolean; validar?: boolean; portasAleatorias?: boolean } | undefined {
+  return (m.equipamentos.get(nome)!.s.servicos as { dns?: { recursivo?: boolean; validar?: boolean; portasAleatorias?: boolean } } | undefined)?.dns;
+}
+
+function defesasDns2(m: Mundo): boolean {
+  const d = dnsDe(m, 'dns2');
+  return !!d?.portasAleatorias && !!d.validar;
+}
+
+function defesasTexto(m: Mundo): string {
+  const d = dnsDe(m, 'dns2');
+  return `portas aleatórias ${d?.portasAleatorias ? 'ligadas' : 'desligadas'}, validação ${d?.validar ? 'ligada' : 'desligada'}`;
 }
 
 interface RegistroTls {
@@ -144,8 +160,8 @@ const dia126: Dia = {
   chamado: [
     'CHAMADO #0126',
     'A coordenação da escola manda as notas finais para a loja que imprime os boletins, e hoje cedo alguém da loja leu em voz alta, no balcão, uma nota que ainda nem tinha saído. O correio passa em claro por dois servidores e um provedor. Na mesma noite, o resolvedor antigo da escola começou a mandar gente para um endereço estranho quando digitam www.loja.exemplo.',
-    'O laboratório do centro de operações tem uma bancada na porta espelhada do switch da escola e um resolvedor novo (dns2) pronto para assumir.',
-    'Objetivo: mandar as notas assinadas e cifradas, ensaiar o envenenamento do resolvedor antigo, levar a secretaria para o resolvedor novo, abrir a loja por HTTPS e conferir o que a bancada enxerga, e testar a extensão suspeita numa sandbox.',
+    'O laboratório do centro de operações tem uma bancada na porta espelhada do switch da escola e um resolvedor novo (dns2), recém-instalado, ainda com as defesas desligadas.',
+    'Objetivo: mandar as notas assinadas e cifradas, ensaiar o envenenamento do resolvedor antigo, ligar as defesas do resolvedor novo (portas aleatórias e validação DNSSEC) e levar a secretaria para ele, abrir a loja por HTTPS e conferir o que a bancada enxerga, e testar a extensão suspeita numa sandbox.',
   ],
   manual: {
     titulo: 'Correio e web seguros',
@@ -159,7 +175,7 @@ const dia126: Dia = {
   },
   dicas: [
     'O PGP fica no PC bia: primeiro "Gerar chaves PGP", depois "Mandar e-mail assinado e cifrado" para contato@loja.exemplo. A chave pública de quem recebe já foi publicada.',
-    'O envenenamento sai da bancada espiao contra o resolvedor 192.168.1.53. A defesa, na ana, é "Escolher o resolvedor de DNS" com o 192.168.1.54, que sorteia as portas e valida DNSSEC.',
+    'O envenenamento sai da bancada espiao contra o resolvedor 192.168.1.53. A defesa mora no dns2: "Portas de origem aleatórias no resolvedor" e "Validar DNSSEC no resolvedor". Depois, na ana, "Escolher o resolvedor de DNS" com o 192.168.1.54.',
     'Depois de abrir https://www.loja.exemplo/ na ana, "Farejar a rede" na espiao, e por fim "Rodar código não confiável" com a extensão, na sandbox.',
   ],
   montar: () => mundoCorreioWeb({ semente: 5126, desafio: false }),
@@ -172,6 +188,7 @@ const dia126: Dia = {
     return [
       item('notas da bia para contato@loja.exemplo, assinadas e cifradas com PGP, entregues', cartaSegura(m, 'bia@escola.exemplo'), m.flags.pgp?.entregue ? 'entregue' : 'ainda não'),
       item('envenenamento ensaiado: o resolvedor antigo (dns1) guardou o endereço falso de www.loja.exemplo', !!forjado, forjado ? `dns1 manda www.loja.exemplo para ${forjado}` : 'cache limpo'),
+      item('o resolvedor novo (dns2) com portas aleatórias e validação DNSSEC', defesasDns2(m), defesasTexto(m)),
       item('a secretaria (ana) usando o resolvedor novo, 192.168.1.54', dnsAna === DNS_NOVO, `resolvedor da ana: ${dnsAna ?? 'nenhum'}`),
       item('ana abriu https://www.loja.exemplo/ com TLS 1.3 e certificado válido', !!t, t ? `SNI ${t.sni}, cadeia ${t.cadeia}` : 'ainda não'),
       item('a bancada farejou e só viu o HTTPS cifrado, sem segredo nenhum em claro', viu, f ? `${f.quadros ?? 0} quadros, ${f.cifrados ?? 0} cifrado(s), segredos: ${(f.segredos ?? []).length}` : 'ainda não farejou'),
@@ -214,6 +231,26 @@ const dia126: Dia = {
       porque: 'É o ataque que o chamado descreve. Ensaiar mostra por que ele funciona: porta fixa, e só um identificador de 16 bits para adivinhar.',
       conferir: (m) => (cacheForjado(m, 'dns1') ? true : 'O cache do dns1 continua limpo. Confira o resolvedor: o antigo é o 192.168.1.53.'),
       feito: 'Com a porta sempre a mesma, 100000 respostas forjadas tiveram 78,3 % de chance de acertar o identificador, e uma acertou. O dns1 vai mandar todo mundo para 198.51.100.66 por 86400 s. A zona é assinada, mas o dns1 não confere.',
+    }),
+    passo({
+      alvo: ['equip', 'dns2'],
+      acao: 'ap-servico-dns-portas',
+      pedir: ['v'],
+      exemplo: { v: 'on' },
+      instrucao: 'No resolvedor novo (dns2), ligue as portas de origem aleatórias.',
+      porque: 'O dns1 caiu porque pergunta sempre da mesma porta: o atacante só precisava adivinhar o identificador de 16 bits. Sorteando a porta de cada consulta, a resposta forjada precisa acertar as duas coisas.',
+      conferir: (m) => (dnsDe(m, 'dns2')?.portasAleatorias ? true : 'As portas aleatórias do dns2 ainda estão desligadas.'),
+      feito: 'Cada consulta do dns2 sai de uma das 64512 portas altas, sorteada. As mesmas 100000 respostas forjadas, que davam 78,3 % de chance contra o dns1, dariam perto de 0,002 %.',
+    }),
+    passo({
+      alvo: ['equip', 'dns2'],
+      acao: 'ap-servico-dns-validar',
+      pedir: ['v'],
+      exemplo: { v: 'on' },
+      instrucao: 'Ainda no dns2, ligue a validação DNSSEC.',
+      porque: 'Sorte não é garantia: com tentativas suficientes, alguma acerta id e porta. A zona loja.exemplo é assinada, e um resolvedor que confere a assinatura joga fora o que não tem RRSIG certo, acertando ou não.',
+      conferir: (m) => (dnsDe(m, 'dns2')?.validar ? true : 'A validação DNSSEC do dns2 ainda está desligada.'),
+      feito: 'Agora o dns2 confere a RRSIG de cada resposta de zona assinada com a DNSKEY da zona, e a chave pelo DS da zona de cima, até a raiz. Resposta forjada não tem como trazer assinatura que confira.',
     }),
     passo({
       alvo: ['equip', 'ana'],
@@ -354,13 +391,13 @@ const dia126: Dia = {
   },
   desafio: {
     carta: [
-      'Na manhã seguinte, a secretaria (ana) também precisa mandar documentos para a loja, mas nunca configurou o correio nem tem chaves. O resolvedor novo (dns2) foi reinstalado e voltou sem as portas aleatórias, só com a validação DNSSEC. E o site da loja amanheceu com o certificado vencido.',
-      'O conserto das portas fica para a equipe do resolvedor. Antes, o laboratório quer provar que a validação, sozinha, já segura o envenenamento.',
-      'Objetivo: a conta da ana no servidor da escola, uma carta assinada e cifrada para contato@loja.exemplo, o ensaio de envenenamento contra o dns2 barrado pelo DNSSEC, a loja com certificado válido aberta por HTTPS na ana, o jogo "grátis" testado na sandbox e a pergunta respondida.',
+      'Na manhã seguinte, a secretaria (ana) também precisa mandar documentos para a loja, mas nunca configurou o correio nem tem chaves. O resolvedor novo (dns2) foi reinstalado e voltou sem defesa nenhuma: nem portas aleatórias, nem validação DNSSEC. E o site da loja amanheceu com o certificado vencido.',
+      'O conserto das portas fica para a equipe do resolvedor. Antes, o laboratório quer provar que a validação, sozinha, já segura o envenenamento: ligue só ela.',
+      'Objetivo: a conta da ana no servidor da escola, uma carta assinada e cifrada para contato@loja.exemplo, a validação DNSSEC ligada no dns2 e o ensaio de envenenamento contra ele barrado pelo DNSSEC, a loja com certificado válido aberta por HTTPS na ana, o jogo "grátis" testado na sandbox e a pergunta respondida.',
     ],
     dicas: [
       'A conta da ana é ana@escola.exemplo, no servidor 192.168.1.25. Depois, chaves PGP e o e-mail seguro, como fez a bia.',
-      'O certificado se troca no servidor loja, em "Ligar HTTPS". O ensaio sai da espiao contra o 192.168.1.54.',
+      'O certificado se troca no servidor loja, em "Ligar HTTPS". No dns2, "Validar DNSSEC no resolvedor" (as portas aleatórias, não: com elas a resposta forjada nem acerta, e o ensaio não prova nada). O ensaio sai da espiao contra o 192.168.1.54.',
       'Na carta, a chave pública da loja embrulha só a chave de sessão.',
     ],
     perguntas: d126D,
@@ -371,6 +408,7 @@ const dia126: Dia = {
       const t = tlsOk(m, 'ana');
       return [
         item('carta da ana para contato@loja.exemplo, assinada e cifrada, entregue', cartaSegura(m, 'ana@escola.exemplo'), m.flags.pgp?.de ?? 'ainda não'),
+        item('validação DNSSEC ligada no dns2', !!dnsDe(m, 'dns2')?.validar, defesasTexto(m)),
         item('envenenamento contra o dns2 acertou o id, mas foi descartado pelo DNSSEC', barrado, d ? `zona assinada: ${d.rejeitada ? 'forjada rejeitada' : 'nada rejeitado ainda'}` : 'ainda não ensaiado'),
         item('ana abriu https://www.loja.exemplo/ com certificado válido', !!t && t.cadeia === 'valida', t ? `cadeia ${t.cadeia}` : (m.flags.tls as RegistroTls | undefined)?.cadeia ? `certificado ${(m.flags.tls as RegistroTls).cadeia}` : 'ainda não'),
         item('o jogo "grátis" rodou na sandbox, com o perigoso negado', sandboxOk(m, 'jogo-gratis'), m.flags.sandbox ? `${m.flags.sandbox.programa} em modo ${m.flags.sandbox.modo}` : 'ainda não'),
@@ -381,6 +419,7 @@ const dia126: Dia = {
       ['equip', 'ana', 'ap-correio-conta', { end: 'ana@escola.exemplo', srv: '192.168.1.25' }],
       ['equip', 'ana', 'sg-pgp'],
       ['equip', 'ana', 'sg-correio-seguro', { para: CONTATO, assunto: 'Documentos', corpo: 'Seguem os documentos da secretaria.' }],
+      ['equip', 'dns2', 'ap-servico-dns-validar', { v: 'on' }],
       ['equip', 'espiao', 'sg-envenenar-dns', { r: DNS_NOVO, nome: 'www.loja.exemplo', falso: IP_FALSO }],
       ['equip', 'loja', 'ap-servico-https', { tipo: 'valido' }],
       ['equip', 'ana', 'ap-navegar-https', { url: 'https://www.loja.exemplo/' }],
@@ -473,6 +512,8 @@ function mundoTroca(o: { semente: number; desafio: boolean }): Mundo {
   if (o.desafio) s('borda').vpn = { cebola: tunel('cebola', IX_VIZINHA, REDE_REDACAO, REDE_FONTE, SEGREDO_1, 1) };
   else s('estrada').vpn = { cebola: tunel('cebola', IX_VIZINHA, REDE_FONTE, REDE_REDACAO, SEGREDO_2, 1) };
   calcularBgp(m);
+  // Os túneis que já vêm montados aparecem em m.flags.vpnPor desde o começo, como os criados pelo console.
+  refrescarVpns(m);
   return m;
 }
 
@@ -481,11 +522,14 @@ interface TunelSalvo {
   local: string;
   remota: string;
   segredo: string;
-  contadores: { cifrados: number; decifrados: number };
+  ativo: boolean;
+  cifrados: number;
+  decifrados: number;
 }
 
+/** Os túneis do roteador como o motor resume em m.flags.vpnPor (redes, segredo, estado do IKE e contadores). */
 function tuneis(m: Mundo, r: string): TunelSalvo[] {
-  return Object.values((m.equipamentos.get(r)!.s.vpn ?? {}) as Record<string, TunelSalvo>);
+  return ((m.flags.vpnPor as Record<string, TunelSalvo[]> | undefined)?.[r] ?? []) as TunelSalvo[];
 }
 
 /** O túnel de uma ponta até o nó do meio, com as redes e o segredo que o nó do meio espera. */
@@ -559,7 +603,7 @@ const dia127: Dia = {
     const seq = sequestros(m);
     return [
       item('túnel da borda até o nó do meio (vizinha) para a rede da fonte, com a outra ponta fechando', !!t, t ? `${t.local} para ${t.remota} via ${t.par}` : 'ainda não'),
-      item('a redação alcança a fonte (10.9.0.10) pelo caminho em camadas', !!t && pingFonte(m) && t.contadores.cifrados > 0, t ? `${t.contadores.cifrados} pacote(s) cifrado(s) na borda` : 'sem túnel'),
+      item('a redação alcança a fonte (10.9.0.10) pelo caminho em camadas', !!t && pingFonte(m) && t.cifrados > 0, t ? `${t.cifrados} pacote(s) cifrado(s) na borda` : 'sem túnel'),
       item('visto o que o meio do caminho enxerga: só ESP entre a borda e o nó do meio', cap?.protocolo === 50, cap?.externo ?? 'ainda não'),
       item('filtro antifalsificação ligado na borda de Fim de Linha', antiOk(m), antiOk(m) ? 'ligado' : 'desligado'),
       ...todasRespondidas(m, d127),

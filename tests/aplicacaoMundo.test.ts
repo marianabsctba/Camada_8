@@ -7,7 +7,7 @@ import { mundoAplicacao, rodar } from './mundoAplicacao';
 import { Terminal } from '../src/motor/cli';
 import { acoesEquip, executarAcao, padroes } from '../src/motor/acoes';
 import { espacoDoMundo, temAplicacao } from '../src/motor/cliAplicacao';
-import { arvoreDeNomes } from '../src/motor/aplicacao';
+import { arvoreDeNomes, atrasoMinimo, dataHttp, etagDe, lerDataHttp, Navegador, ServidorWeb, simularBuffer, vazaoNoTempo } from '../src/motor/aplicacao';
 import { lerCidr } from '../src/motor/util';
 import type { Dia } from '../src/conteudo/tipos';
 
@@ -165,5 +165,165 @@ describe('console, menu e flags', () => {
       expect(saida, a.id).not.toMatch(/desconhecido|não entendi/i);
       expect(TRAVESSAO.test(saida), a.id).toBe(false);
     }
+  });
+});
+
+describe('HTTP: datas, validadores e cache', () => {
+  it('data HTTP no formato IMF-fixdate a partir do relógio do mundo, e os formatos obsoletos também se leem', () => {
+    expect(dataHttp(0)).toBe('Thu, 26 Nov 2026 12:00:00 GMT');
+    expect(dataHttp(3661.7)).toBe('Thu, 26 Nov 2026 13:01:01 GMT');
+    expect(dataHttp(86400 * 6)).toBe('Wed, 02 Dec 2026 12:00:00 GMT');
+    expect(lerDataHttp('Thu, 26 Nov 2026 13:01:01 GMT')).toBe(3661);
+    expect(lerDataHttp('Thursday, 26-Nov-26 12:00:10 GMT')).toBe(10);
+    expect(lerDataHttp('Thu Nov 26 12:00:20 2026')).toBe(20);
+    expect(lerDataHttp('ontem à tarde')).toBeNull();
+  });
+
+  it('If-Modified-Since compara datas; If-None-Match manda quando vem; data ilegível é ignorada', () => {
+    const srv = new ServidorWeb('x').publicar('/', { tipo: 'estatico', conteudo: 'oi', modificado: 100 });
+    const pedir = (cab: Record<string, string>) => srv.atender({ metodo: 'GET', caminho: '/', versao: 'HTTP/1.1', cabecalhos: cab, corpo: '' }, 500);
+    const r = pedir({});
+    expect(r.cabecalhos).toMatchObject({ 'Last-Modified': dataHttp(100), Date: dataHttp(500), ETag: etagDe('oi') });
+    expect(pedir({ 'If-Modified-Since': dataHttp(100) }).estado).toBe(304);
+    expect(pedir({ 'If-Modified-Since': dataHttp(99) }).estado).toBe(200);
+    expect(pedir({ 'If-Modified-Since': 'não é data' }).estado).toBe(200);
+    // Com If-None-Match, o If-Modified-Since não conta (RFC 9110, §13.1.3).
+    expect(pedir({ 'If-None-Match': '"outro"', 'If-Modified-Since': dataHttp(400) }).estado).toBe(200);
+    expect(pedir({ 'If-None-Match': `"zzz", W/${etagDe('oi')}` }).estado).toBe(304);
+    expect(pedir({ 'If-None-Match': '*' }).estado).toBe(304);
+  });
+
+  it('servico web pagina: ETag novo só quando o conteúdo muda; o cache separa esquema e porta', () => {
+    const m = mundoAplicacao();
+    const t = new Terminal(m, {} as Dia);
+    const igual = rodar(t, 'loja', ['servico web pagina / <h1>Loja do laboratório</h1>']);
+    expect(igual).toMatch(/já estava com esse conteúdo/);
+    expect(igual).not.toMatch(/ETag novo/);
+    rodar(t, 'ana', ['navegar http://www.loja.exemplo/', 'navegar http://www.loja.exemplo/']);
+    expect(m.flags.http.estado).toBe(304);
+    rodar(t, 'loja', ['esperar 30']);
+    const mudou = rodar(t, 'loja', ['servico web pagina / Promoção']);
+    expect(mudou).toMatch(/ETag novo/);
+    expect(mudou).toMatch(/Thu, 26 Nov 2026 12:00:30 GMT/);
+    const s = rodar(t, 'ana', ['navegar http://www.loja.exemplo/']);
+    expect(m.flags.http.estado).toBe(200);
+    expect(s).toMatch(/If-Modified-Since: Thu, 26 Nov 2026 12:00:00 GMT/);
+    expect(s).toMatch(/Last-Modified: Thu, 26 Nov 2026 12:00:30 GMT/);
+    const nav = new Navegador();
+    const srv = new ServidorWeb('w').publicar('/', { tipo: 'estatico', conteudo: 'a', maxAge: 60 });
+    nav.buscar({ w: srv }, 'http://w/', 0);
+    expect(nav.buscar({ w: srv }, 'http://w:80/', 1).origem).toBe('cache');
+    expect(nav.buscar({ w: srv }, 'http://w:8080/', 1).origem).toBe('rede');
+    expect(nav.buscar({ w: srv }, 'https://w/', 1).origem).toBe('rede');
+  });
+});
+
+describe('DNS pelo menu: defesas, prioridade do MX, TXT com espaços e todos os nomes', () => {
+  it('ações de DNSSEC, validação e portas aleatórias ligam as chaves certas', () => {
+    const m = mundoAplicacao();
+    m.flags.aplicacao = true;
+    const t = new Terminal(m, {} as Dia);
+    const acao = (eq: string, id: string, v: Record<string, string>) => executarAcao(t, acoesEquip(m, m.equipamentos.get(eq)!).find((a) => a.id === id)!, v).flatMap((x) => x.saida).join('\n');
+    acao('loja', 'ap-servico-dns-dnssec', { v: 'on' });
+    acao('dns1', 'ap-servico-dns-validar', { v: 'on' });
+    acao('dns1', 'ap-servico-dns-portas', { v: 'on' });
+    const dns = (n: string) => m.equipamentos.get(n)!.s.servicos.dns;
+    expect(dns('loja').dnssec).toBe(true);
+    expect(dns('dns1')).toMatchObject({ validar: true, portasAleatorias: true });
+    // Validar e sortear porta é coisa de resolvedor; assinar, de quem tem zona.
+    expect(acao('loja', 'ap-servico-dns-validar', { v: 'on' })).toMatch(/recursivo on/);
+    expect(dns('loja').validar).toBeUndefined();
+    const s = rodar(t, 'ana', ['dig www.loja.exemplo']);
+    expect(m.flags.dns).toMatchObject({ dnssec: 'validada' });
+    expect(s).toMatch(/RRSIG/);
+  });
+
+  it('MX com prioridade e TXT com espaços pelo menu; dig mostra o TXT entre aspas', () => {
+    const m = mundoAplicacao();
+    m.flags.aplicacao = true;
+    const t = new Terminal(m, {} as Dia);
+    const acao = (id: string, v: Record<string, string>) => executarAcao(t, acoesEquip(m, m.equipamentos.get('loja')!).find((a) => a.id === id)!, v).flatMap((x) => x.saida).join('\n');
+    acao('ap-servico-dns-registro', { nome: '@', tipo: 'MX', valor: 'reserva2', ttl: '3600', prioridade: '5' });
+    acao('ap-servico-dns-registro', { nome: '@', tipo: 'TXT', valor: 'v=spf1 mx -all "fim"', ttl: '300', prioridade: '' });
+    const regs = m.equipamentos.get('loja')!.s.servicos.dns.registros as { tipo: string; valor: string; prioridade?: number }[];
+    expect(regs.find((r) => r.valor === 'reserva2')?.prioridade).toBe(5);
+    expect(regs.find((r) => r.tipo === 'TXT')?.valor).toBe('v=spf1 mx -all "fim"');
+    const s = rodar(t, 'ana', ['dig loja.exemplo TXT', 'dig loja.exemplo MX']);
+    expect(s).toMatch(/TXT\s+"v=spf1 mx -all \\"fim\\""/);
+    expect(s).toMatch(/MX\s+5 reserva2\.loja\.exemplo\./);
+    // Pelo console também, com aspas; e o que não faz sentido é recusado com o porquê.
+    expect(rodar(t, 'loja', ['servico dns registro x TXT "sem fim'])).toMatch(/aspas/);
+    expect(rodar(t, 'loja', ['servico dns registro x A correio'])).toMatch(/não é/);
+    expect(rodar(t, 'loja', ['servico dns registro @ MX 203.0.113.25'])).toMatch(/nunca direto para um IP/);
+    expect(rodar(t, 'loja', ['servico dns registro @ MX correio 300 70000'])).toMatch(/0 a 65535/);
+  });
+
+  it('o nome do dig oferece todos os nomes das zonas; navegar e assistir, todas as páginas e vídeos publicados', () => {
+    const m = mundoAplicacao();
+    m.flags.aplicacao = true;
+    const t = new Terminal(m, {} as Dia);
+    rodar(t, 'loja', ['servico dns registro @ TXT "teste"', 'servico web pagina /promo Promoção', 'servico web https on']);
+    const acoes = acoesEquip(m, m.equipamentos.get('ana')!);
+    const opcoes = (id: string, campo: string) => acoes.find((a) => a.id === id)!.campos!.find((c) => c.nome === campo)!.opcoes!.map((o) => o.valor);
+    const nomes = opcoes('ap-dig', 'nome');
+    for (const n of ['loja.exemplo', 'www.loja.exemplo', 'site.loja.exemplo', 'correio.loja.exemplo', 'escola.exemplo', 'mx.escola.exemplo']) expect(nomes).toContain(n);
+    const http = opcoes('ap-navegar', 'url');
+    for (const u of ['http://www.loja.exemplo/', 'http://www.loja.exemplo/promo', 'http://site.loja.exemplo/promo']) expect(http).toContain(u);
+    expect(opcoes('ap-navegar-https', 'url')).toContain('https://www.loja.exemplo/promo');
+    const videos = opcoes('ap-assistir', 'url');
+    for (const u of ['http://video.loja.exemplo/aula', 'http://video.loja.exemplo/leve']) expect(videos).toContain(u);
+  });
+
+  it('o dig fala com vírgula decimal em todo lugar', () => {
+    const m = mundoAplicacao();
+    const t = new Terminal(m, {} as Dia);
+    const s = rodar(t, 'ana', ['dig www.loja.exemplo']);
+    expect(s).not.toMatch(/\d\.\d+ ms/);
+    expect(s).toMatch(/RTT \d+,\d+ ms/);
+  });
+});
+
+describe('streaming reprodutível', () => {
+  it('a vazão tem partida lenta, memória e quedas, e é a mesma para a mesma semente', () => {
+    const a = vazaoNoTempo({ base: 10000, segundos: 300, semente: 42, rtt: 0.2 });
+    expect(vazaoNoTempo({ base: 10000, segundos: 300, semente: 42, rtt: 0.2 })).toEqual(a);
+    expect(vazaoNoTempo({ base: 10000, segundos: 300, semente: 43, rtt: 0.2 })).not.toEqual(a);
+    // Primeiro segundo na partida lenta, bem abaixo da banda; nunca acima de 98 % do gargalo.
+    expect(a[0]!).toBeLessThan(a[5]! * 0.8);
+    expect(Math.max(...a)).toBeLessThanOrEqual(9800);
+    const media = a.reduce((s, x) => s + x, 0) / a.length;
+    expect(media).toBeGreaterThan(8000);
+    expect(media).toBeLessThan(9500);
+    // Correlação no tempo: segundos vizinhos se parecem mais do que segundos ao acaso.
+    const dif = (k: number) => a.slice(k).reduce((s, x, i) => s + Math.abs(x - a[i]!), 0) / (a.length - k);
+    expect(dif(1)).toBeLessThan(dif(40));
+  });
+
+  it('atraso mínimo: com ele toca liso, com um segundo a menos trava', () => {
+    const banda = vazaoNoTempo({ base: 10000, segundos: 900, semente: 7, rtt: 0.05 });
+    const taxa = 8900;
+    const min = atrasoMinimo({ duracao: 300, taxaVideo: taxa, banda });
+    expect(min).toBeGreaterThan(0);
+    expect(simularBuffer({ duracao: 300, taxaVideo: taxa, banda, atrasoInicial: min }).travamentos).toBe(0);
+    expect(simularBuffer({ duracao: 300, taxaVideo: taxa, banda, atrasoInicial: min - 1 }).travamentos).toBeGreaterThan(0);
+  });
+
+  it('no mundo, assistir é reprodutível e diz o atraso que resolve, mesmo com a banda um pouco abaixo da taxa', () => {
+    const m = mundoAplicacao();
+    const t = new Terminal(m, {} as Dia);
+    rodar(t, 'loja', ['servico streaming hd 9000 120']);
+    const r1 = rodar(t, 'ana', ['assistir http://video.loja.exemplo/hd 0']);
+    const f1 = { ...m.flags.streaming };
+    // A segunda vez o DNS vem do cache; do vídeo em diante, tudo igual.
+    const video = (x: string) => x.slice(x.indexOf('Vídeo "hd"'));
+    expect(video(rodar(t, 'ana', ['assistir http://video.loja.exemplo/hd 0']))).toBe(video(r1));
+    expect(f1.travamentos).toBeGreaterThan(0);
+    expect(f1.atrasoMinimo).toBeGreaterThan(0);
+    expect(r1).toMatch(new RegExp(`atraso inicial de ${f1.atrasoMinimo} s`));
+    rodar(t, 'ana', [`assistir http://video.loja.exemplo/hd ${f1.atrasoMinimo}`]);
+    expect(m.flags.streaming.travamentos).toBe(0);
+    // Banda média abaixo da taxa, mas por pouco: o recado diz que esperar resolve, e quanto.
+    if (f1.bandaKbps < 9000) expect(r1).toMatch(/ainda chega ao fim sem travar|seria preciso/);
+    expect(r1).not.toMatch(/nada resolve/);
   });
 });

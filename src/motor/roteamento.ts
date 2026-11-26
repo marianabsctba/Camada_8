@@ -38,7 +38,7 @@ import {
 import { ipTexto, lerCidr, lerIp, type Cidr } from './util';
 import { decidir, fluxosDe, temFluxos, prefixoQueContem, instalarRegra, type DecisaoFluxo } from './sdn';
 import { byteServico, nomeDscp } from './qos';
-import { avaliarFirewall, casaPrefixoTxt, firewallDe, idsDe, inspecionarPacote, SOBRA_ESP, tuneisDe, type InfoPacote, type TunelVpn } from './filtro';
+import { avaliarFirewall, casaPrefixoTxt, firewallDe, idsDe, inspecionarPacote, refrescarFiltros, SOBRA_ESP, tuneisDe, type InfoPacote, type TunelVpn } from './filtro';
 
 export interface OpcoesPing {
   /** Bytes de dados do ICMP (o ping comum manda 56). */
@@ -230,37 +230,87 @@ export function configurarNat(e: Equipamento, internas: string[], externa: strin
   e.s.nat = { internas, externa, tabela: nat(e)?.tabela ?? [], proxPorta: nat(e)?.proxPorta ?? 50000 } satisfies ConfigNat;
 }
 
-/** Saindo de dentro para fora: troca IP e porta de origem pelos externos e anota na tabela. No ICMP, a "porta" é o identificador do eco. */
+/**
+ * Porta que identifica a conversa no NAPT (RFC 3022, §2.2): no TCP e no UDP, a porta de verdade do cabeçalho L4;
+ * no eco ICMP, o identificador da consulta (que faz o papel de porta, nos dois sentidos).
+ */
+function portaOrigemDe(p: Pacote): number {
+  return (p.protocolo === 6 || p.protocolo === 17) && p.l4 ? p.l4.origem : p.icmp.id;
+}
+
+function portaDestinoDe(p: Pacote): number {
+  return (p.protocolo === 6 || p.protocolo === 17) && p.l4 ? p.l4.destino : p.icmp.id;
+}
+
+/** Linha da tabela para (protocolo, IP e porta internos), criando uma com porta externa livre se ainda não há. */
+function traducaoPara(n: ConfigNat, proto: Traducao['protocolo'], ipInt: string, portaInt: number, ipExt: string): Traducao {
+  let t = n.tabela.find((x) => x.protocolo === proto && x.ipInterno === ipInt && x.portaInterna === portaInt);
+  if (!t) {
+    // Mantém a porta de dentro se estiver livre do lado de fora; senão, a próxima livre.
+    const usada = (porta: number) => n.tabela.some((x) => x.protocolo === proto && x.ipExterno === ipExt && x.portaExterna === porta);
+    let porta = portaInt;
+    while (usada(porta)) porta = n.proxPorta++;
+    t = { protocolo: proto, ipInterno: ipInt, portaInterna: portaInt, ipExterno: ipExt, portaExterna: porta };
+    n.tabela.push(t);
+  }
+  return t;
+}
+
+/**
+ * Saindo de dentro para fora (NAPT, RFC 3022): troca o IP e a porta de origem pelos externos e anota na tabela.
+ * Um erro ICMP que sai de dentro (sobre um pacote que veio de fora) também tem o pacote embutido traduzido: ali o
+ * endereço de dentro é o destino do pacote original (RFC 3022, §4.3).
+ */
 function natIda(r: Equipamento, p: Pacote): string | null {
   const n = nat(r)!;
   const ext = interfacesL3(r).find((i) => i.porta === n.externa);
   if (!ext) return null;
-  const proto = PROTO[p.protocolo] ?? 'icmp';
   const ipExt = ipTexto(ext.cidr.endereco);
   const ipInt = ipTexto(p.origem);
-  let t = n.tabela.find((x) => x.protocolo === proto && x.ipInterno === ipInt && x.portaInterna === p.icmp.id);
-  if (!t) {
-    const usada = (porta: number) => n.tabela.some((x) => x.protocolo === proto && x.ipExterno === ipExt && x.portaExterna === porta);
-    let porta = p.icmp.id;
-    while (usada(porta)) porta = n.proxPorta++;
-    t = { protocolo: proto, ipInterno: ipInt, portaInterna: p.icmp.id, ipExterno: ipExt, portaExterna: porta };
-    n.tabela.push(t);
+  if (p.erro && p.embutido) {
+    const b = p.embutido;
+    const proto = PROTO[b.protocolo] ?? 'icmp';
+    const t = n.tabela.find((x) => x.protocolo === proto && x.ipInterno === ipTexto(b.destino) && x.portaInterna === b.portaDestino);
+    p.origem = ext.cidr.endereco;
+    if (!t) return `${r.nome} (NAT): erro ICMP de ${ipInt} sai como ${ipExt}`;
+    b.destino = ext.cidr.endereco;
+    b.portaDestino = t.portaExterna;
+    return `${r.nome} (NAT): erro ICMP de ${ipInt} sai como ${ipExt}, e o pacote embutido passa a dizer ${ipExt}:${t.portaExterna}`;
   }
+  const proto = PROTO[p.protocolo] ?? 'icmp';
+  const portaInt = portaOrigemDe(p);
+  const t = traducaoPara(n, proto, ipInt, portaInt, ipExt);
   p.origem = ext.cidr.endereco;
-  p.icmp.id = t.portaExterna;
-  if (p.l4) p.l4.origem = t.portaExterna;
+  if ((proto === 'tcp' || proto === 'udp') && p.l4) p.l4.origem = t.portaExterna;
+  else p.icmp.id = t.portaExterna;
   return `${r.nome} (NAT): origem ${ipInt}:${t.portaInterna} vira ${ipExt}:${t.portaExterna}`;
 }
 
-/** Voltando de fora: se a porta externa está na tabela, desfaz a tradução e repassa para dentro. */
+/**
+ * Voltando de fora: se (protocolo, IP e porta de destino) está na tabela, desfaz a tradução e repassa para dentro.
+ * Num erro ICMP, quem diz a conversa é o pacote embutido, que saiu daqui com origem externa: traduz o destino do
+ * erro e a origem do embutido de volta para os de dentro (RFC 3022, §4.3).
+ */
 function natVolta(r: Equipamento, p: Pacote): string | null {
   const n = nat(r)!;
+  if (p.erro && p.embutido) {
+    const b = p.embutido;
+    const proto = PROTO[b.protocolo] ?? 'icmp';
+    const t = n.tabela.find((x) => x.protocolo === proto && x.ipExterno === ipTexto(b.origem) && x.portaExterna === b.portaOrigem);
+    if (!t) return null;
+    p.destino = lerIp(t.ipInterno)!;
+    b.origem = p.destino;
+    b.portaOrigem = t.portaInterna;
+    if (proto === 'icmp') p.icmp.id = t.portaInterna;
+    return `${r.nome} (NAT): erro ICMP sobre ${t.ipExterno}:${t.portaExterna} volta para ${t.ipInterno}:${t.portaInterna}, com o pacote embutido traduzido também`;
+  }
   const proto = PROTO[p.protocolo] ?? 'icmp';
-  const t = n.tabela.find((x) => x.protocolo === proto && x.ipExterno === ipTexto(p.destino) && x.portaExterna === p.icmp.id);
+  const porta = portaDestinoDe(p);
+  const t = n.tabela.find((x) => x.protocolo === proto && x.ipExterno === ipTexto(p.destino) && x.portaExterna === porta);
   if (!t) return null;
   p.destino = lerIp(t.ipInterno)!;
-  p.icmp.id = t.portaInterna;
-  if (p.l4) p.l4.destino = t.portaInterna;
+  if ((proto === 'tcp' || proto === 'udp') && p.l4) p.l4.destino = t.portaInterna;
+  else p.icmp.id = t.portaInterna;
   return `${r.nome} (NAT): destino ${t.ipExterno}:${t.portaExterna} volta a ser ${t.ipInterno}:${t.portaInterna}`;
 }
 
@@ -285,6 +335,11 @@ export interface Pacote {
   l4?: { origem: number; destino: number; flags?: string };
   /** Dentro de um túnel IPsec: o cabeçalho original, guardado debaixo do ESP. */
   tunel?: { origem: number; destino: number; protocolo: number; ttl: number; nome: string; de: string };
+  /**
+   * Num erro ICMP: o cabeçalho IP e os 8 primeiros bytes do pacote que morreu (RFC 792), que levam as portas TCP/UDP
+   * ou o identificador do eco. O NAT traduz isto também (RFC 3022, §4.3), senão o erro não acha quem o causou.
+   */
+  embutido?: { origem: number; destino: number; protocolo: number; portaOrigem: number; portaDestino: number };
 }
 
 export interface Viagem {
@@ -317,7 +372,7 @@ export interface Viagem {
 }
 
 function clonar(p: Pacote): Pacote {
-  return { ...p, fragmentos: p.fragmentos.map((f) => ({ ...f })), icmp: { ...p.icmp }, l4: p.l4 ? { ...p.l4 } : undefined, tunel: p.tunel ? { ...p.tunel } : undefined };
+  return { ...p, fragmentos: p.fragmentos.map((f) => ({ ...f })), icmp: { ...p.icmp }, l4: p.l4 ? { ...p.l4 } : undefined, tunel: p.tunel ? { ...p.tunel } : undefined, embutido: p.embutido ? { ...p.embutido } : undefined };
 }
 
 /* ---------- Segurança no caminho (só age com firewall, IDS, filtro antifalsificação, VPN ou ARP falso configurados) ---------- */
@@ -327,7 +382,7 @@ function infoDe(p: Pacote): InfoPacote {
 }
 
 /** Firewall, filtro antifalsificação (BCP 38) e IDS/IPS do roteador. Devolve o motivo do descarte, ou null. */
-function filtrar(e: Equipamento, p: Pacote, entrada: string | undefined, v: Viagem): string | null {
+function filtrar(m: Mundo, e: Equipamento, p: Pacote, entrada: string | undefined, v: Viagem): string | null {
   if (e.s.antiFalsificacao && entrada && !p.tunel) {
     const volta = escolherRota(e, p.origem);
     if (!volta || volta.porta !== entrada) {
@@ -337,20 +392,60 @@ function filtrar(e: Equipamento, p: Pacote, entrada: string | undefined, v: Viag
   }
   const info = infoDe(p);
   const ids = idsDe(e);
+  const fw = firewallDe(e);
+  if (!ids && !fw) return null;
+  let motivo: string | null = null;
   if (ids) {
     const d = inspecionarPacote(ids, info);
     if (d.texto) (v.alertas ??= []).push(`${e.nome}: ${d.texto}`);
-    if (d.bloquear) return `${e.nome} descartou: ${d.texto}`;
+    if (d.bloquear) motivo = `${e.nome} descartou: ${d.texto}`;
   }
-  const fw = firewallDe(e);
-  if (fw) {
+  if (fw && !motivo) {
     const d = avaliarFirewall(fw, info, entrada);
     if (d.acao === 'negar') {
       v.eventos.push(`${e.nome} (firewall): ${d.texto}`);
-      return `${e.nome} descartou no firewall: ${d.texto}.`;
+      motivo = `${e.nome} descartou no firewall: ${d.texto}.`;
     }
   }
-  return null;
+  // O que os dias conferem fica com os números de agora: contadores, tabela de estado, alertas.
+  refrescarFiltros(m, e);
+  return motivo;
+}
+
+/* ---------- Túneis IPsec: estado do IKE e o resumo para m.flags ---------- */
+
+/** O túnel sobe quando a outra ponta tem o túnel espelhado, com o mesmo segredo e as redes invertidas. */
+export function estadoTunel(m: Mundo, e: Equipamento, t: TunelVpn): { ativo: boolean; motivo?: string } {
+  const ipPar = lerIp(t.par);
+  const outro = ipPar === null ? undefined : donoDoIp(m, ipPar)?.e;
+  if (!outro) return { ativo: false, motivo: `ninguém tem o endereço ${t.par}` };
+  const meus = interfacesL3(e).map((i) => ipTexto(i.cidr.endereco));
+  const espelho = Object.values(tuneisDe(outro) ?? {}).find((x) => meus.includes(x.par));
+  if (!espelho) return { ativo: false, motivo: `${outro.nome} não tem túnel apontando para cá` };
+  if (espelho.segredo !== t.segredo) return { ativo: false, motivo: 'o segredo pré-compartilhado é diferente nas duas pontas (a autenticação do IKE falha)' };
+  if (espelho.local !== t.remota || espelho.remota !== t.local) return { ativo: false, motivo: `as redes não batem: aqui ${t.local} ↔ ${t.remota}, lá ${espelho.local} ↔ ${espelho.remota}` };
+  return { ativo: true };
+}
+
+/**
+ * m.flags.vpnPor[roteador]: os túneis de cada roteador, com o estado do IKE e os contadores de agora. Refeito a cada
+ * comando de VPN e a cada pacote que entra ou sai de um túnel, porque o estado de uma ponta depende da outra.
+ */
+export function refrescarVpns(m: Mundo): void {
+  const por: Record<string, Record<string, unknown>[]> = {};
+  for (const e of m.equipamentos.values()) {
+    const tab = tuneisDe(e);
+    if (!tab || !Object.keys(tab).length) continue;
+    por[e.nome] = Object.values(tab).map((t) => {
+      const st = estadoTunel(m, e, t);
+      return { nome: t.nome, par: t.par, local: t.local, remota: t.remota, segredo: t.segredo, spi: t.spi, ativo: st.ativo, motivo: st.motivo ?? null, cifrados: t.contadores.cifrados, decifrados: t.contadores.decifrados };
+    });
+  }
+  m.flags.vpnPor = por;
+  // O último túnel mostrado no console também acompanha (contadores e estado), sem perder a captura.
+  const v = m.flags.vpn as { roteador?: string; nome?: string } | undefined;
+  const t = v?.roteador ? por[v.roteador]?.find((x) => x.nome === v.nome) : undefined;
+  if (v && t) m.flags.vpn = { ...v, ativo: t.ativo, motivo: t.motivo, cifrados: t.cifrados, decifrados: t.decifrados };
 }
 
 /** Túnel deste roteador que leva o destino, com a outra ponta configurada igual (o IKE só fecha assim). */
@@ -385,6 +480,7 @@ function erroIcmp(m: Mundo, v: Viagem, r: Equipamento, entrada: string | undefin
   const ipEntrada = (intfs.find((i) => i.porta === entrada) ?? intfs[0])!.cidr.endereco;
   // O erro leva de volta o cabeçalho e os 8 primeiros bytes do pacote que morreu: 8 + 20 + 8 bytes de ICMP.
   const erro = novoPacote(m, { origem: ipEntrada, destino: p.origem, ttl: r.ttl, dados: 28, icmp: { tipo, codigo, id: p.icmp.id, seq: p.icmp.seq, mtu }, erro: true });
+  erro.embutido = { origem: p.origem, destino: p.destino, protocolo: p.protocolo, portaOrigem: portaOrigemDe(p), portaDestino: portaDestinoDe(p) };
   v.eventos.push(`${r.nome} descarta o pacote e devolve ICMP tipo ${tipo} código ${codigo}: ${nomeIcmp(tipo, codigo)}`);
   const volta = viajar(m, r.nome, erro);
   v.icmpErro = { de: ipEntrada, nome: r.nome, tipo, codigo, mtu, viagem: volta };
@@ -522,6 +618,7 @@ export function viajar(m: Mundo, inicio: string, p0: Pacote): Viagem {
         return v;
       }
       t.contadores.decifrados++;
+      refrescarVpns(m);
       v.eventos.push(`${atual.nome} (VPN ${t.nome}): confere a integridade do ESP, decifra e devolve o pacote de ${ipTexto(p.tunel.origem)} para ${ipTexto(p.tunel.destino)}`);
       p.origem = p.tunel.origem;
       p.destino = p.tunel.destino;
@@ -570,7 +667,7 @@ export function viajar(m: Mundo, inicio: string, p0: Pacote): Viagem {
       return erroIcmp(m, v, atual, entrada, p, 3, 0);
     }
     if (passo > 0 && (atual.s.firewall || atual.s.ids || atual.s.antiFalsificacao)) {
-      const motivo = filtrar(atual, p, entrada, v);
+      const motivo = filtrar(m, atual, p, entrada, v);
       if (motivo) {
         v.onde = atual.nome;
         v.falha = motivo;
@@ -590,6 +687,7 @@ export function viajar(m: Mundo, inicio: string, p0: Pacote): Viagem {
         }
         tun.t.contadores.cifrados++;
         tun.t.ultimo = { origem: ipTexto(p.origem), destino: ipTexto(p.destino), protocolo: p.protocolo, tamanho: p.tamanho, externo: `${ipTexto(tun.ipLocal)} > ${ipTexto(tun.ipPar)}` };
+        refrescarVpns(m);
         v.eventos.push(`${atual.nome} (VPN ${tun.t.nome}): encapsula em ESP (SPI ${tun.t.spi}) de ${ipTexto(tun.ipLocal)} para ${ipTexto(tun.ipPar)}; ${p.tamanho} bytes viram ${p.tamanho + SOBRA_ESP}, conteúdo cifrado`);
         p.tunel = { origem: p.origem, destino: p.destino, protocolo: p.protocolo, ttl: p.ttl, nome: tun.t.nome, de: atual.nome };
         p.origem = tun.ipLocal;

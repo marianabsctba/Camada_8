@@ -484,7 +484,7 @@ const dia116: Dia = {
     texto: [
       'Um pedido HTTP é texto: uma linha com o método, o caminho e a versão (GET / HTTP/1.1), depois cabeçalhos, um por linha (Host diz qual site, porque um servidor pode hospedar vários; User-Agent diz qual navegador; Cookie devolve o bilhete; Accept diz o que o navegador entende), uma linha em branco e, às vezes, um corpo. Os métodos dizem a intenção: GET busca, HEAD busca só os cabeçalhos, POST manda dados para o servidor processar (um formulário), PUT grava um recurso num caminho, DELETE apaga. A resposta começa com um código de três dígitos: 1xx é informação, 2xx deu certo (200 OK), 3xx manda olhar em outro lugar (301 mudou de endereço de vez, 304 não mudou desde a sua cópia), 4xx é erro de quem pediu (404 não existe, 403 proibido) e 5xx é erro do servidor (500 deu pane lá dentro).',
       'Abrir uma conexão TCP custa 1 RTT antes de qualquer dado, e uma página tem muitos objetos. No HTTP mais antigo, cada objeto abria e fechava a sua conexão: 2 RTT por objeto. Com conexões persistentes, a mesma conexão serve vários pedidos, um depois do outro: 1 RTT por objeto, depois da base. Com pipelining, os pedidos saem todos de uma vez, mas as respostas voltam em ordem, e uma lenta segura as de trás. O HTTP/2 resolve isso no próprio HTTP: uma conexão só, com vários fluxos intercalados em quadros binários, respostas fora de ordem e cabeçalhos comprimidos (eles se repetem quase iguais em todo pedido). Sobra a cabeça de fila do TCP quando um segmento se perde, e por isso o HTTP/3 roda sobre o QUIC, em UDP.',
-      'Melhor que buscar rápido é não buscar. O navegador guarda cópias no cache, e o servidor diz por quanto tempo elas valem (Cache-Control: max-age=300 são 300 segundos). Dentro da validade, o navegador usa a cópia sem nem perguntar: zero bytes na rede. Vencida a validade, ele pergunta de um jeito condicional: manda o ETag da cópia (If-None-Match, um resumo do conteúdo) e a data dela (If-Modified-Since). Se nada mudou, o servidor responde 304 Not Modified, sem corpo; se mudou, 200 com o objeto novo. Neste laboratório, a data é o relógio do mundo em segundos, e o ETag muda sempre que o conteúdo muda.',
+      'Melhor que buscar rápido é não buscar. O navegador guarda cópias no cache, e o servidor diz por quanto tempo elas valem (Cache-Control: max-age=300 são 300 segundos). Dentro da validade, o navegador usa a cópia sem nem perguntar: zero bytes na rede. Vencida a validade, ele pergunta de um jeito condicional: manda o ETag da cópia (If-None-Match, um resumo do conteúdo) e a data dela (If-Modified-Since). Se nada mudou, o servidor responde 304 Not Modified, sem corpo; se mudou, 200 com o objeto novo. Neste laboratório, a data sai do relógio do mundo no formato de data do HTTP (Thu, 26 Nov 2026 12:00:00 GMT, sempre em GMT e com precisão de segundo), e o ETag é um resumo do conteúdo: muda quando o conteúdo muda, e só nessa hora.',
       'O HTTPS é o mesmo HTTP, só que dentro de um túnel TLS na porta 443. Antes do primeiro pedido, navegador e servidor trocam chaves (Diffie-Hellman), o servidor mostra um certificado assinado por uma autoridade certificadora em que o navegador confia, e daí em diante pedido, cookie e resposta viajam cifrados e protegidos contra alteração. Se o certificado estiver vencido, for de outro nome ou assinado por ninguém confiável, o navegador para e avisa. Quem olha o fio vê só o IP, a porta e o nome do site (que vai no SNI), não o caminho nem o conteúdo. A criptografia deste laboratório é de brinquedo, com números pequenos e AES em modo contador no lugar do modo usado de verdade; a ideia é a mesma, a força não.',
       'Cifrar o caminho não resolve tudo na privacidade. Um cookie de terceiro vem de outro site embutido na página (um anúncio, um botão de curtir): o navegador devolve o cookie desse terceiro em todo site que o embute, e ele monta o seu histórico pela web inteira. Mesmo sem cookie, o fingerprinting junta detalhes do navegador (versão, fontes, tamanho da tela, fuso) até virar uma impressão digital quase única. O pedido doNotTrack (o cabeçalho DNT: 1) pedia para não ser rastreado, mas obedecer era opcional, e quase ninguém obedeceu. A defesa que funciona é do navegador: bloquear cookie de terceiro e parecer igual a todo mundo.',
     ],
@@ -554,7 +554,7 @@ const dia116: Dia = {
         if (!t) return 'O balcão ainda não abriu o site por https.';
         return t.ok ? true : `O navegador avisou: ${t.motivo}.`;
       },
-      feito: 'ClientHello e ServerHello com as chaves Diffie-Hellman, certificado conferido pela cadeia, e o mesmo GET condicional, agora cifrado. No fio, só o nome no SNI fica legível.',
+      feito: 'ClientHello e ServerHello com as chaves Diffie-Hellman, certificado conferido pela cadeia, e o mesmo GET de antes, agora cifrado. Desta vez sem If-None-Match: para o cache do navegador, http://www.prefeitura.exemplo/ e https://www.prefeitura.exemplo/ são endereços diferentes, e a cópia do primeiro não vale para o segundo. No fio, só o nome no SNI fica legível.',
     }),
     passo({
       alvo: ['equip', 'prefeitura'],
@@ -720,7 +720,7 @@ function assistiuSemTravar(m: Mundo, adaptativo: boolean, atrasoMax = Infinity):
     ? 'o telão ainda não assistiu à transmissão'
     : !v.ok
       ? `não começou (${(m.flags.streaming as { motivo?: string }).motivo})`
-      : `${v.adaptativo ? 'adaptativo' : 'qualidade fixa'}, atraso inicial ${v.atrasoInicial} s, ${v.travamentos} travamento(s)${v.adaptativo ? `, qualidade média ${v.qualidadeMedia} kb/s` : ''}`;
+      : `${v.adaptativo ? 'adaptativo' : 'qualidade fixa'}, atraso inicial ${String(v.atrasoInicial).replace('.', ',')} s, ${v.travamentos} travamento(s)${v.adaptativo ? `, qualidade média ${v.qualidadeMedia} kb/s` : ''}`;
   return item(`o telão assistiu à transmissão do início ao fim sem travar${modo}${limite}`, ok, det);
 }
 
@@ -747,7 +747,7 @@ const dia117: Dia = {
   dicas: [
     `No servidor arena, "Servir um vídeo" com o nome video, taxa de ${TAXA_HD} kb/s e ${DUR_HD} s de duração (os 5 minutos de aquecimento).`,
     'No telão, "Assistir a um vídeo" com atraso inicial de 0 s em qualidade fixa, como no ensaio: a banda média dá, mas varia, e sem reserva a primeira queda congela a imagem.',
-    'Aumente o atraso inicial até a linha do tempo não ter nenhum x. Uns 5 a 10 s de reserva seguram as quedas deste enlace.',
+    'Aumente o atraso inicial até a linha do tempo não ter nenhum x. Quando trava, a própria saída diz o menor atraso que segura esta transmissão; 10 s de reserva sobram.',
   ],
   perguntas: d117,
   montar: () => mundoFinal({ semente: 6117, mbps: BANDA_CIDADE, paginaPrefeitura: { conteudo: PAGINA_FINAL, maxAge: 300 }, httpsPrefeitura: 'valido' }),
@@ -760,7 +760,7 @@ const dia117: Dia = {
     ];
   },
   posMorte: [
-    `O técnico tinha razão pela metade: a banda média do enlace, uns 8,8 Mb/s, dava conta dos ${TAXA_HD} kb/s, mas por pouco, e a banda não é média, é segundo a segundo. Com outros fluxos dividindo o enlace, ela oscila entre uns 7 e uns 10,5 Mb/s, e cada segundo abaixo da taxa do vídeo come a reserva do buffer. Sem reserva nenhuma, o primeiro segundo ruim já congelou a imagem.`,
+    `O técnico tinha razão pela metade: a banda média que sobrava para o vídeo, uns 9 Mb/s, dava conta dos ${TAXA_HD} kb/s, mas por pouco, e a banda não é média, é segundo a segundo. Com outros fluxos dividindo o enlace, ela oscila, e nas quedas (um fluxo novo disputando o enlace, uma perda que faz o TCP cortar a janela pela metade) cai a uns 5 Mb/s por alguns segundos seguidos. Cada segundo abaixo da taxa do vídeo come a reserva do buffer. Sem reserva nenhuma, a primeira queda já congelou a imagem.`,
     'Com alguns segundos de atraso inicial, o reprodutor começou com uma reserva grande o bastante para atravessar as quedas, e os 5 minutos tocaram do começo ao fim. O preço foi a espera no começo, aceitável para o aquecimento; para o jogo em si, cada segundo de buffer é um segundo de atraso em relação ao estádio, e o vizinho com rádio grita gol antes do telão.',
     'Para quem conversa ao vivo, essa conta não fecha: 10 s de atraso numa videochamada é inviável. Lá a mídia vai em RTP sobre UDP, o buffer é de dezenas de milissegundos, e o que se perde fica perdido. E se a banda média cair abaixo da taxa do vídeo, buffer nenhum salva; aí o que salva é baixar a qualidade, que é o assunto do desafio.',
   ],
@@ -816,7 +816,7 @@ const dia117: Dia = {
         if (!v.ok) return 'A transmissão não começou.';
         if (v.adaptativo) return 'Use a qualidade fixa: o adaptativo é para o desafio.';
         if ((v.atrasoInicial ?? 0) > 1) return 'Com reserva, o buffer segura. Para ver o problema do ensaio, use 0 s.';
-        return (v.travamentos ?? 0) > 0 ? true : 'Desta vez os primeiros segundos foram bons e deu para juntar uma reserva. Assista de novo com 0 s.';
+        return (v.travamentos ?? 0) > 0 ? true : 'Não travou: confira se o atraso inicial ficou mesmo em 0 s e a qualidade fixa.';
       },
       feito: 'Travou: a linha do tempo mostra os x onde o buffer secou e a imagem congelou esperando os próximos pedaços de vídeo chegarem. A banda média deu conta; o que faltou foi reserva.',
     }),
@@ -936,7 +936,7 @@ const dia117: Dia = {
       'Objetivo: o telão assistindo do começo ao fim sem travar, começando em até 4 s, e a conta do vídeo cru respondida.',
     ],
     dicas: [
-      `Com ${TAXA_4K} kb/s contra uma banda média de uns 8,8 Mb/s, buffer pequeno não resolve: a reserva só diminui.`,
+      `Com ${TAXA_4K} kb/s contra uma banda média de uns 9 Mb/s, buffer pequeno não resolve: a reserva só diminui.`,
       'No telão, "Assistir a um vídeo" no modo adaptativo, com atraso inicial de 2 a 4 s.',
       'Vídeo cru: pontos por quadro × bits por ponto × quadros por segundo, dividido por um milhão para dar Mb/s.',
     ],

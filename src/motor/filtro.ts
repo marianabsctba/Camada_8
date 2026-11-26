@@ -3,8 +3,41 @@
 // quando a aplicação mostra, o conteúdo em claro). Nada disso age se o roteador não tiver a configuração:
 // sem s.firewall e sem s.ids, o caminho dos pacotes é exatamente o de antes.
 
-import type { Equipamento } from './mundo';
+import type { Equipamento, Mundo } from './mundo';
 import { ipTexto, lerCidr, lerIp, mascara } from './util';
+
+/* ---------- Flags com histórico ---------- */
+
+/** Quantos registros de cada tipo o histórico guarda (os mais antigos saem primeiro). */
+export const LIMITE_HISTORICO = 40;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type RegistroFlag = Record<string, any>;
+
+/**
+ * Grava o resultado de um comando em m.flags[tipo] (o último, que é o que a maioria dos objetivos lê) e acrescenta
+ * uma cópia em m.flags.historico[tipo], para os objetivos que pedem várias contas no mesmo dia. A lista tem limite.
+ */
+export function anotarFlag(m: Mundo, tipo: string, valor: RegistroFlag): RegistroFlag {
+  m.flags[tipo] = valor;
+  const hist = (m.flags.historico ??= {}) as Record<string, RegistroFlag[]>;
+  const lista = (hist[tipo] ??= []);
+  lista.push({ ...valor });
+  if (lista.length > LIMITE_HISTORICO) lista.splice(0, lista.length - LIMITE_HISTORICO);
+  return valor;
+}
+
+/** Tudo que foi anotado de um tipo, do mais antigo para o mais novo. */
+export function historicoDe(m: Mundo, tipo: string): RegistroFlag[] {
+  return ((m.flags.historico as Record<string, RegistroFlag[]> | undefined)?.[tipo] ?? []) as RegistroFlag[];
+}
+
+/** O registro mais novo de um tipo que satisfaz a condição. */
+export function ultimoQue(m: Mundo, tipo: string, f: (x: RegistroFlag) => boolean = () => true): RegistroFlag | undefined {
+  const h = historicoDe(m, tipo);
+  for (let i = h.length - 1; i >= 0; i--) if (f(h[i]!)) return h[i];
+  return undefined;
+}
 
 export type AcaoFw = 'permitir' | 'negar';
 export type ProtoFw = 'tcp' | 'udp' | 'icmp';
@@ -31,8 +64,13 @@ export interface ConfigFirewall {
   padrao: AcaoFw;
   /** Filtro com estado: deixa passar, antes das regras, tudo que pertence a uma conversa já permitida. */
   comEstado: boolean;
-  /** Tabela de estado: uma linha por conversa permitida (protocolo, origem e destino com portas). */
+  /** Tabela de estado: uma linha por conversa permitida (protocolo, origem e destino com portas, no sentido de quem abriu). */
   conexoes: string[];
+  /**
+   * Estado TCP de cada conversa da tabela (RFC 9293, §3.5): "syn-enviado" depois do SYN de quem abre, "estabelecida"
+   * depois do SYN+ACK de volta. Conversa sem estado anotado (UDP, ICMP, tabela antiga) conta como estabelecida.
+   */
+  estados?: Record<string, EstadoConversa>;
   proxId: number;
   contadores: { permitidos: number; negados: number; porEstado: number; porPadrao: number };
   /** Últimas decisões, para "firewall log". */
@@ -101,7 +139,46 @@ function chaveInversa(i: InfoPacote): string {
   return `${NOME_PROTO[i.protocolo] ?? i.protocolo} ${ipTexto(i.destino)}:${pd} > ${ipTexto(i.origem)}:${po}`;
 }
 
-/** O pacote pertence a uma conversa que o firewall já deixou passar (num sentido ou no outro)? */
+export type EstadoConversa = 'syn-enviado' | 'estabelecida';
+
+interface ConversaAchada {
+  chave: string;
+  /** O pacote vai no sentido contrário ao de quem abriu a conversa. */
+  volta: boolean;
+  estado: EstadoConversa;
+}
+
+function acharConversa(fw: ConfigFirewall, i: InfoPacote): ConversaAchada | null {
+  const ida = chaveConversa(i);
+  if (fw.conexoes.includes(ida)) return { chave: ida, volta: false, estado: fw.estados?.[ida] ?? 'estabelecida' };
+  const inv = chaveInversa(i);
+  if (fw.conexoes.includes(inv)) return { chave: inv, volta: true, estado: fw.estados?.[inv] ?? 'estabelecida' };
+  return null;
+}
+
+/** Flags TCP do segmento como conjunto ("SYN+ACK" vira SYN e ACK). Sem flags informadas, é um segmento comum (ACK). */
+function flagsTcp(i: InfoPacote): Set<string> {
+  return new Set((i.flags ?? 'ACK').toUpperCase().split('+').map((x) => x.trim()));
+}
+
+/**
+ * O pacote cabe na conversa achada? No TCP (RFC 9293, §3.5), depois do SYN de quem abre só vale, na volta, o
+ * SYN+ACK; com a conversa estabelecida, segmento com SYN não pertence mais a ela (seria outra abertura). RST vale
+ * nos dois sentidos. Aproximação: o firewall não confere os números de sequência, só as flags e o sentido.
+ * No ICMP de eco, a ida é o pedido (tipo 8) e a volta é a resposta (tipo 0).
+ */
+function cabeNaConversa(c: ConversaAchada, i: InfoPacote): boolean {
+  if (i.protocolo === 6) {
+    const f = flagsTcp(i);
+    if (f.has('RST')) return true;
+    if (c.estado === 'syn-enviado') return c.volta && f.has('SYN') && f.has('ACK');
+    return !f.has('SYN');
+  }
+  if (i.protocolo === 1) return c.volta ? i.icmpTipo === 0 : i.icmpTipo === 8;
+  return true;
+}
+
+/** O pacote pertence a uma conversa que o firewall já deixou passar (num sentido ou no outro), do jeito certo? */
 export function conversaConhecida(fw: ConfigFirewall, i: InfoPacote): boolean {
   if (i.erro) {
     // Erro ICMP é "relacionado": vale se existe qualquer conversa entre os dois endereços.
@@ -109,7 +186,8 @@ export function conversaConhecida(fw: ConfigFirewall, i: InfoPacote): boolean {
     const b = ipTexto(i.destino);
     return fw.conexoes.some((c) => (c.includes(` ${a}:`) && c.includes(` ${b}:`)) || c.includes(`> ${b}:`));
   }
-  return fw.conexoes.includes(chaveConversa(i)) || fw.conexoes.includes(chaveInversa(i));
+  const c = acharConversa(fw, i);
+  return !!c && cabeNaConversa(c, i);
 }
 
 export function casaRegra(r: RegraFw, i: InfoPacote, entrada: string | undefined, estabelecida: boolean): boolean {
@@ -143,12 +221,30 @@ function anotar(fw: ConfigFirewall, texto: string): void {
   if (fw.log.length > 60) fw.log.splice(0, fw.log.length - 60);
 }
 
-/** Abre a conversa na tabela de estado: o SYN do TCP, o pedido de eco do ICMP, qualquer UDP. */
+/**
+ * Abre a conversa na tabela de estado: só o SYN sozinho do TCP (um ACK ou SYN+ACK sem conversa conhecida não cria
+ * estado, como no rastreamento de conexões de verdade), o pedido de eco do ICMP e qualquer UDP.
+ */
 function abreConversa(i: InfoPacote): boolean {
   if (i.erro) return false;
-  if (i.protocolo === 6) return !i.flags || i.flags === 'SYN';
+  if (i.protocolo === 6) {
+    const f = flagsTcp(i);
+    return f.has('SYN') && !f.has('ACK') && !f.has('RST') && !f.has('FIN');
+  }
   if (i.protocolo === 1) return i.icmpTipo === 8;
   return true;
+}
+
+/** Depois de um pacote que coube na conversa: o SYN+ACK de volta a estabelece; o RST a encerra. */
+function avancarConversa(fw: ConfigFirewall, i: InfoPacote): void {
+  if (i.protocolo !== 6 || i.erro) return;
+  const c = acharConversa(fw, i);
+  if (!c) return;
+  const f = flagsTcp(i);
+  if (f.has('RST')) {
+    fw.conexoes.splice(fw.conexoes.indexOf(c.chave), 1);
+    if (fw.estados) delete fw.estados[c.chave];
+  } else if (c.estado === 'syn-enviado' && c.volta && f.has('SYN') && f.has('ACK')) (fw.estados ??= {})[c.chave] = 'estabelecida';
 }
 
 /**
@@ -174,13 +270,65 @@ export function avaliarFirewall(fw: ConfigFirewall, i: InfoPacote, entrada: stri
   }
   if (d.acao === 'permitir') {
     fw.contadores.permitidos++;
-    if (!estabelecida && abreConversa(i)) {
-      fw.conexoes.push(chaveConversa(i));
-      if (fw.conexoes.length > 500) fw.conexoes.splice(0, fw.conexoes.length - 500);
+    if (estabelecida) avancarConversa(fw, i);
+    else if (abreConversa(i) && !acharConversa(fw, i)) {
+      const chave = chaveConversa(i);
+      fw.conexoes.push(chave);
+      if (i.protocolo === 6) (fw.estados ??= {})[chave] = 'syn-enviado';
+      if (fw.conexoes.length > 500) for (const velha of fw.conexoes.splice(0, fw.conexoes.length - 500)) if (fw.estados) delete fw.estados[velha];
     }
   } else fw.contadores.negados++;
   anotar(fw, `${d.acao === 'permitir' ? 'PASSOU ' : 'NEGADO '} ${d.texto}`);
   return d;
+}
+
+/** Resumo do firewall para m.flags: o que os objetivos dos dias conferem. */
+export function resumoFirewall(e: Equipamento, fw: ConfigFirewall): RegistroFlag {
+  return {
+    roteador: e.nome,
+    padrao: fw.padrao,
+    comEstado: fw.comEstado,
+    regras: fw.regras.map((r) => ({ id: r.id, texto: textoRegra(r).replace(/\s+/g, ' ').trim(), acao: r.acao, proto: r.proto ?? null, origem: r.origem ?? null, destino: r.destino ?? null, porta: r.porta ?? null, portaOrigem: r.portaOrigem ?? null, estado: r.estado ?? null, entrada: r.entrada ?? null, contador: r.contador })),
+    contadores: { ...fw.contadores },
+    conversas: fw.conexoes.length,
+    decisoes: fw.log.length,
+  };
+}
+
+/** Resumo do IDS para m.flags, com a contagem de alertas por nome. */
+export function resumoIds(e: Equipamento, ids: ConfigIds): RegistroFlag {
+  const porNome: Record<string, number> = {};
+  for (const a of ids.alertas) porNome[a.nome] = (porNome[a.nome] ?? 0) + 1;
+  return { roteador: e.nome, modo: ids.modo, limiarVarredura: ids.limiarVarredura, limiarSyn: ids.limiarSyn, limiarTaxa: ids.limiarTaxa, assinaturas: ids.assinaturas.map((a) => a.nome), alertas: ids.alertas.length, porNome, ultimo: ids.alertas[ids.alertas.length - 1] ?? null, bloqueados: [...ids.bloqueados] };
+}
+
+/**
+ * Comando de firewall ou IDS no roteador: m.flags.firewall (ou ids) passa a ser o deste roteador, vai para o
+ * histórico, e m.flags.firewallPor[roteador] (ou idsPor) guarda o de cada roteador.
+ */
+export function anotarFiltro(m: Mundo, tipo: 'firewall' | 'ids', e: Equipamento, resumo: RegistroFlag): void {
+  anotarFlag(m, tipo, resumo);
+  ((m.flags[`${tipo}Por`] ??= {}) as Record<string, RegistroFlag>)[e.nome] = resumo;
+}
+
+/**
+ * Tráfego passou pelo firewall ou pelo IDS de e: as flags ficam com os contadores, a tabela de estado e os alertas
+ * de agora (sem ir para o histórico, que é das mudanças feitas por comando). m.flags.firewall e m.flags.ids só
+ * mudam se já eram deste roteador (ou se ainda não havia nenhum).
+ */
+export function refrescarFiltros(m: Mundo, e: Equipamento): void {
+  const fw = firewallDe(e);
+  if (fw) {
+    const r = resumoFirewall(e, fw);
+    ((m.flags.firewallPor ??= {}) as Record<string, RegistroFlag>)[e.nome] = r;
+    if (!m.flags.firewall || m.flags.firewall.roteador === e.nome) m.flags.firewall = r;
+  }
+  const ids = idsDe(e);
+  if (ids) {
+    const r = resumoIds(e, ids);
+    ((m.flags.idsPor ??= {}) as Record<string, RegistroFlag>)[e.nome] = r;
+    if (!m.flags.ids || m.flags.ids.roteador === e.nome) m.flags.ids = r;
+  }
 }
 
 /** "80", "1-1024". */

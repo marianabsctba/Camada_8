@@ -6,7 +6,7 @@ import { adicionar, aparelho, comutador, ligar, novoMundo, pc, roteador, type Mu
 import { lerCidr } from '../motor/util';
 import { buscarColisao, cifrarRsa, diffieHellman, gerarChavesRsa, homemNoMeio, sha256, sha256Bytes } from '../motor/cripto';
 import { associarWifi, DICIONARIO_PEQUENO, wifiDe } from '../motor/seguranca';
-import { SOBRA_ESP, tuneisDe } from '../motor/filtro';
+import { historicoDe, SOBRA_ESP } from '../motor/filtro';
 import { item, numerica, pingOk, registroPing, todasRespondidas } from './comum';
 import type { Dia, ItemObjetivo, Passo, Pergunta } from './tipos';
 
@@ -21,34 +21,9 @@ const cidr = (s: string) => lerCidr(s)!;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Registro = Record<string, any>;
 
-/** Chaves de m.flags que o motor sobrescreve a cada comando e que os objetivos destes dias precisam lembrar. */
-const LEMBRAR = ['cripto', 'tls', 'http', 'vpn', 'wifi'];
-
-/**
- * O motor guarda só o último resultado em cada flag (o último RSA, o último TLS...). Para o objetivo pedir várias
- * contas no mesmo dia, cada escrita nessas flags também vai para m.flags.historico7b, sem mudar o que o motor lê.
- */
-function lembrar(m: Mundo): Mundo {
-  const hist: Record<string, Registro[]> = {};
-  m.flags.historico7b = hist;
-  for (const k of LEMBRAR) {
-    let atual: unknown = m.flags[k];
-    hist[k] = [];
-    Object.defineProperty(m.flags, k, {
-      configurable: true,
-      enumerable: true,
-      get: () => atual,
-      set: (v: unknown) => {
-        atual = v;
-        if (v && typeof v === 'object') hist[k]!.push({ ...(v as Registro) });
-      },
-    });
-  }
-  return m;
-}
-
+/** Tudo que o motor anotou de um tipo neste dia (m.flags.historico), do mais antigo para o mais novo. */
 function hist(m: Mundo, k: string): Registro[] {
-  return ((m.flags.historico7b as Record<string, Registro[]> | undefined)?.[k] ?? []) as Registro[];
+  return historicoDe(m, k);
 }
 
 function cripto(m: Mundo, op: string, f: (x: Registro) => boolean = () => true): Registro | undefined {
@@ -144,7 +119,7 @@ const dia123: Dia = {
     'Para o aniversário, divida o número de bits do resumo por 2.',
   ],
   perguntas: d123,
-  montar: () => lembrar(mundoCooperativa(7123)),
+  montar: () => mundoCooperativa(7123),
   objetivo: (m) => [
     itemRsa(m, RSA_AULA.n, 'RSA com p = 61 e q = 53 (n = 3233), cifrando e decifrando de volta'),
     item(`resumo SHA-256 de "${ORDEM}"`, resumoFeito(m, H_ORDEM), H_ORDEM.slice(0, 16) + '...'),
@@ -331,7 +306,7 @@ const dia123: Dia = {
       'Para o aniversário, metade dos bits: 40 ÷ 2.',
     ],
     perguntas: d123D,
-    montar: () => lembrar(mundoCooperativa(8123)),
+    montar: () => mundoCooperativa(8123),
     objetivo: (m) => [
       itemRsa(m, RSA_DES.n, `RSA da cooperativa (p = 47, q = 59, n = ${RSA_DES.n}), cifrando e decifrando`),
       item('resumo SHA-256 do contrato original', resumoFeito(m, H_CONTRATO), H_CONTRATO.slice(0, 16) + '...'),
@@ -445,7 +420,7 @@ const dia124: Dia = {
     `Com o portal servindo o certificado vencido, abra ${URL_PORTAL} no atendimento: o navegador precisa parar.`,
     'No Diffie-Hellman, preencha o segredo do atacante para ver as duas chaves diferentes. No Kerberos, a senha digitada igual à cadastrada.',
   ],
-  montar: () => lembrar(mundoPortal(7124)),
+  montar: () => mundoPortal(7124),
   objetivo: (m) => {
     const dh = cripto(m, 'dh-homem-no-meio');
     const k = kerberosCom(m, true);
@@ -660,7 +635,7 @@ const dia124: Dia = {
       'O último certificado é o válido, e a página precisa abrir sem aviso.',
       'No Kerberos, digite uma senha diferente da cadastrada.',
     ],
-    montar: () => lembrar(mundoPortal(8124, 'autoassinado')),
+    montar: () => mundoPortal(8124, 'autoassinado'),
     objetivo: (m) => {
       const cfg = (m.equipamentos.get('portal')!.s.servicos as Registro | undefined)?.web?.https;
       const t = m.flags.tls as Registro | undefined;
@@ -719,13 +694,13 @@ function mundoTunel(semente: number): Mundo {
   return m;
 }
 
-function tunelEm(m: Mundo, r: string) {
-  return Object.values(tuneisDe(m.equipamentos.get(r)!) ?? {})[0];
+/** O primeiro túnel do roteador, como o motor resume em m.flags.vpnPor (estado do IKE e contadores de agora). */
+function tunelEm(m: Mundo, r: string): Registro | undefined {
+  return (m.flags.vpnPor as Record<string, Registro[]> | undefined)?.[r]?.[0];
 }
 
 function tunelAtivo(m: Mundo): boolean {
-  const v = m.flags.vpn as Registro | undefined;
-  return !!v?.ativo && !!tunelEm(m, 'borda-fdl') && !!tunelEm(m, 'borda-represa');
+  return !!tunelEm(m, 'borda-fdl')?.ativo && !!tunelEm(m, 'borda-represa')?.ativo;
 }
 
 function capturaVista(m: Mundo): Registro | undefined {
@@ -801,7 +776,7 @@ const dia125: Dia = {
     `O MTU efetivo aparece em "Ver os túneis": 1500 menos os ${SOBRA_ESP} bytes do ESP.`,
   ],
   perguntas: d125,
-  montar: () => lembrar(mundoTunel(7125)),
+  montar: () => mundoTunel(7125),
   objetivo: (m) => {
     const c = capturaVista(m);
     return [
@@ -996,7 +971,7 @@ const dia125: Dia = {
       'No tablet, "Conectar numa rede sem fio" com a senha nova. A resposta da pergunta é a contagem que aparece na quebra.',
     ],
     perguntas: d125D,
-    montar: () => lembrar(mundoPraca(8125)),
+    montar: () => mundoPraca(8125),
     objetivo: (m) => {
       const q = [...hist(m, 'wifi')].reverse().find((x) => x.quebra)?.quebra as Registro | undefined;
       const w = wifiDe(m.equipamentos.get('ap-praca')!);
