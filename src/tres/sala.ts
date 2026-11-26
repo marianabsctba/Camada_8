@@ -1,16 +1,19 @@
-// Sala técnica da Fibra Fim de Linha: concreto, luz fria, um rack e uma bancada de metal.
+// A sala do dia: monta o lugar do ato (lugares.ts) em volta do rack e da bancada.
+// A área jogável, o rack, a bancada e a estante do almoxarifado ficam sempre no mesmo lugar;
+// muda a casca, a luz e a mobília.
 
 import * as THREE from 'three';
 import type { Mundo } from '../motor/mundo';
-import { BANCADA, montarEquipamentos, quantasBancadas, type Alvo, type Cena3d } from './equipamentos3d';
-import { movel } from './glb';
+import { montarExtra } from './cenario';
+import { BANCADA, montarEquipamentos, quantasBancadas, RACK, type Alvo, type Cena3d } from './equipamentos3d';
+import { movel, preCarregarMoveis } from './glb';
 import { J, posicionar } from './jogador';
+import { lugarDoAto, type Acabamento, type Lado, type Lugar, type Movel } from './lugares';
 import { limparCena, M } from './motor3d';
-import { pbr } from './pbr';
+import { pbr, preCarregarTexturas } from './pbr';
 
 const LX: [number, number] = [-3, 3];
 const LZ: [number, number] = [-3, 3];
-const ALT = 2.8;
 
 let equipamentos: Cena3d | null = null;
 let fixo: THREE.Group | null = null;
@@ -18,6 +21,8 @@ let notasAtuais: string[] = [];
 let alvosFixos: THREE.Object3D[] = [];
 let destaque: { tipo: string; id: string } | null = null;
 let seta: THREE.Group | null = null;
+let lugar: Lugar = lugarDoAto(0);
+let animacoes: ((t: number) => void)[] = [];
 
 function criarSeta(): THREE.Group {
   const g = new THREE.Group();
@@ -59,124 +64,257 @@ function posicionarSeta() {
   M.cena.add(seta);
 }
 
-function casca(): THREE.Group {
+/* ---------- casca: piso, teto e paredes com vãos ---------- */
+
+/** Posição ao longo da parede no sistema local dela (o vão é dado em coordenada do mundo). */
+function local(lado: Lado, c: number): number {
+  return lado === 'fundo' || lado === 'dir' ? c : -c;
+}
+
+const POSE: Record<Lado, { x: number; z: number; ry: number }> = {
+  fundo: { x: 0, z: LZ[0], ry: 0 },
+  frente: { x: 0, z: LZ[1], ry: Math.PI },
+  esq: { x: LX[0], z: 0, ry: Math.PI / 2 },
+  dir: { x: LX[1], z: 0, ry: -Math.PI / 2 },
+};
+
+/** Material de acabamento com a textura repetindo a cada "m" metros (UV em metros). */
+function acabamento(a: Acabamento, tinta = a.tinta): THREE.MeshStandardMaterial {
+  return pbr(a.tex, [1 / a.m, 1 / a.m], tinta);
+}
+
+function janela(parede: THREE.Group, c: number, v: { larg: number; base: number; topo: number }, mats: { caixilho: THREE.Material; vidro: THREE.Material; peitoril: THREE.Material; requadro: THREE.Material }) {
+  const h = v.topo - v.base;
+  const perfil = (pw: number, ph: number, x: number, y: number) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(pw, ph, 0.07), mats.caixilho);
+    m.position.set(x, y, -0.02);
+    parede.add(m);
+  };
+  perfil(v.larg, 0.05, c, v.base + 0.025);
+  perfil(v.larg, 0.05, c, v.topo - 0.025);
+  perfil(0.05, h, c - v.larg / 2 + 0.025, v.base + h / 2);
+  perfil(0.05, h, c + v.larg / 2 - 0.025, v.base + h / 2);
+  const folhas = Math.max(2, Math.round(v.larg / 0.65));
+  for (let k = 1; k < folhas; k++) perfil(0.035, h, c - v.larg / 2 + (k * v.larg) / folhas, v.base + h / 2);
+  perfil(v.larg, 0.035, c, v.base + h * 0.62);
+  const vd = new THREE.Mesh(new THREE.PlaneGeometry(v.larg, h), mats.vidro);
+  vd.position.set(c, v.base + h / 2, -0.02);
+  parede.add(vd);
+  const pt = new THREE.Mesh(new THREE.BoxGeometry(v.larg + 0.1, 0.04, 0.18), mats.peitoril);
+  pt.position.set(c, v.base - 0.02, 0.04);
+  parede.add(pt);
+  // requadro: a parede é uma placa fina, então o vão ganha espessura de alvenaria
+  const lados: [number, number, number, number][] = [
+    [v.larg, 0.02, c, v.topo],
+    [0.02, h, c - v.larg / 2, v.base + h / 2],
+    [0.02, h, c + v.larg / 2, v.base + h / 2],
+  ];
+  for (const [rw, rh, rx, ry] of lados) {
+    const q = new THREE.Mesh(new THREE.BoxGeometry(rw, rh, 0.2), mats.requadro);
+    q.position.set(rx, ry, -0.1);
+    parede.add(q);
+  }
+}
+
+function casca(l: Lugar): THREE.Group {
   const g = new THREE.Group();
-  const w = LX[1] - LX[0];
-  const d = LZ[1] - LZ[0];
-  const piso = new THREE.Mesh(new THREE.PlaneGeometry(w, d), pbr('garage_floor', [3, 3], '#b9bec4'));
+  const [px0, px1, pz0, pz1] = l.pisoArea ?? [LX[0], LX[1], LZ[0], LZ[1]];
+  const pw = px1 - px0;
+  const pd = pz1 - pz0;
+  const piso = new THREE.Mesh(new THREE.PlaneGeometry(pw, pd), pbr(l.piso.tex, [pw / l.piso.m, pd / l.piso.m], l.piso.tinta));
   piso.rotation.x = -Math.PI / 2;
+  piso.position.set((px0 + px1) / 2, 0, (pz0 + pz1) / 2);
   piso.receiveShadow = true;
   g.add(piso);
-  const teto = new THREE.Mesh(new THREE.PlaneGeometry(w, d), pbr('smooth_concrete_floor', [2, 2], '#7d848c'));
-  teto.rotation.x = Math.PI / 2;
-  teto.position.y = ALT;
-  g.add(teto);
-  const parede = (larg: number, x: number, z: number, ry: number) => {
-    const p = new THREE.Mesh(new THREE.PlaneGeometry(larg, ALT), pbr('painted_plaster_wall', [larg / 2, 1.4], '#6f7d8c'));
-    p.position.set(x, ALT / 2, z);
-    p.rotation.y = ry;
-    p.receiveShadow = true;
-    g.add(p);
-    // rodapé de cimento queimado
-    const r = new THREE.Mesh(new THREE.PlaneGeometry(larg, 0.12), new THREE.MeshStandardMaterial({ color: '#3a3f45', roughness: 0.9 }));
-    r.position.set(x, 0.06, z);
-    r.rotation.y = ry;
-    r.translateZ(0.002);
-    g.add(r);
+  const w = LX[1] - LX[0];
+  const d = LZ[1] - LZ[0];
+  if (l.teto) {
+    const teto = new THREE.Mesh(new THREE.PlaneGeometry(w, d), pbr(l.teto.tex, [w / l.teto.m, d / l.teto.m], l.teto.tinta));
+    teto.rotation.x = Math.PI / 2;
+    teto.position.y = l.alt;
+    teto.castShadow = true;
+    g.add(teto);
+  }
+  const matParede = acabamento(l.parede);
+  const matRodape = l.rodape ? new THREE.MeshStandardMaterial({ color: l.rodape, roughness: 0.9 }) : null;
+  const mats = {
+    caixilho: new THREE.MeshStandardMaterial({ color: '#c9ccd0', metalness: 0.7, roughness: 0.35 }),
+    vidro: new THREE.MeshStandardMaterial({ color: '#cfe3f2', transparent: true, opacity: 0.1, roughness: 0.05, metalness: 0.1, depthWrite: false }),
+    peitoril: new THREE.MeshStandardMaterial({ color: '#b9b5ad', roughness: 0.8 }),
+    requadro: new THREE.MeshStandardMaterial({ color: l.parede.tinta, roughness: 0.95 }),
   };
-  parede(w, 0, LZ[0], 0);
-  parede(w, 0, LZ[1], Math.PI);
-  parede(d, LX[0], 0, Math.PI / 2);
-  parede(d, LX[1], 0, -Math.PI / 2);
-  // eletrocalha no teto, do rack até a bancada
-  const calha = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.04, 5.4), new THREE.MeshStandardMaterial({ color: '#5d656e', metalness: 0.7, roughness: 0.5 }));
-  calha.position.set(0.6, ALT - 0.06, 0);
-  g.add(calha);
+  for (const p of l.paredes) {
+    const larg = p.lado === 'fundo' || p.lado === 'frente' ? w : d;
+    const pose = POSE[p.lado];
+    const parede = new THREE.Group();
+    parede.position.set(pose.x, 0, pose.z);
+    parede.rotation.y = pose.ry;
+    const forma = new THREE.Shape();
+    forma.moveTo(-larg / 2, 0);
+    forma.lineTo(larg / 2, 0);
+    forma.lineTo(larg / 2, l.alt);
+    forma.lineTo(-larg / 2, l.alt);
+    forma.closePath();
+    for (const v of p.vaos ?? []) {
+      const c = local(p.lado, v.c);
+      const furo = new THREE.Path();
+      furo.moveTo(c - v.larg / 2, v.base);
+      furo.lineTo(c - v.larg / 2, v.topo);
+      furo.lineTo(c + v.larg / 2, v.topo);
+      furo.lineTo(c + v.larg / 2, v.base);
+      furo.closePath();
+      forma.holes.push(furo);
+    }
+    // ShapeGeometry gera UV em metros, então a textura repete a cada "m" metros
+    const malha = new THREE.Mesh(new THREE.ShapeGeometry(forma), matParede);
+    malha.receiveShadow = true;
+    malha.castShadow = true;
+    parede.add(malha);
+    if (p.barra) {
+      const barra = new THREE.Mesh(new THREE.PlaneGeometry(larg, p.barra.altura), pbr(l.parede.tex, [larg / l.parede.m, p.barra.altura / l.parede.m], p.barra.tinta));
+      barra.position.set(0, p.barra.altura / 2, 0.002);
+      barra.receiveShadow = true;
+      parede.add(barra);
+      const friso = new THREE.Mesh(new THREE.PlaneGeometry(larg, 0.03), new THREE.MeshStandardMaterial({ color: p.barra.tinta, roughness: 0.6 }));
+      friso.position.set(0, p.barra.altura, 0.004);
+      parede.add(friso);
+    }
+    if (matRodape) {
+      const r = new THREE.Mesh(new THREE.PlaneGeometry(larg, 0.12), matRodape);
+      r.position.set(0, 0.06, 0.006);
+      parede.add(r);
+    }
+    for (const v of p.vaos ?? []) janela(parede, local(p.lado, v.c), v, mats);
+    g.add(parede);
+  }
   return g;
 }
 
-function luzes(): THREE.Group {
+/* ---------- luzes ---------- */
+
+function luzes(l: Lugar): THREE.Group {
   const g = new THREE.Group();
-  g.add(new THREE.HemisphereLight('#a9c2dd', '#1a1f26', 0.35));
-  const pontos: [number, number][] = [
-    [0, -1.6],
-    [0, 1.2],
-  ];
-  pontos.forEach(([x, z], i) => {
-    const l = new THREE.PointLight('#e8f1ff', i === 0 ? 7 : 5, 9, 1.6);
-    l.position.set(x, ALT - 0.25, z);
-    l.castShadow = i === 0 && !M.leve;
-    l.shadow.mapSize.set(1024, 1024);
-    l.shadow.bias = -0.002;
-    l.userData.tremer = i === 1; // uma lâmpada fluorescente sempre está morrendo
-    g.add(l);
-    const luminaria = movel('mounted_fluorescent_lights', { largura: 1.25 });
-    luminaria.position.set(x, ALT - 0.1, z);
-    g.add(luminaria);
-  });
+  g.add(new THREE.HemisphereLight(l.hemi.ceu, l.hemi.chao, l.hemi.forca));
+  let sombra = false;
+  for (const def of l.luzes) {
+    let luz: THREE.PointLight | THREE.SpotLight | THREE.DirectionalLight;
+    if (def.tipo === 'sol') {
+      const d = new THREE.DirectionalLight(def.cor, def.forca);
+      const cam = d.shadow.camera;
+      cam.left = cam.bottom = -4.5;
+      cam.right = cam.top = 4.5;
+      cam.near = 1;
+      cam.far = 40;
+      luz = d;
+    } else if (def.tipo === 'foco') {
+      luz = new THREE.SpotLight(def.cor, def.forca, def.alcance ?? 10, def.angulo ?? 0.8, 0.55, 1.6);
+    } else {
+      luz = new THREE.PointLight(def.cor, def.forca, def.alcance ?? 9, 1.6);
+    }
+    luz.position.set(...def.pos);
+    if (def.alvo && (luz instanceof THREE.SpotLight || luz instanceof THREE.DirectionalLight)) {
+      luz.target.position.set(...def.alvo);
+      g.add(luz.target);
+    }
+    // sombra só numa luz por lugar, e nenhuma no modo leve
+    if (def.sombra && !sombra && !M.leve) {
+      sombra = true;
+      luz.castShadow = true;
+      luz.shadow.mapSize.set(1024, 1024);
+      luz.shadow.bias = -0.002;
+    }
+    luz.userData.tremer = !!def.tremer;
+    luz.userData.forca = def.forca;
+    g.add(luz);
+  }
+  for (const lum of l.luminarias) if (!(lum.detalhe && M.leve)) g.add(colocar(lum));
   // brilho dos LEDs do rack
   const led = new THREE.PointLight('#3ddc84', 0.2, 1.6, 2);
-  led.position.set(0.6, 1.4, -1.9);
+  led.position.set(RACK.x, 1.4, RACK.z + 0.65);
   g.add(led);
   return g;
 }
 
-function mobilia(m: Mundo): THREE.Group {
+/* ---------- mobília ---------- */
+
+function colocar(d: Movel): THREE.Group {
+  const o = movel(d.arq, { giro: d.giro, altura: d.altura, largura: d.largura, parte: d.parte });
+  if (d.pos.length === 3) o.position.set(d.pos[0], d.pos[1], d.pos[2]);
+  else o.position.set(d.pos[0], 0, d.pos[1]);
+  return o;
+}
+
+function mobilia(l: Lugar, m: Mundo): THREE.Group {
   const g = new THREE.Group();
   const n = Math.max(2, quantasBancadas(m));
-  for (let i = 0; i * 1.6 < n * BANCADA.passo; i++) {
-    const mesa = movel('metal_office_desk', { altura: 0.76, giro: Math.PI / 2 });
-    mesa.position.set(BANCADA.x + 0.05, 0, BANCADA.z0 + 0.4 + i * 1.6);
+  // mesas da bancada, uma depois da outra até cobrir todos os aparelhos de mesa, sem
+  // passar da parede da frente (se faltar espaço, a fileira encosta nela)
+  const fim = LZ[1] - 0.05;
+  let ini = BANCADA.z0 - 0.45;
+  const ultimo = Math.min(fim, BANCADA.z0 + (n - 1) * BANCADA.passo + 0.45);
+  const k = Math.max(1, Math.ceil((ultimo - ini) / l.mesa.passo - 0.1));
+  if (ini + k * l.mesa.passo > fim) ini = Math.max(LZ[0] + 0.05, fim - k * l.mesa.passo);
+  for (let i = 0; i < k; i++) {
+    const mesa = movel(l.mesa.arq, { altura: l.mesa.altura, giro: l.mesa.giro });
+    mesa.position.set(BANCADA.x + 0.05, 0, ini + (i + 0.5) * l.mesa.passo);
     g.add(mesa);
   }
-  const itens: [string, number, number, number, number?][] = [
-    ['steel_frame_shelves_01', 2.6, -1.4, -Math.PI / 2, 1.9],
-    ['cardboard_box_01', 2.55, -0.4, 0.3, 0.32],
-    ['industrial_storage_cart', 2.3, 1.2, -Math.PI / 2, 0.9],
-    ['metal_toolbox', 2.3, 1.2, -1.2, 0.2],
-    ['plastic_monobloc_chair_01', -1.7, -0.6, -Math.PI / 2, 0.82],
-    ['metal_trash_can', -2.6, 2.4, 0, 0.45],
-    ['plastic_crate_01', 1.7, -2.6, 0.2, 0.3],
-  ];
-  for (const [arq, x, z, giro, altura] of itens) {
-    const o = movel(arq, { giro, altura });
-    o.position.set(x, arq === 'metal_toolbox' ? 0.9 : 0, z);
-    if (arq === 'steel_frame_shelves_01' && Object.keys(m.catalogo).length) {
+  for (const d of l.moveis) {
+    if (d.detalhe && M.leve) continue;
+    const o = colocar(d);
+    if (d.almox && Object.keys(m.catalogo).length) {
       o.userData.alvo = { tipo: 'almox', id: 'almox', rotulo: 'estante do almoxarifado' } satisfies Alvo;
       alvosFixos.push(o);
     }
     g.add(o);
   }
-  const alarme = movel('fire_alarm', { altura: 0.12 });
-  alarme.position.set(-1.2, 2.2, LZ[1] - 0.05);
-  g.add(alarme);
-  const camera = movel('security_camera_01', { altura: 0.18, giro: Math.PI * 0.75 });
-  camera.position.set(LX[1] - 0.25, ALT - 0.3, LZ[0] + 0.25);
-  g.add(camera);
   return g;
 }
 
-/** Monta a sala inteira para o dia. */
-export function montarSala(m: Mundo, notas: string[]) {
+function extras(l: Lugar): THREE.Group {
+  const g = new THREE.Group();
+  animacoes = [];
+  for (const e of l.extras) {
+    const p = montarExtra(e);
+    g.add(p.grupo);
+    if (p.animar) animacoes.push(p.animar);
+  }
+  return g;
+}
+
+/** Baixa móveis e texturas do lugar do ato, para a sala abrir sem esperar a rede. */
+export function preCarregarLugar(ato: number) {
+  const l = lugarDoAto(ato);
+  preCarregarMoveis(new Set([l.mesa.arq, ...l.moveis.map((d) => d.arq), ...l.luminarias.map((d) => d.arq)]));
+  preCarregarTexturas(new Set([l.piso.tex, l.parede.tex, ...(l.teto ? [l.teto.tex] : []), ...(l.texturasExtras ?? [])]));
+}
+
+/** Monta a sala inteira para o dia, no lugar do ato. */
+export function montarSala(m: Mundo, notas: string[], ato = 0) {
   limparCena();
+  lugar = lugarDoAto(ato);
   notasAtuais = notas;
   alvosFixos = [];
   destaque = null;
   seta = null;
-  M.cena.background = new THREE.Color('#0b1016');
+  M.cena.background = new THREE.Color(lugar.fundo);
+  M.cena.fog = lugar.nevoa ? new THREE.Fog(lugar.nevoa.cor, lugar.nevoa.perto, lugar.nevoa.longe) : null;
+  M.cena.environmentIntensity = lugar.ambiente;
+  if (M.renderer) M.renderer.toneMappingExposure = lugar.exposicao;
   fixo = new THREE.Group();
-  fixo.add(casca(), luzes(), mobilia(m));
+  fixo.add(casca(lugar), luzes(lugar), mobilia(lugar, m), extras(lugar));
   M.cena.add(fixo);
   atualizarEquipamentos(m);
   J.limites = [LX[0], LX[1], LZ[0], LZ[1]];
-  posicionar(0.2, 1.6, 0.25);
+  posicionar(...(lugar.inicio ?? [0.2, 1.6, 0.25]));
+  const tremem: THREE.Light[] = [];
+  fixo.traverse((o) => {
+    if ((o as THREE.Light).isLight && o.userData.tremer) tremem.push(o as THREE.Light);
+  });
   M.atualizar.add((_dt, t) => {
-    fixo?.traverse((o) => {
-      if ((o as THREE.PointLight).isPointLight && o.userData.tremer) {
-        const l = o as THREE.PointLight;
-        l.intensity = Math.sin(t * 37) > 0.97 || Math.sin(t * 3.1) > 0.995 ? 0.6 : 5;
-      }
-    });
+    // uma lâmpada fluorescente sempre está morrendo
+    for (const l of tremem) l.intensity = Math.sin(t * 37) > 0.97 || Math.sin(t * 3.1) > 0.995 ? 0.6 : l.userData.forca;
+    for (const a of animacoes) a(t);
     if (seta) {
       seta.position.y = seta.userData.base + Math.sin(t * 3) * 0.06;
       seta.rotation.y = t * 1.5;
@@ -201,7 +339,7 @@ export function atualizarEquipamentos(m: Mundo) {
   }
   equipamentos = montarEquipamentos(m, notasAtuais);
   M.cena.add(equipamentos.raiz);
-  J.obstaculos = [...equipamentos.obstaculos, [2.2, 3, -2, -0.8], [1.9, 2.7, 0.8, 1.6]];
+  J.obstaculos = [...equipamentos.obstaculos, ...lugar.obstaculos];
   posicionarSeta();
 }
 

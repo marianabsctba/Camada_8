@@ -5,7 +5,21 @@ import { acompanhar } from './glb';
 const BASE = `${import.meta.env.BASE_URL}ambiente/texturas/`;
 const tl = new THREE.TextureLoader();
 
-export type Superficie = 'garage_floor' | 'painted_plaster_wall' | 'smooth_concrete_floor';
+export type Superficie =
+  | 'asphalt_02'
+  | 'beige_wall_002'
+  | 'brick_wall_02'
+  | 'concrete_pavement'
+  | 'dirty_carpet'
+  | 'garage_floor'
+  | 'grey_plaster'
+  | 'herringbone_parquet'
+  | 'old_linoleum_flooring_01'
+  | 'painted_plaster_wall'
+  | 'plastered_wall_02'
+  | 'smooth_concrete_floor'
+  | 'terrazzo_tiles'
+  | 'white_plaster_02';
 
 const imagens = new Map<string, Promise<THREE.Texture>>();
 
@@ -18,8 +32,9 @@ function baixar(nome: string): Promise<THREE.Texture> {
   return p;
 }
 
-export function preCarregarTexturas() {
-  for (const s of ['garage_floor', 'painted_plaster_wall', 'smooth_concrete_floor']) for (const k of ['cor', 'normal', 'aspereza']) void baixar(`${s}_${k}`);
+/** Baixa as texturas de um lugar antes de a sala ser montada. */
+export function preCarregarTexturas(lista: Iterable<Superficie>) {
+  for (const s of lista) for (const k of ['cor', 'normal', 'aspereza']) void baixar(`${s}_${k}`);
 }
 
 function tex(nome: string, rep: [number, number], cor: boolean): THREE.Texture {

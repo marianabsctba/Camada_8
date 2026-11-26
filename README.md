@@ -24,4 +24,8 @@ Os testes trazem um robô que resolve cada dia digitando no terminal, e um conju
 
 TypeScript, Vite e Three.js, publicado no GitHub Pages.
 
+## Créditos
+
+- Móveis, objetos e texturas dos lugares em 3D (galpão, rua, central telefônica, escola, data center, sala dos servidores, cabine do estádio e centro de operações): [Poly Haven](https://polyhaven.com/), licença [CC0](https://polyhaven.com/license), convertidos para GLB com Draco e texturas WebP. Ficam em `public/ambiente`.
+
 Powered by Mariana BS.

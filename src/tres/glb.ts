@@ -18,10 +18,9 @@ export async function esperarCarga(): Promise<void> {
   while (pendentes.size) await Promise.allSettled([...pendentes]);
 }
 
-/** Móveis que a sala usa, para baixar enquanto a pessoa ainda está na capa. */
-export const MOVEIS_DA_SALA = ['metal_office_desk', 'mounted_fluorescent_lights', 'industrial_storage_cart', 'metal_toolbox', 'steel_frame_shelves_01', 'cardboard_box_01', 'plastic_monobloc_chair_01', 'fire_alarm', 'security_camera_01', 'metal_trash_can', 'plastic_crate_01'];
-export function preCarregarMoveis() {
-  for (const m of MOVEIS_DA_SALA) void carregar(m);
+/** Baixa os móveis de um lugar enquanto a pessoa ainda está na capa ou no mapa. */
+export function preCarregarMoveis(lista: Iterable<string>) {
+  for (const m of lista) void carregar(m);
 }
 
 function L(): GLTFLoader {
@@ -58,11 +57,18 @@ function carregar(arquivo: string): Promise<THREE.Object3D | null> {
  * Coloca um móvel apoiado no chão, centrado no ponto. Com "altura", escala o modelo
  * para essa altura (útil para encaixar o tampo da mesa onde os aparelhos estão).
  */
-export function movel(arquivo: string, o: { altura?: number; largura?: number; giro?: number } = {}): THREE.Group {
+export function movel(arquivo: string, o: { altura?: number; largura?: number; giro?: number; parte?: string } = {}): THREE.Group {
   const grupo = new THREE.Group();
   void acompanhar(carregar(arquivo)).then((cena) => {
     if (!cena) return;
+    // clone raso de malhas: geometria e material ficam compartilhados com o cache
     const copia = cena.clone(true);
+    if (o.parte) {
+      // kits modulares do Poly Haven: fica só a peça pedida ("nome" exato ou "prefixo*")
+      const pref = o.parte.endsWith('*') ? o.parte.slice(0, -1) : null;
+      for (const f of [...copia.children]) if (pref ? !f.name.startsWith(pref) : f.name !== o.parte) copia.remove(f);
+      copia.updateMatrixWorld(true);
+    }
     const b = new THREE.Box3().setFromObject(copia);
     const tam = b.getSize(new THREE.Vector3());
     const k = o.altura ? o.altura / tam.y : o.largura ? o.largura / Math.max(tam.x, tam.z) : 1;

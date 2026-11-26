@@ -13,10 +13,9 @@ import { CURRICULO, type EntradaCurriculo } from './conteudo/curriculo';
 import type { Dia } from './conteudo/tipos';
 import { acoesDo, executarAcao, type TipoAlvo } from './motor/acoes';
 import { iniciarControles, J, soltarMouse } from './tres/jogador';
-import { esperarCarga, preCarregarMoveis } from './tres/glb';
+import { esperarCarga } from './tres/glb';
 import { iniciar3d, M, pausar3d } from './tres/motor3d';
-import { preCarregarTexturas } from './tres/pbr';
-import { alvoNaMira, atualizarEquipamentos, destacar, montarSala } from './tres/sala';
+import { alvoNaMira, atualizarEquipamentos, destacar, montarSala, preCarregarLugar } from './tres/sala';
 
 const CHAVE = 'camada8.v2';
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -276,7 +275,7 @@ function abrirDia(numero: number) {
     app.replaceChildren(palco);
     const canvas = iniciar3d(palco);
     canvas.style.opacity = '0';
-    montarSala(term.mundo, [`Dia ${dia.numero}`, dia.titulo, 'Siga a seta laranja']);
+    montarSala(term.mundo, [`Dia ${dia.numero}`, dia.titulo, 'Siga a seta laranja'], dia.ato);
     iniciarControles(canvas, palco);
     J.livre = true;
     destacarFn = destacar;
@@ -366,6 +365,7 @@ function mapaTela(recente?: number) {
   const prox = proximaEntrada();
   const { lugares, casas } = contarConectados(resolvidos);
   const atoAtual = prox?.ato ?? 7;
+  preCarregarLugar(atoAtual);
   const ato = ATOS[atoAtual]!;
   const marca = el('button', { class: 'marca', title: 'Voltar à capa' });
   marca.innerHTML = 'CAMADA <span>8</span>';
@@ -584,7 +584,7 @@ function abrirDesafio(dia: Dia) {
   app.replaceChildren(palco);
   const canvas = iniciar3d(palco);
   canvas.style.opacity = '0';
-  montarSala(term.mundo, ['Desafio', dia.titulo, 'Sem seta hoje']);
+  montarSala(term.mundo, ['Desafio', dia.titulo, 'Sem seta hoje'], dia.ato);
   destacar(null);
   iniciarControles(canvas, palco);
   J.livre = true;
@@ -613,6 +613,5 @@ function abrirDesafio(dia: Dia) {
   desenhar();
 }
 
-preCarregarMoveis();
-preCarregarTexturas();
+preCarregarLugar(proximaEntrada()?.ato ?? 0);
 capa();

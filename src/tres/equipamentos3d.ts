@@ -140,7 +140,7 @@ function etiqueta(texto: string[], larg: number, alt: number, fundo = '#fff27a',
 
 /* ---------- rack ---------- */
 
-function rack42(): THREE.Group {
+export function rack42(): THREE.Group {
   const g = new THREE.Group();
   const alt = 42 * U + 0.1;
   const largExt = 0.6;
