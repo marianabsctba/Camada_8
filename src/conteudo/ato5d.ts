@@ -1,6 +1,6 @@
 // Dias do ato 5 (A Conversa), com prática guiada, aula e desafio no próprio dia.
-// Os dois últimos dias da camada de transporte, na sala dos servidores: QUIC e BBR (6.6) e medir
-// desempenho de verdade (6.7), até a videochamada do hospital ficar estável.
+// Dias da camada de transporte, na sala dos servidores: QUIC e BBR (6.6) e medir desempenho de verdade
+// (6.7.1 a 6.7.4), até a videochamada do hospital ficar estável. As redes rápidas (6.7.5 a 6.7.8) estão em ato5e.
 
 import { assinaturaTcp, configTcp } from '../motor/transporte';
 import { adicionar, ligar, novoMundo, pc, roteador, type Mundo } from '../motor/mundo';
@@ -427,7 +427,7 @@ const dia110: Dia = {
 };
 
 /* ======================================================================
- * ref 111: Medir de verdade (6.7)
+ * ref 111: Medir de verdade (6.7.1 a 6.7.4)
  * ====================================================================== */
 
 interface Velocidade {
@@ -440,56 +440,35 @@ interface Velocidade {
   assinatura: string;
 }
 
-interface Desempenho {
-  de: string;
-  ip: string;
-  rttMs: number;
-  bdpBytes: number;
-  escalaNecessaria: number;
-  voltaSeqS: number;
-}
-
 /** O último teste de velocidade até o medidor, se foi feito com a configuração de agora. */
 function velocidade(m: Mundo): Velocidade | undefined {
   const v = m.flags.velocidade as Velocidade | undefined;
   return v && v.de === CLIENTE && v.ip === MEDIDOR && v.assinatura === assinaturaTcp(cliente(m)) ? v : undefined;
 }
 
-function desempenho(m: Mundo, rttMinMs: number): Desempenho | undefined {
-  const d = m.flags.desempenho as Desempenho | undefined;
-  return d && d.de === CLIENTE && d.ip === MEDIDOR && d.rttMs >= rttMinMs ? d : undefined;
+/** Vazão máxima de uma conexão com a janela de fábrica (65535 bytes) no RTT medido, em Mb/s. */
+function tetoJanela(rttMs: number): number {
+  return (65535 * 8) / (rttMs / 1000) / 1e6;
 }
 
-/** O que o receptor consegue anunciar de verdade: o buffer, limitado pelo campo de 16 bits vezes 2 elevado à escala. */
-function janelaEfetiva(m: Mundo): number {
-  const c = configTcp(cliente(m));
-  return Math.min(c.janela, 65535 * 2 ** c.escala);
-}
-
-/** Produto banda × atraso do caminho até o medidor, com a banda do rádio e o RTT medido. */
-function bdpCaminho(mbps: number, rttMs: number): number {
-  return (mbps * 1e6 * (rttMs / 1000)) / 8;
-}
-
-function janelaCobre(m: Mundo, d: Desempenho | undefined): ItemObjetivo {
-  const j = janelaEfetiva(m);
-  const bdp = d?.bdpBytes;
-  return item('a janela que a estação anuncia cobre o produto banda × atraso do caminho', bdp !== undefined && j >= bdp, bdp === undefined ? 'meça o desempenho do caminho primeiro' : `janela anunciável ${j} bytes, produto ${bdp} bytes`);
+/** Espera de uma fila cheia: pacotes de 1500 bytes saindo à banda do rádio, em ms. */
+function filaCheiaMs(pacotes: number, mbps: number): number {
+  return ((pacotes * 1500 * 8) / (mbps * 1e6)) * 1000;
 }
 
 /** O rádio novo do hospital até a capital. */
 const RADIO_MBPS = 100;
+const FILA_RADIO = 350;
 
 const d111: Pergunta[] = [
-  numerica('1', 'Qual é a menor escala de janela que deixa a estação anunciar o produto banda × atraso do caminho até o medidor?', (m) => (m.flags.desempenho as Desempenho | undefined)?.escalaNecessaria ?? NaN, 0),
+  numerica('1', 'Pela conta janela ÷ RTT, até quantos Mb/s uma conexão só com a janela de fábrica (65535 bytes) consegue nesse caminho? (duas casas)', (m) => tetoJanela(velocidade(m)?.rttMs ?? 40.2), 0.05),
+  numerica('2', `A fila da saída do rádio guarda ${FILA_RADIO} pacotes de 1500 bytes. Cheia, quantos milissegundos de espera ela soma ao RTT?`, filaCheiaMs(FILA_RADIO, RADIO_MBPS), 0.5),
 ];
 
-/** A 10 Gb/s, o número de sequência de 32 bits dá a volta em 2³² × 8 ÷ 10¹⁰ s. */
-const VOLTA_10G = (2 ** 32 * 8) / 10e9;
-
 const d111D: Pergunta[] = [
-  numerica('1', 'Com o caminho de agora, qual é a menor escala de janela que cobre o produto banda × atraso?', (m) => (m.flags.desempenho as Desempenho | undefined)?.escalaNecessaria ?? NaN, 0),
-  numerica('2', 'Se o rádio virar um enlace de 10 Gb/s, em quantos segundos o número de sequência de 32 bits dá a volta? (uma casa decimal)', VOLTA_10G, 0.1),
+  numerica('1', 'Com o RTT de agora, até quantos Mb/s uma conexão só com a janela de fábrica consegue? (duas casas)', (m) => tetoJanela(velocidade(m)?.rttMs ?? 60.2), 0.05),
+  numerica('2', 'Pela mesma conta, qual é o menor número de conexões em paralelo cuja soma passa de 80 Mb/s?', (m) => Math.ceil(80 / tetoJanela(velocidade(m)?.rttMs ?? 60.2)), 0),
+  numerica('3', 'Com a fila nova de 500 pacotes de 1500 bytes cheia, quantos milissegundos de espera ela soma ao RTT?', filaCheiaMs(500, RADIO_MBPS), 0.5),
 ];
 
 const dia111: Dia = {
@@ -498,43 +477,39 @@ const dia111: Dia = {
   titulo: 'Medir de verdade',
   chamado: [
     'CHAMADO #0111',
-    'A operadora entregou o rádio novo de 100 Mb/s entre o hospital e a capital. A direção rodou o teste de velocidade do celular, viu "13 Mb/s" e já redigiu uma carta furiosa cobrando o contrato.',
-    'Antes de mandar a carta, alguém precisa medir direito: reproduzir os 20 ms de cada sentido até a capital no emulador, testar com uma conexão e com várias e descobrir quem está segurando a vazão.',
-    'Objetivo: o atraso do caminho no emulador, o desempenho do caminho medido, a escala de janela respondida, a janela da estação cobrindo o produto banda × atraso e um teste de velocidade com uma conexão só passando de 80 Mb/s.',
+    'A operadora entregou o rádio novo de 100 Mb/s entre o hospital e a capital. A direção rodou o teste de velocidade do celular, viu "13 Mb/s" e já redigiu uma carta furiosa cobrando o contrato. A equipe da videochamada reclama de outra coisa: quando alguém baixa um arquivo, a voz do especialista atrasa.',
+    'Antes de mandar a carta, alguém precisa medir direito: reproduzir os 20 ms de cada sentido até a capital no emulador, testar com uma conexão e com várias, e calcular o que acontece com a latência quando o rádio está cheio.',
+    'Objetivo: o atraso do caminho no emulador, um teste de velocidade com pelo menos 4 conexões que mostre o enlace (mais que o dobro de uma só) e as duas perguntas respondidas, a da janela e a da fila.',
   ],
   manual: {
     titulo: 'Desempenho: onde a rede fica lenta e como medir sem se enganar',
     texto: [
-      'Quase todo problema de desempenho cai em poucas famílias. Congestionamento: mais tráfego do que o enlace aguenta, e a fila cresce. Desbalanceamento de recursos: um servidor de 1 Gb/s falando com um rádio de 100 Mb/s, ou um receptor lento demais para o que chega, ou uma janela pequena num cano grande. Sobrecarga sincronizada: depois de uma queda de energia, todas as máquinas ligam juntas e pedem endereço ao mesmo tempo. E configuração: buffers, temporizadores e janelas com os valores de fábrica, pensados para outra rede.',
-      'Medir parece fácil e engana muito. Uma amostra só não diz nada: meça muitas vezes e olhe a média e a variação. Meça tempo suficiente para a partida lenta ficar fora da conta, mas não tanto que a rede mude no meio. Confira se o relógio tem resolução para o que está medindo. Cuidado com o cache: a segunda leitura do mesmo arquivo pode nem passar pela rede. E não deixe a ferramenta de medição ser o gargalo, nem confunda o que mediu com o que queria medir.',
-      'O teste de velocidade da rede de acesso é o melhor exemplo. Uma conexão TCP só pode ficar presa na própria janela: vazão máxima = janela ÷ RTT. Com a janela padrão de 65535 bytes e 40 ms de ida e volta, isso dá uns 13 Mb/s, num rádio de 100. Por isso os testes de velocidade abrem várias conexões em paralelo e somam: o que se quer medir é o enlace, não a configuração de uma conexão. Ao mesmo tempo, a pessoa usa a rede por uma conexão de cada vez, então o resultado de um fluxo também importa. No fim, o que conta é a qualidade de experiência: quanto tempo até a imagem aparecer, quantas vezes congela, quanto atraso entre falar e ser ouvido. Vazão alta com 500 ms de fila é uma péssima videochamada.',
-      'Redes longas e rápidas pedem cuidado especial. O produto banda × atraso diz quantos bytes precisam estar em voo para o cano ficar cheio: 100 Mb/s × 40 ms são uns 500 mil bytes. O campo de janela do TCP tem 16 bits (até 65535); a opção de escala de janela, combinada no SYN, multiplica o campo por 2 elevado à escala. Em enlaces muito rápidos aparece outro problema: o número de sequência de 32 bits dá a volta (a 1 Gb/s, em uns 34 s), antes da vida máxima de um segmento na rede, e um segmento velho atrasado poderia ser aceito como novo. A proteção é o PAWS: uma marca de tempo em cada segmento desempata.',
-      'Do lado dos hosts, a regra é tratar o caso comum depressa. Um segmento de dados que chega em ordem, numa conexão já aberta, segue um caminho rápido de poucas instruções, sem copiar os dados várias vezes e sem uma interrupção por pacote. Temporizadores ficam em estruturas que não custam caro para mexer. E nos enlaces estreitos, compacta-se o cabeçalho: numa voz com 20 bytes de fala por pacote, IP, UDP e RTP somam 40 bytes, e como quase tudo se repete de um pacote para o outro, viram uns 3.',
+      'Quase todo problema de desempenho cai em poucas famílias. O gargalo: mais tráfego do que o enlace mais estreito aguenta, e a fila cresce. A sobrecarga súbita e sincronizada: depois de uma queda de energia, todas as máquinas ligam juntas e pedem endereço ao mesmo tempo; um pacote com erro que faz cada receptor responder vira uma tempestade de broadcast. Os buffers: pequenos demais perdem rajadas, grandes demais guardam centenas de milissegundos de fila (o bufferbloat), e quem enche a fila atrasa todo mundo atrás dela. E o desajuste de capacidade: um servidor de 1 Gb/s falando com um rádio de 100 Mb/s, um receptor lento demais para o que chega, uma janela pequena num cano grande. Muitas vezes a culpa é da configuração: buffers, temporizadores e janelas com os valores de fábrica, pensados para outra rede.',
+      'Medir parece fácil e engana muito. Uma amostra só não diz nada: meça muitas vezes, guarde a média e a variação, e olhe os percentis (o 95º e o 99º dizem como fica o pior momento, que é o que a pessoa lembra). Deixe o aquecimento de fora: a partida lenta do TCP, o cache que ainda está vazio, a primeira resolução de nome. Confira se o relógio tem resolução para o que mede, e não meça uma coisa de 1 ms com um relógio de 10 ms. Cuidado com o cache: a segunda leitura do mesmo arquivo pode nem passar pela rede. Meça nas condições de uso, com o atraso e a carga de verdade. E não deixe a ferramenta de medição ser o gargalo, nem confunda o que mediu com o que queria medir.',
+      'O teste de velocidade da rede de acesso é o melhor exemplo. Uma conexão TCP só pode ficar presa na própria janela: vazão máxima = janela ÷ RTT. Com a janela de fábrica de 65535 bytes e 40 ms de ida e volta, isso dá uns 13 Mb/s, num rádio de 100. Por isso os bons testes abrem várias conexões em paralelo e somam, escolhem um servidor perto (RTT pequeno, menos caminho que não é da rede de acesso) e descartam os primeiros segundos. O que se quer medir é o enlace, não a configuração de uma conexão. Ao mesmo tempo, a pessoa usa a rede por uma conexão de cada vez, então o resultado de um fluxo só também é informação: diz que o problema é do host, não do rádio.',
+      'Vazão não é tudo. A latência ociosa, com a rede vazia, é o RTT de base: propagação e processamento. A latência sob carga é o que a pessoa sente quando alguém está baixando um arquivo ao mesmo tempo: o RTT de base mais a espera na fila do gargalo. Com bufferbloat, um enlace de 100 Mb/s com fila de 350 pacotes soma até 42 ms a cada pacote, e uma videochamada que vai bem com a rede vazia passa a atrasar. Os testes de velocidade modernos medem as duas, e a qualidade de experiência é feita delas: quanto tempo até a imagem aparecer, quantas vezes congela, quanto atraso entre falar e ser ouvido. Vazão alta com 500 ms de fila é uma péssima videochamada.',
     ],
   },
   dicas: [
     'Comece pelo emulador ("Atraso do caminho") na telemed: 20 ms em cada sentido. Depois, "Teste de velocidade" até 203.0.113.20 com 1 conexão e com várias.',
-    '"Desempenho" mostra o produto banda × atraso e a escala necessária. O campo de 16 bits vai até 65535; cada ponto de escala dobra o limite.',
-    'Em "Janela do receptor e escala", um buffer de 600000 bytes com escala 3 (até 524280 bytes anunciáveis) cobre os uns 502 mil bytes do caminho.',
+    'Cada conexão anda no máximo janela ÷ RTT: 65535 × 8 bits ÷ 0,0402 s. Com 8 conexões, a soma já chega perto do rádio.',
+    'Cada pacote de 1500 bytes leva 0,12 ms para sair pelo rádio de 100 Mb/s. A fila cheia, com 350 deles na frente, espera 350 vezes isso.',
   ],
   perguntas: d111,
-  montar: () => mundoCapital({ semente: 5111, servidor: 'medidor', mbps: RADIO_MBPS, buffer: 350 }),
+  montar: () => mundoCapital({ semente: 5111, servidor: 'medidor', mbps: RADIO_MBPS, buffer: FILA_RADIO, escuta: [['tcp', 80]] }),
   objetivo: (m) => {
     const at = caminhoCli(m).atraso ?? 0;
-    const d = desempenho(m, 30);
     const v = velocidade(m);
     return [
       item('o emulador da telemed com 20 ms de atraso em cada sentido', Math.abs(at - 0.02) < 1e-9, `${(at * 1000).toFixed(0)} ms`),
-      item('desempenho do caminho até o medidor (203.0.113.20) medido com o atraso da capital', !!d, d ? `RTT ${d.rttMs.toFixed(1)} ms, produto ${d.bdpBytes} bytes` : 'ainda não medido com o atraso'),
-      janelaCobre(m, d),
-      item('teste de velocidade, com a configuração de agora, em que uma conexão só passa de 80 Mb/s', !!v && v.umFluxoMbps > 80, v ? `uma conexão: ${v.umFluxoMbps.toFixed(2)} Mb/s` : 'nenhum teste com a configuração de agora'),
+      item('teste de velocidade até o medidor, com o atraso da capital e pelo menos 4 conexões, somando mais que o dobro de uma só', !!v && v.rttMs >= 30 && v.fluxos >= 4 && v.mbps > 2 * v.umFluxoMbps, v ? `${v.fluxos} conexão(ões): ${v.mbps.toFixed(2)} Mb/s; uma só: ${v.umFluxoMbps.toFixed(2)} Mb/s` : 'nenhum teste com a configuração de agora'),
       ...todasRespondidas(m, d111),
     ];
   },
   posMorte: [
-    'A operadora estava inocente. Com 40 ms de ida e volta, uma conexão com a janela de fábrica (65535 bytes) só consegue 65535 × 8 ÷ 0,0402 s, uns 13 Mb/s, por mais largo que seja o rádio. O teste do celular abriu uma conexão só e mediu a janela da estação, não o enlace. Com 4 conexões o teste soma uns 51 Mb/s; com 8, uns 97 Mb/s: o rádio entregava o contratado o tempo todo.',
-    'O conserto foi do lado de cá. O caminho precisa de uns 502 mil bytes em voo; o campo de janela vai até 65535, então a estação passou a combinar escala 3 no SYN (até 524280 bytes) com um buffer de 600000. Daí uma conexão só encheu o rádio. A carta furiosa virou um e-mail agradecendo o rádio novo.',
-    'E a videochamada? Com o BBR do dia anterior mantendo a fila curta, o QUIC abrindo em 1 RTT e sobrevivendo à troca de rede, e agora a janela do tamanho do caminho, a primeira consulta inteira com o especialista da capital rodou sem congelar. A sala de telemedicina aplaudiu. A camada de transporte de Fim de Linha está pronta: a conversa ficou rápida, justa e confiável.',
+    'A operadora estava inocente. Com 40 ms de ida e volta, uma conexão com a janela de fábrica (65535 bytes) só consegue 65535 × 8 ÷ 0,0402 s, uns 13 Mb/s, por mais largo que seja o rádio. O teste do celular abriu uma conexão só e mediu a janela da estação, não o enlace. Com 8 conexões o teste soma uns 97 Mb/s: o rádio entregava o contratado o tempo todo. A carta furiosa virou um e-mail agradecendo o rádio novo.',
+    'A reclamação da videochamada também era real, e era de outra família: bufferbloat. Ociosa, a ida e volta até a capital é de 40,2 ms. Quando alguém baixa um arquivo com Reno ou CUBIC, que só diminuem depois de perder, a fila de 350 pacotes enche e soma até 42 ms a cada pacote, inclusive aos da voz do especialista: o RTT dobra. O BBR, do dia anterior, mede a banda e o RTT mínimo e mantém a fila quase vazia: é com ele que a estação deve atender as consultas.',
+    'Sobrou o problema de verdade da estação: uma conexão só, com a janela de fábrica, não enche um cano longo e largo. É o assunto de amanhã, das redes rápidas.',
   ],
   passos: [
     passo({
@@ -556,13 +531,20 @@ const dia111: Dia = {
       acao: 'tr-velocidade',
       valores: { ip: MEDIDOR, n: '1' },
       instrucao: 'Faça o teste de velocidade até o medidor (203.0.113.20) com uma conexão só, como o celular da direção fez.',
-      porque: 'Primeiro reproduzir a queixa: se a medição da direção não se repete aqui, o problema é outro.',
+      porque: 'Primeiro reproduzir a queixa: se a medição da direção não se repete aqui, o problema é outro. Repare que o teste deixa os 2 primeiros segundos, a partida lenta, fora da conta.',
       conferir: (m) => {
         const v = velocidade(m);
         if (!v) return 'O teste de velocidade ainda não foi feito com a configuração de agora.';
         return v.fluxos === 1 ? true : 'Este passo é com uma conexão só, como o teste do celular.';
       },
       feito: 'Uns 13 Mb/s, e a própria saída avisa: preso pela janela do receptor, 65535 bytes ÷ 40,2 ms. A queixa se repete, mas o culpado aparece junto.',
+    }),
+    passo({
+      pergunta: '1',
+      exemplo: { resposta: '13,04' },
+      instrucao: 'Pela conta janela ÷ RTT, até quantos Mb/s uma conexão só consegue nesse caminho?',
+      porque: '65535 bytes são 524280 bits por RTT. Divida pelo RTT medido em segundos.',
+      feito: '524280 bits ÷ 0,0402 s = 13,04 Mb/s. O teste de uma conexão mediu a conta da janela, não o rádio.',
     }),
     passo({
       alvo: ['equip', CLIENTE],
@@ -581,50 +563,51 @@ const dia111: Dia = {
       feito: 'Com 8 conexões, uns 97 Mb/s: o rádio entrega o contratado. Um fluxo só media a janela da estação, não a rede de acesso.',
     }),
     passo({
-      alvo: ['equip', CLIENTE],
-      acao: 'tr-desempenho',
-      valores: { ip: MEDIDOR },
-      instrucao: 'Meça o desempenho do caminho até o medidor: produto banda × atraso, limite da janela, escala e número de sequência.',
-      porque: 'Saber que a janela é o limite não basta: é preciso saber de quanto ela precisa para este caminho.',
-      conferir: (m) => (desempenho(m, 30) ? true : 'O desempenho ainda não foi medido com os 20 ms de atraso no emulador.'),
-      feito: 'Produto banda × atraso: 100 Mb/s × 40,2 ms, uns 502 mil bytes (344 segmentos em voo). O número de sequência só dá a volta em 343,6 s a 100 Mb/s: aqui o PAWS ainda não é necessário.',
-    }),
-    passo({
-      pergunta: '1',
-      exemplo: { resposta: '3' },
-      instrucao: 'Qual é a menor escala de janela que deixa anunciar esse produto banda × atraso?',
-      porque: 'A janela anunciada vale 65535 vezes 2 elevado à escala. Dobre 65535 até passar de uns 502 mil bytes.',
-      feito: 'Escala 3: 65535 × 8 = 524280 bytes. Com escala 2 (262140) ainda faltaria metade.',
-    }),
-    passo({
-      alvo: ['equip', CLIENTE],
-      acao: 'tr-janela',
-      pedir: ['janela', 'escala'],
-      exemplo: { janela: '600000', escala: '3' },
-      instrucao: 'Ajuste o buffer do receptor e a escala de janela da telemed para cobrir o produto banda × atraso.',
-      porque: 'São duas peças: o buffer diz quanto o receptor aguenta guardar; a escala diz quanto o campo de 16 bits consegue anunciar. Vale o menor dos dois.',
-      conferir: (m) => {
-        const d = desempenho(m, 30);
-        if (!d) return 'Meça o desempenho primeiro, para saber o tamanho do caminho.';
-        const c = configTcp(cliente(m));
-        if (c.janela < d.bdpBytes) return `Um buffer de ${c.janela} bytes é menor que os ${d.bdpBytes} bytes que precisam estar em voo. Aumente o buffer.`;
-        if (janelaEfetiva(m) < d.bdpBytes) return `O buffer dá, mas com escala ${c.escala} o campo só anuncia ${65535 * 2 ** c.escala} bytes. Suba a escala.`;
-        return true;
+      escolha: {
+        opcoes: [
+          'Um servidor perto, várias conexões e os primeiros segundos fora da conta',
+          'Um servidor bem longe, para medir a internet inteira',
+          'Uma conexão só, que é como as pessoas usam a rede',
+          'Um arquivo pequeno, para o teste terminar rápido',
+        ],
+        certa: 0,
+        errada: {
+          1: 'Com o servidor longe, o RTT cresce e cada conexão anda menos (janela ÷ RTT). O teste passa a medir o caminho todo, não a rede de acesso.',
+          2: 'Uma conexão só mede a janela e a configuração do host, como você acabou de ver. É informação útil, mas não é a capacidade do enlace.',
+          3: 'Com arquivo pequeno, a transferência acaba ainda na partida lenta, e o número sai baixo por motivo que não tem a ver com a rede.',
+        },
       },
-      feito: 'Agora a estação anuncia mais de meio megabyte de janela. A escala é combinada no SYN: se o outro lado não mandar a opção, nenhum dos dois usa.',
+      exemplo: { resposta: '0' },
+      instrucao: 'A operadora vai pôr um teste oficial no site. O que um bom teste da rede de acesso precisa ter?',
+      porque: 'O que se quer medir é a rede de acesso: tire do caminho a janela de uma conexão, a distância e o aquecimento.',
+      feito: 'Servidor perto, conexões em paralelo e aquecimento descartado. E, de preferência, a latência medida junto.',
     }),
     passo({
-      alvo: ['equip', CLIENTE],
-      acao: 'tr-velocidade',
-      valores: { ip: MEDIDOR, n: '1' },
-      instrucao: 'Repita o teste de velocidade com uma conexão só.',
-      porque: 'A prova do conserto é a mesma medição que gerou a queixa, nas mesmas condições.',
-      conferir: (m) => {
-        const v = velocidade(m);
-        if (!v) return 'O teste ainda não foi feito com a configuração de agora.';
-        return v.umFluxoMbps > 80 ? true : `Uma conexão ficou em ${v.umFluxoMbps.toFixed(2)} Mb/s. Confira se a janela anunciável cobre o produto banda × atraso.`;
+      escolha: {
+        opcoes: [
+          'A fila do rádio enche e cada pacote da voz espera atrás do arquivo: o atraso cresce',
+          'Nada: a videochamada usa outra porta, então tem outra fila',
+          'A videochamada fica mais rápida, porque o rádio está aquecido',
+          'Só o arquivo atrasa; a voz tem prioridade por ser pequena',
+        ],
+        certa: 0,
+        errada: {
+          1: 'A porta separa os soquetes nos hosts, não as filas dos roteadores. Sem qualidade de serviço configurada, todo pacote entra na mesma fila de saída do rádio.',
+          2: 'Com o rádio vazio a fila está vazia. Com ele cheio, cada pacote espera os que estão na frente.',
+          3: 'Sem qualidade de serviço configurada, a fila é por ordem de chegada. Tamanho pequeno não fura fila.',
+        },
       },
-      feito: 'Uma conexão só chegou perto dos 100 Mb/s do rádio. A carta para a operadora pode ir para o lixo.',
+      exemplo: { resposta: '0' },
+      instrucao: 'Alguém começa a baixar um arquivo grande e enche o rádio. O que acontece com a videochamada que já estava no ar?',
+      porque: 'A latência ociosa é o RTT de base. Sob carga, soma-se a espera na fila do gargalo.',
+      feito: 'A voz passa a esperar na fila atrás do arquivo. É a latência sob carga, que os bons testes de velocidade medem junto com a vazão.',
+    }),
+    passo({
+      pergunta: '2',
+      exemplo: { resposta: '42' },
+      instrucao: 'A fila do rádio guarda 350 pacotes de 1500 bytes. Cheia, quantos milissegundos de espera ela soma?',
+      porque: 'Cada pacote na frente precisa sair pelo rádio: 1500 × 8 bits a 100 Mb/s são 0,12 ms.',
+      feito: '350 × 0,12 ms = 42 ms: o pior caso da latência sob carga, que dobra o RTT da videochamada.',
     }),
   ],
   aula: {
@@ -636,10 +619,10 @@ const dia111: Dia = {
           tipo: 'tabela',
           cabecalho: ['Problema', 'Exemplo', 'Remédio'],
           linhas: [
-            ['congestionamento', 'mais tráfego que o enlace aguenta', 'controle de congestionamento, mais banda'],
-            ['desbalanceamento', 'servidor de 1 Gb/s num rádio de 100; janela pequena num cano grande', 'ajustar a parte fraca'],
-            ['sobrecarga sincronizada', 'todas as máquinas ligando juntas depois de faltar luz', 'espalhar no tempo, com espera aleatória'],
-            ['configuração', 'buffer, temporizador e janela de fábrica', 'medir e ajustar para a rede real'],
+            ['gargalo', 'mais tráfego que o enlace mais estreito aguenta', 'controle de congestionamento, mais banda'],
+            ['sobrecarga súbita', 'todas as máquinas ligando juntas depois de faltar luz; tempestade de broadcast', 'espalhar no tempo, com espera aleatória'],
+            ['buffers', 'fila de centenas de milissegundos (bufferbloat)', 'fila curta, gestão ativa de fila, BBR'],
+            ['desajuste de capacidade', 'servidor de 1 Gb/s num rádio de 100; janela pequena num cano grande', 'ajustar a parte fraca'],
           ],
         },
       },
@@ -648,13 +631,13 @@ const dia111: Dia = {
         texto: ['Quase todo número errado vem de um destes descuidos.'],
         visual: {
           tipo: 'camadas',
-          camadas: ['amostra: muitas medidas, com média e variação', 'tempo: longo o bastante para deixar a partida lenta de fora', 'relógio: com resolução para o que se mede', 'cache: a segunda leitura pode nem passar pela rede', 'condições reais: o atraso e a carga de verdade'],
+          camadas: ['amostras: muitas medidas, com média, variação e percentis', 'aquecimento: a partida lenta e o cache vazio ficam de fora', 'relógio: com resolução para o que se mede', 'cache: a segunda leitura pode nem passar pela rede', 'condições reais: o atraso e a carga de verdade'],
           rotulo: 'antes de acreditar num número',
         },
       },
       {
         titulo: 'Um fluxo só engana',
-        texto: ['No rádio de 100 Mb/s com 40 ms de ida e volta e a janela de fábrica, cada conexão para em janela ÷ RTT. A soma de várias mostra o enlace. E no fim o que vale é a experiência: tempo até a imagem, congelamentos, atraso para ser ouvido.'],
+        texto: ['No rádio de 100 Mb/s com 40 ms de ida e volta e a janela de fábrica, cada conexão para em janela ÷ RTT. A soma de várias mostra o enlace.'],
         visual: {
           tipo: 'tabela',
           cabecalho: ['Conexões', 'Vazão medida'],
@@ -662,27 +645,30 @@ const dia111: Dia = {
             ['1, janela de 65535 bytes', 'uns 13 Mb/s'],
             ['4', 'uns 51 Mb/s'],
             ['8', 'uns 97 Mb/s'],
-            ['1, janela de 524280 bytes (escala 3)', 'uns 97 Mb/s'],
           ],
         },
       },
       {
-        titulo: 'Redes longas e rápidas',
-        texto: ['Com RTT de 40,2 ms: o produto banda × atraso diz a janela necessária, e a escala é quantas vezes dobrar 65535 até chegar lá. Acima de uns 290 Mb/s, o número de sequência dá a volta em menos que a vida máxima de um segmento (120 s) e o PAWS, com marca de tempo, passa a ser obrigatório.'],
+        titulo: 'Latência ociosa e sob carga',
+        texto: ['O RTT de base é propagação e processamento. Sob carga, soma-se a espera na fila do gargalo: no rádio de 100 Mb/s, 0,12 ms por pacote de 1500 bytes na frente.'],
         visual: {
           tipo: 'tabela',
-          cabecalho: ['Banda', 'Banda × atraso', 'Escala', 'Sequência dá a volta em'],
+          cabecalho: ['Situação', 'Ida e volta até a capital'],
           linhas: [
-            ['100 Mb/s', '502515 bytes', '3', '343,6 s (sem PAWS)'],
-            ['1 Gb/s', '5025150 bytes', '7', '34,4 s (PAWS)'],
-            ['10 Gb/s', '50251500 bytes', '10', '3,4 s (PAWS)'],
+            ['rede vazia', '40,2 ms'],
+            ['fila de 350 pacotes cheia', '40,2 + 42 = 82,2 ms'],
+            ['fila de 1000 pacotes cheia (bufferbloat)', '40,2 + 120 = 160,2 ms'],
           ],
         },
       },
       {
-        titulo: 'Host rápido e cabeçalho pequeno',
-        texto: ['O caso comum (segmento em ordem, conexão aberta) vai por um caminho curto, sem cópias nem uma interrupção por pacote. Em enlace estreito, o cabeçalho que se repete é compactado: numa voz de 20 bytes, 40 de IP, UDP e RTP viram uns 3, e o aproveitamento sobe de 33 % para 87 %.'],
-        visual: { tipo: 'bits', antes: '20 de voz + 40 de cabeçalho', depois: '20 de voz + 3 de cabeçalho compactado', legenda: 'o que muda de um pacote para o outro é só o número de sequência e a marca de tempo' },
+        titulo: 'Qualidade de experiência',
+        texto: ['A pessoa não vê megabits: vê a imagem demorar, a chamada congelar, a voz chegar atrasada. Um bom número de vazão com fila longa é uma experiência ruim.'],
+        visual: {
+          tipo: 'camadas',
+          camadas: ['tempo até a imagem aparecer', 'quantas vezes congela, e por quanto tempo', 'atraso entre falar e ser ouvido (abaixo de 150 ms, conversa boa)', 'vazão: necessária, mas não suficiente'],
+          rotulo: 'o que a pessoa sente',
+        },
       },
     ],
     checagem: {
@@ -694,38 +680,33 @@ const dia111: Dia = {
         'Que o RTT é alto demais para qualquer TCP passar de 13 Mb/s',
       ],
       certa: 0,
-      explicacao: 'Com 65535 bytes de janela e 40 ms de RTT, uma conexão TCP chega no máximo a uns 13 Mb/s, qualquer que seja o enlace. Várias conexões em paralelo, ou uma janela com escala do tamanho do produto banda × atraso, mostram a capacidade real.',
+      explicacao: 'Com 65535 bytes de janela e 40 ms de RTT, uma conexão TCP chega no máximo a uns 13 Mb/s, qualquer que seja o enlace. Várias conexões em paralelo mostram a capacidade real; uma janela com escala do tamanho do produto banda × atraso resolve para uma conexão só.',
     },
   },
   desafio: {
     carta: [
-      'O especialista que atende o hospital mudou de consultório: agora o caminho até o medidor tem uns 60 ms de ida e volta, já no emulador. Na estação, um técnico de passagem deixou o buffer do receptor em 1 MB "para resolver de vez" e foi embora.',
-      'A vazão de uma conexão só continua horrível, e a direção ameaça de novo com a carta. A operadora também ofereceu, para o ano que vem, um enlace de 10 Gb/s.',
-      'Objetivo: o desempenho do caminho medido, a janela anunciável cobrindo o produto banda × atraso, um teste com várias conexões em que uma só também passa de 80 Mb/s e as perguntas respondidas.',
+      'O especialista que atende o hospital mudou de consultório: agora o caminho até o medidor tem uns 60 ms de ida e volta, já no emulador. A operadora trocou também a fila do rádio por uma de 500 pacotes, e a equipe da videochamada quer saber quanto atraso isso pode somar.',
+      'A direção ameaça de novo com a carta: o teste de 8 conexões que funcionou na semana passada agora não passa de uns 70 Mb/s.',
+      'Objetivo: um teste de velocidade com a configuração de agora somando mais de 80 Mb/s e as três perguntas respondidas.',
     ],
     dicas: [
-      'Um buffer de 1 MB não adianta se o campo de 16 bits continua sem escala: ele para em 65535 bytes.',
-      'Com 60 ms de RTT, o produto passa de 750 mil bytes. Escala 3 anuncia até 524280; escala 4, até 1048560.',
-      'O número de sequência tem 2³² valores, cada um um byte: a 10 Gb/s, 2³² × 8 bits ÷ 10¹⁰ bits por segundo.',
+      'Com 60 ms de RTT, cada conexão traz menos: 65535 × 8 bits ÷ 0,0602 s.',
+      'Divida os 80 Mb/s pelo que cada conexão traz e arredonde para cima. O teste aceita até 16 conexões.',
+      'A fila nova cheia: 500 pacotes de 1500 bytes saindo a 100 Mb/s, 0,12 ms cada.',
     ],
     perguntas: d111D,
-    montar: () => mundoCapital({ semente: 6111, servidor: 'medidor', mbps: RADIO_MBPS, buffer: 500, atraso: 0.03, tcp: { janela: 1000000 } }),
+    montar: () => mundoCapital({ semente: 6111, servidor: 'medidor', mbps: RADIO_MBPS, buffer: 500, atraso: 0.03, escuta: [['tcp', 80]] }),
     objetivo: (m) => {
-      const d = desempenho(m, 50);
       const v = velocidade(m);
       return [
-        item('desempenho do caminho até o medidor medido', !!d, d ? `RTT ${d.rttMs.toFixed(1)} ms, produto ${d.bdpBytes} bytes, ou ${Math.round(bdpCaminho(RADIO_MBPS, d.rttMs))} pela conta` : 'ainda não'),
-        janelaCobre(m, d),
-        item('teste com pelo menos 4 conexões, com a configuração de agora, e uma conexão só acima de 80 Mb/s', !!v && v.fluxos >= 4 && v.umFluxoMbps > 80, v ? `${v.fluxos} conexões: ${v.mbps.toFixed(2)} Mb/s; uma só: ${v.umFluxoMbps.toFixed(2)} Mb/s` : 'nenhum teste com a configuração de agora'),
+        item('teste de velocidade com a configuração de agora somando mais de 80 Mb/s', !!v && v.mbps > 80, v ? `${v.fluxos} conexões: ${v.mbps.toFixed(2)} Mb/s; uma só: ${v.umFluxoMbps.toFixed(2)} Mb/s` : 'nenhum teste com a configuração de agora'),
         ...todasRespondidas(m, d111D),
       ];
     },
     solucao: [
-      ['equip', CLIENTE, 'tr-desempenho', { ip: MEDIDOR }],
-      ['equip', CLIENTE, 'tr-janela', { janela: '1000000', escala: '4' }],
-      ['equip', CLIENTE, 'tr-velocidade', { ip: MEDIDOR, n: '4' }],
+      ['equip', CLIENTE, 'tr-velocidade', { ip: MEDIDOR, n: '12' }],
     ],
-    respostas: { '1': '4', '2': '3,4' },
+    respostas: { '1': '8,71', '2': '10', '3': '60' },
   },
 };
 

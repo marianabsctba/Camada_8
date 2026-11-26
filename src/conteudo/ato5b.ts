@@ -1,5 +1,5 @@
 // Dias do ato 5 (A Conversa), com prática guiada, aula e desafio no próprio dia.
-// Controle de congestionamento e justiça (6.3), UDP, RPC e RTP (6.4) e o TCP por dentro (6.5.1 a 6.5.6),
+// Controle de congestionamento e justiça (6.3), UDP, RPC e RTP (6.4) e o TCP por dentro (6.5.1 a 6.5.3),
 // na sala dos servidores de Fim de Linha.
 
 import { escutar, soquetesDe } from '../motor/transporte';
@@ -678,7 +678,7 @@ const dia105: Dia = {
 };
 
 /* ======================================================================
- * ref 106: TCP por dentro (6.5.1 a 6.5.6)
+ * ref 106: TCP por dentro (6.5.1 a 6.5.3)
  * ====================================================================== */
 
 const VIDEO = '198.51.100.20';
@@ -695,17 +695,16 @@ function mundo106(o: { semente: number; tcp?: Partial<ConfigTcp>; escutas?: ['tc
   });
 }
 
-/** A estação abriu uma conexão com o servidor na porta e, no fim, ficou em TIME_WAIT? */
-function conexaoCompleta(m: Mundo, porta: number): boolean {
+/** A estação abriu uma conexão com o servidor nessa porta? */
+function conexaoAberta(m: Mundo, porta: number): boolean {
   const c = m.flags.conexao;
-  return !!c && c.de === 'telemed' && c.porta === porta && c.resultado === 'aberta' && !!c.fechamento && (c.fechamento.estadosCliente as string[]).includes('TIME_WAIT');
+  return !!c && c.de === 'telemed' && c.porta === porta && c.resultado === 'aberta';
 }
 
 function detalheConexao(m: Mundo): string {
   const c = m.flags.conexao;
   if (!c) return 'nenhuma conexão tentada';
-  if (c.resultado !== 'aberta') return `porta ${c.porta}: ${c.resultado}`;
-  return c.fechamento ? `porta ${c.porta}: aberta e fechada (${(c.fechamento.estadosCliente as string[]).join(', ')})` : `porta ${c.porta}: aberta, ainda não fechada`;
+  return c.resultado === 'aberta' ? `porta ${c.porta}: aberta` : `porta ${c.porta}: ${c.resultado}`;
 }
 
 function transferenciaOk(m: Mundo, porta: number, minimo: number): boolean {
@@ -720,9 +719,12 @@ function detalheTransferencia(m: Mundo): string {
   return `${t.entregues} bytes na porta ${t.porta}, ${t.segmentos} segmentos, ${num(t.vazaoMbps, 2)} Mb/s`;
 }
 
-const d106: Pergunta[] = [numerica('1', 'Quantos bytes tem o cabeçalho TCP do SYN que a estação de telemedicina mandou?', 28, 0)];
+const d106: Pergunta[] = [
+  numerica('1', 'Em quantos segmentos o TCP da estação cortou o exame de 1M (1000000 bytes)?', 685, 0),
+  numerica('2', 'Chegaram os segmentos seq=2001 e seq=3461, com 1460 bytes cada; o seq=4921 se perdeu; chegaram seq=6381 e seq=7841. Que número de confirmação o receptor manda depois do último?', 4921, 0),
+];
 const d106D: Pergunta[] = [
-  numerica('1', 'Com a escala de janela ligada, quantos bytes tem o cabeçalho TCP do SYN da estação?', 32, 0),
+  numerica('1', 'Com o MSS de 1360, em quantos segmentos o exame de 2M (2000000 bytes) sobe?', 1471, 0),
   numerica('2', 'Chegaram os segmentos seq=5001 e seq=6001, com 1000 bytes cada; o seq=7001 se perdeu; chegou o seq=8001, também com 1000 bytes. Que número de confirmação o receptor manda depois deste último?', 7001, 0),
 ];
 
@@ -732,37 +734,36 @@ const dia106: Dia = {
   titulo: 'TCP por dentro',
   chamado: [
     'CHAMADO #0106',
-    'A regional de saúde ligou o servidor novo de videoconsulta, e a estação de telemedicina do hospital só recebe "conexão recusada". O suporte de lá jura que a culpa é daqui e mandou um questionário sobre o TCP, começando pelo tamanho do cabeçalho do SYN.',
-    'Antes de o especialista entrar na primeira consulta, o exame de imagem de 1M precisa subir inteiro pela porta da videoconsulta, a 443.',
-    'Objetivo: o servidor escutando em TCP 443, uma conexão da estação aberta com aperto de mão em três vias e fechada com a estação em TIME_WAIT, a pergunta respondida e o exame de 1M transferido.',
+    'A regional de saúde ligou o servidor novo de videoconsulta, e a estação de telemedicina do hospital só recebe "conexão recusada". O suporte de lá jura que a culpa é daqui e mandou um questionário sobre como o TCP numera e confirma o que manda.',
+    'Antes de o especialista entrar na primeira consulta, o exame de imagem de 1M precisa subir inteiro, por uma conexão aberta com a porta da videoconsulta, a 443.',
+    'Objetivo: o servidor escutando em TCP 443, uma conexão da estação aberta com ele, o exame de 1M enviado por ela e as duas perguntas respondidas.',
   ],
   manual: {
-    titulo: 'O TCP: serviço, protocolo, cabeçalho, abertura e encerramento',
+    titulo: 'O TCP: o serviço que ele dá e o protocolo que o sustenta',
     texto: [
-      'O TCP entrega um fluxo de bytes confiável e em ordem entre dois soquetes. É ponto a ponto: cada conexão tem exatamente duas pontas, nada de mandar para um grupo. É full-duplex: os dois lados mandam ao mesmo tempo, cada sentido com a sua numeração. E é fluxo de bytes, não de mensagens: se a aplicação escreve 300 bytes e depois 200, o outro lado pode ler os 500 de uma vez, ou 100 e depois 400. Quem precisa de fronteira (onde termina uma mensagem) põe a fronteira nos próprios dados.',
-      'Cada byte do fluxo tem um número de sequência de 32 bits, e cada segmento leva o número do seu primeiro byte. A confirmação é acumulativa: o receptor manda no campo de confirmação o número do próximo byte que espera, o que confirma tudo antes dele de uma vez. Se um segmento some no meio, os que chegam depois são guardados, mas a confirmação fica parada no buraco. O tamanho de cada segmento é limitado pelo MSS: no Ethernet, 1500 de MTU menos 20 do IP e 20 do TCP dá 1460 bytes de dados.',
-      'O cabeçalho tem 20 bytes fixos e até 40 de opções. Portas de origem e destino (16 bits cada), número de sequência e número de confirmação (32 bits cada), o tamanho do próprio cabeçalho contado em palavras de 32 bits (4 bits, por isso as opções são completadas até múltiplo de 4), as flags (CWR e ECE do ECN, URG, ACK, PSH, RST, SYN e FIN), a janela (16 bits: quantos bytes o receptor ainda aceita), o checksum (que cobre também um pseudo-cabeçalho com os IPs) e o ponteiro urgente. As opções mais comuns vão no SYN: o MSS, a escala de janela e a permissão de SACK.',
-      'A conexão abre com o aperto de mão em três vias. O servidor está em LISTEN. O cliente manda SYN com o seu número inicial x, sorteado, e vai para SYN_SENT. O servidor responde SYN+ACK com o seu número inicial y e confirmação x+1 (o SYN gasta um número) e vai para SYN_RCVD. O cliente confirma com y+1 e os dois chegam a ESTABLISHED. Se ninguém escuta na porta, o servidor responde RST e o cliente ouve "conexão recusada": a máquina existe, o serviço não.',
-      'Para fechar, cada sentido fecha separado, porque a conexão é full-duplex. Quem fecha primeiro manda FIN e passa por FIN_WAIT_1; com o ACK, FIN_WAIT_2; quando chega o FIN do outro lado, confirma e fica em TIME_WAIT por 2 MSL (duas vezes a vida máxima de um segmento na rede), para que nenhum segmento atrasado desta conexão seja confundido com uma nova. O outro lado passa por CLOSE_WAIT e LAST_ACK. Não existe jeito perfeito de dois lados terem certeza de que o outro sabe que acabou (o problema dos dois exércitos); o TCP se contenta com temporizadores.',
+      'O TCP (Transmission Control Protocol) foi especificado na RFC 793, de 1981, para dar um fluxo confiável por cima de um IP que perde, duplica e embaralha pacotes. Em quatro décadas ganhou dezenas de remendos em RFCs separadas (temporizadores, controle de congestionamento, opções, segurança), e em 2022 a RFC 9293 juntou tudo de novo num texto só, que é a referência de hoje. A ideia não mudou: a aplicação entrega bytes ao TCP, e ele se vira para que cheguem todos, em ordem, do outro lado.',
+      'O serviço é um fluxo de bytes confiável, ponto a ponto e full-duplex. Ponto a ponto: cada conexão tem exatamente duas pontas, nada de grupo ou difusão. Full-duplex: os dois lados mandam ao mesmo tempo, cada sentido com a sua numeração. As pontas são soquetes, e cada conexão é identificada pela quádrupla IP e porta de origem, IP e porta de destino. As portas abaixo de 1024 são as bem conhecidas, de serviços padronizados (22 ssh, 25 correio, 80 web, 443 web segura); de 1024 a 49151, as registradas; de 49152 a 65535, as efêmeras que o sistema sorteia para o cliente (RFC 6335). E é fluxo, não mensagem: se a aplicação escreve 300 bytes e depois 200, o outro lado pode ler os 500 de uma vez, ou 100 e depois 400. Quem precisa de fronteira põe a fronteira nos próprios dados.',
+      'Duas exceções mexem nesse fluxo. A flag PSH pede ao receptor que entregue à aplicação o que já chegou, sem esperar encher o buffer; hoje quase todo sistema marca PSH no fim de cada escrita por conta própria. A flag URG com o ponteiro de urgência marca dados urgentes, como o Ctrl+C de um terminal remoto, que deveriam passar na frente. As implementações nunca concordaram sobre onde termina o dado urgente, e a RFC 6093 recomenda que aplicação nova não use: quem precisa de canal de controle abre outra conexão ou põe isso no protocolo de aplicação.',
+      'Por dentro, cada byte do fluxo tem um número de sequência de 32 bits, e cada segmento leva o número do seu primeiro byte. O número inicial (ISN) não começa em zero: é sorteado a cada conexão (RFC 6528), para que segmentos de uma conexão antiga não caiam numa nova e para que ninguém de fora adivinhe a numeração. A confirmação é acumulativa: o receptor manda o número do próximo byte que espera, o que confirma tudo antes dele de uma vez; se um segmento some no meio, os que chegam depois são guardados, mas a confirmação fica parada no buraco. O tamanho de cada segmento é limitado pelo MSS, o maior pedaço de dados por segmento: no Ethernet, 1500 de MTU menos 20 do IP e 20 do TCP dá 1460. E o receptor anuncia uma janela, quantos bytes ainda aceita além do que confirmou, para que o emissor nunca mande mais do que cabe no buffer dele. Quem não recebe confirmação a tempo retransmite.',
     ],
   },
   dicas: [
     '"Conexão recusada" é RST: a máquina respondeu, mas ninguém escuta na porta. Abra o TCP 443 no video-regional.',
-    'Depois do aperto de mão, "Ver o cabeçalho TCP" na estação mostra o último SYN, com o tamanho do cabeçalho em bytes.',
-    'Feche a conexão a partir da estação ("eu primeiro") e depois transfira 1M para a porta 443.',
+    'Da estação, conecte ao video-regional na 443 e mande o exame de 1M pela conexão aberta ("Enviar dados na conexão").',
+    'São 1000000 bytes em pedaços de até 1460. E a confirmação é sempre o próximo byte esperado: o buraco segura tudo.',
   ],
   perguntas: d106,
   montar: () => mundo106({ semente: 1106 }),
   objetivo: (m) => [
     item('o video-regional escuta em TCP 443', escutando(m, 'video-regional', 'tcp', 443)),
-    item('uma conexão da estação com a porta 443 aberta e fechada, com a estação em TIME_WAIT', conexaoCompleta(m, 443), detalheConexao(m)),
+    item('uma conexão da estação com a porta 443 aberta', conexaoAberta(m, 443), detalheConexao(m)),
+    item('o exame de 1M enviado inteiro pela porta 443', transferenciaOk(m, 443, 1e6), detalheTransferencia(m)),
     ...todasRespondidas(m, d106),
-    item('o exame de 1M transferido inteiro pela porta 443', transferenciaOk(m, 443, 1e6), detalheTransferencia(m)),
   ],
   posMorte: [
-    'A culpa era daqui, sim, mas do lado de lá da rede: o servidor da regional não tinha ninguém escutando na 443, e o TCP dele respondia cada SYN com RST. Bastou o serviço chamar listen para o mesmo SYN virar SYN+ACK. O RST é uma resposta honesta: a máquina existe e está dizendo que não tem ninguém naquela porta. Bem diferente de um SYN sem resposta nenhuma, que fica sendo reenviado até desistir.',
-    'O SYN da estação tem 28 bytes de cabeçalho: 20 fixos e 8 de opções, o MSS de 1460 (4 bytes) e a permissão de SACK (2 bytes), completados até múltiplo de 4. O campo de tamanho diz 7, porque conta palavras de 32 bits. No encerramento, quem fechou primeiro foi a estação, então foi ela que ficou em TIME_WAIT esperando 2 MSL, e não o servidor.',
-    'O exame de 1M virou 685 segmentos de até 1460 bytes, cada um com o número de sequência do primeiro byte que leva. Do outro lado, a aplicação recebeu um fluxo de 1000000 bytes em ordem, sem saber onde cada segmento começava. É esse o serviço: um cano de bytes confiável, com dois sentidos e duas pontas.',
+    'A culpa era daqui, sim, mas do lado de lá da rede: o servidor da regional não tinha ninguém escutando na 443, e o TCP dele respondia cada SYN com RST. Bastou o serviço chamar listen para o mesmo SYN ser atendido. O RST é uma resposta honesta: a máquina existe e está dizendo que não tem ninguém naquela porta. Bem diferente de um SYN sem resposta nenhuma, que fica sendo reenviado até desistir.',
+    'A conexão ficou na tabela da estação como uma quádrupla: 10.50.1.10 com a porta efêmera 49152, de um lado, e 198.51.100.20:443 do outro. Do lado do servidor, o soquete que escuta continuou em LISTEN, e o accept criou outro, só para esta conversa. É a quádrupla que deixa mil estações falarem com a mesma porta 443 sem misturar nada.',
+    'O exame de 1M virou 685 segmentos de até 1460 bytes, cada um com o número de sequência do primeiro byte que leva, a partir do número inicial sorteado. Do outro lado, a aplicação recebeu um fluxo de 1000000 bytes em ordem, sem saber onde cada segmento começava. É esse o serviço: um cano de bytes confiável, com dois sentidos e duas pontas. Amanhã, o cabeçalho que carrega esses números, campo a campo, e como a conexão abre e fecha.',
   ],
   passos: [
     passo({
@@ -791,7 +792,7 @@ const dia106: Dia = {
       pedir: ['proto', 'porta'],
       exemplo: { proto: 'tcp', porta: '443' },
       instrucao: 'No video-regional, abra o serviço de videoconsulta: TCP na porta 443.',
-      porque: 'A "conexão recusada" é o RST de um servidor sem ninguém na porta. Com socket, bind e listen, o soquete vai para LISTEN e o SYN passa a ter quem atenda.',
+      porque: 'A "conexão recusada" é o RST de um servidor sem ninguém na porta. Com socket, bind e listen, o soquete vai para LISTEN e o SYN passa a ter quem atenda. A 443 é a porta bem conhecida da web segura.',
       conferir: (m) => {
         if (escutando(m, 'video-regional', 'tcp', 443)) return true;
         if (escutando(m, 'video-regional', 'udp', 443)) return 'Isso abriu a 443 em UDP. A videoconsulta chega por TCP; as portas dos dois protocolos são independentes.';
@@ -803,55 +804,65 @@ const dia106: Dia = {
       alvo: ['equip', 'telemed'],
       acao: 'tr-conectar',
       valores: { porta: '443' },
-      instrucao: 'Da estação de telemedicina, conecte ao video-regional na porta 443 e acompanhe o aperto de mão.',
-      porque: 'Repare nos números: o SYN+ACK confirma o número inicial do cliente mais 1, e o ACK final confirma o do servidor mais 1. O SYN gasta um número de sequência, mesmo sem levar dados.',
+      instrucao: 'Da estação de telemedicina, conecte ao video-regional na porta 443.',
+      porque: 'Repare no número de sequência do SYN: é o número inicial da estação, sorteado, e não zero. Daqui para a frente, cada byte que ela mandar tem um número contado a partir dele.',
       conferir: (m) => {
         const c = m.flags.conexao;
         if (!c) return 'A conexão ainda não foi tentada.';
         if (c.resultado === 'recusada') return 'Voltou RST: ninguém escuta nessa porta. Confira o serviço do video-regional e a porta 443.';
         return c.resultado === 'aberta' && c.porta === 443 ? true : `A conexão foi para a porta ${c.porta}. A videoconsulta está na 443.`;
       },
-      feito: 'SYN, SYN+ACK, ACK: os dois lados em ESTABLISHED depois de 1 RTT, cada um sabendo o número inicial do outro.',
+      feito: 'Conexão aberta. O sistema escolheu sozinho a porta efêmera 49152 para a estação, e cada lado já sabe o número inicial do outro.',
     }),
     passo({
       alvo: ['equip', 'telemed'],
-      acao: 'tr-cabecalho',
-      instrucao: 'Na estação, veja o cabeçalho TCP do SYN que acabou de sair.',
-      porque: 'O SYN é o segmento com mais opções: é nele que cada lado diz o seu MSS e se aceita SACK e escala de janela.',
-      feito: 'Portas, sequência, confirmação zerada (sem a flag ACK ela não vale), tamanho do cabeçalho, flags, janela, checksum e as opções, byte a byte.',
+      acao: 'tr-soquetes',
+      instrucao: 'Veja a tabela de soquetes da estação.',
+      porque: 'Um soquete TCP conectado é identificado pela quádrupla: IP e porta local, IP e porta remota.',
+      feito: '10.50.1.10:49152 com 198.51.100.20:443, ESTABLISHED. Outra estação na mesma 443 seria outra quádrupla, e o servidor não confunde as duas.',
+    }),
+    passo({
+      alvo: ['equip', 'telemed'],
+      acao: 'tr-enviar',
+      valores: { bytes: '1M' },
+      instrucao: 'Mande o exame de 1M pela conexão aberta.',
+      porque: 'A aplicação entrega 1000000 bytes de uma vez; o TCP corta em segmentos de até 1 MSS, manda dentro da janela e espera as confirmações acumulativas.',
+      conferir: (m) => (transferenciaOk(m, 443, 1e6) ? true : `O exame não subiu inteiro: ${detalheTransferencia(m)}.`),
+      feito: 'Um milhão de bytes em 685 segmentos. Do outro lado, recv devolveu os bytes em ordem, sem buraco e sem saber onde cada segmento começava.',
     }),
     passo({
       pergunta: '1',
-      exemplo: { resposta: '28' },
-      instrucao: 'Quantos bytes tem o cabeçalho TCP desse SYN?',
-      porque: 'São 20 fixos mais as opções: MSS (4 bytes) e SACK permitido (2 bytes), completados até múltiplo de 4, porque o campo de tamanho conta palavras de 32 bits.',
-      feito: '28 bytes: o campo de tamanho diz 7 palavras de 32 bits.',
+      exemplo: { resposta: '685' },
+      instrucao: 'Em quantos segmentos o TCP cortou o exame?',
+      porque: 'Cada segmento leva no máximo 1 MSS de dados: 1460 bytes. Divida e arredonde para cima, porque o último vai menor.',
+      feito: '684 segmentos cheios de 1460 bytes e um último de 1360: 685.',
     }),
     passo({
-      alvo: ['equip', 'telemed'],
-      acao: 'tr-fechar',
-      valores: { modo: 'cliente' },
-      instrucao: 'Feche a conexão a partir da estação, que fecha primeiro.',
-      porque: 'Cada sentido fecha por conta própria: FIN e ACK de um lado, FIN e ACK do outro. Quem fecha primeiro é quem espera no TIME_WAIT.',
-      conferir: (m) => {
-        const f = m.flags.conexao?.fechamento;
-        if (!f) return 'A conexão ainda não foi fechada.';
-        return (f.estadosCliente as string[]).includes('TIME_WAIT') ? true : 'Quem fechou primeiro foi o servidor, então quem ficou em TIME_WAIT foi ele. Feche a partir da estação.';
-      },
-      feito: 'ESTABLISHED, FIN_WAIT_1, FIN_WAIT_2, TIME_WAIT na estação; CLOSE_WAIT e LAST_ACK no servidor. A porta efêmera da estação fica presa por 2 MSL.',
-    }),
-    passo({
-      alvo: ['equip', 'telemed'],
-      acao: 'tr-transferir',
-      valores: { porta: '443', bytes: '1M' },
-      instrucao: 'Transfira o exame de 1M para o video-regional, na porta 443.',
-      porque: 'Conecta, manda e fecha. Cada segmento leva até 1460 bytes, e a confirmação acumulativa diz sempre o próximo byte esperado.',
-      conferir: (m) => (transferenciaOk(m, 443, 1e6) ? true : `O exame não subiu inteiro: ${detalheTransferencia(m)}.`),
-      feito: 'Um milhão de bytes em 685 segmentos. Do outro lado, recv devolveu os bytes em ordem, sem buraco e sem saber onde cada segmento começava.',
+      pergunta: '2',
+      exemplo: { resposta: '4921' },
+      instrucao: 'O seq=4921 se perdeu e chegaram dois segmentos depois dele. Que confirmação o receptor manda depois do último?',
+      porque: 'A confirmação é acumulativa: diz o próximo byte que falta, não o último que chegou.',
+      feito: 'ack=4921, de novo e de novo. Os segmentos 6381 e 7841 ficam guardados no buffer, mas só são confirmados quando o buraco for preenchido. São esses ACKs repetidos que avisam o emissor da perda.',
     }),
   ],
   aula: {
     cartoes: [
+      {
+        titulo: 'Da RFC 793 à RFC 9293',
+        texto: ['O protocolo é o mesmo de 1981; o que mudou foi a quantidade de remendos. A RFC 9293 junta o essencial de volta num documento só.'],
+        visual: {
+          tipo: 'tabela',
+          cabecalho: ['RFC', 'Ano', 'O que trouxe'],
+          linhas: [
+            ['793', '1981', 'o TCP original: sequência, confirmação, janela, aperto de mão'],
+            ['1122', '1989', 'correções e requisitos para os hosts'],
+            ['5681 e 6298', '2009 e 2011', 'controle de congestionamento e o cálculo do RTO'],
+            ['6528', '2012', 'número inicial sorteado, contra adivinhação'],
+            ['7323', '2014', 'escala de janela e marcas de tempo'],
+            ['9293', '2022', 'tudo consolidado: a referência atual'],
+          ],
+        },
+      },
       {
         titulo: 'O serviço: fluxo de bytes, ponto a ponto, full-duplex',
         texto: ['A aplicação escreve quando quer e quanto quer; o TCP numera os bytes e entrega todos, em ordem, do outro lado. Cada conexão tem duas pontas e dois sentidos independentes.'],
@@ -862,8 +873,21 @@ const dia106: Dia = {
         },
       },
       {
+        titulo: 'Soquetes e portas',
+        texto: ['A conexão é a quádrupla. O servidor fica numa porta conhecida; o cliente ganha uma efêmera do sistema.'],
+        visual: {
+          tipo: 'tabela',
+          cabecalho: ['Faixa', 'Para quê', 'Exemplos'],
+          linhas: [
+            ['0 a 1023', 'bem conhecidas, serviços padronizados', '22 ssh, 25 correio, 53 nomes, 80 web, 443 web segura'],
+            ['1024 a 49151', 'registradas', '5004 áudio e vídeo em tempo real'],
+            ['49152 a 65535', 'efêmeras, sorteadas para o cliente', '49152, a primeira da estação'],
+          ],
+        },
+      },
+      {
         titulo: 'Sequência por byte e confirmação acumulativa',
-        texto: ['O número de sequência é o do primeiro byte do segmento. A confirmação é o próximo byte esperado e vale para tudo antes dele. Um buraco segura a confirmação até ser preenchido.'],
+        texto: ['O número de sequência é o do primeiro byte do segmento, contado a partir do número inicial sorteado. A confirmação é o próximo byte esperado e vale para tudo antes dele. Um buraco segura a confirmação até ser preenchido.'],
         visual: {
           tipo: 'tabela',
           cabecalho: ['Segmento que chega', 'Bytes', 'Confirmação devolvida'],
@@ -876,70 +900,25 @@ const dia106: Dia = {
         },
       },
       {
-        titulo: 'O cabeçalho, campo a campo',
-        texto: ['20 bytes fixos e até 40 de opções. O tamanho do cabeçalho vai em palavras de 32 bits: 5 sem opções, até 15 com elas.'],
-        visual: {
-          tipo: 'tabela',
-          cabecalho: ['Campo', 'Bits', 'Para quê'],
-          linhas: [
-            ['portas de origem e destino', '16 + 16', 'que soquete em cada ponta'],
-            ['número de sequência', '32', 'o primeiro byte deste segmento'],
-            ['número de confirmação', '32', 'o próximo byte esperado (com a flag ACK)'],
-            ['tamanho do cabeçalho', '4', 'em palavras de 32 bits'],
-            ['flags', '8', 'CWR, ECE, URG, ACK, PSH, RST, SYN, FIN'],
-            ['janela', '16', 'quantos bytes o receptor ainda aceita'],
-            ['checksum e ponteiro urgente', '16 + 16', 'confere tudo, com os IPs; marca dado urgente'],
-            ['opções', 'até 320', 'MSS, escala de janela, SACK, marca de tempo'],
-          ],
-        },
-      },
-      {
-        titulo: 'Aperto de mão em três vias',
-        texto: ['O SYN e o FIN gastam um número de sequência cada um, mesmo sem dados. Por isso a confirmação do SYN é o número inicial mais 1.'],
-        visual: {
-          tipo: 'diagrama',
-          nos: [
-            { id: 'c1', rotulo: 'cliente: SYN_SENT', x: 80, y: 40 },
-            { id: 's1', rotulo: 'servidor: LISTEN, depois SYN_RCVD', x: 460, y: 110 },
-            { id: 'c2', rotulo: 'cliente: ESTABLISHED', x: 80, y: 180 },
-            { id: 's2', rotulo: 'servidor: ESTABLISHED', x: 460, y: 250 },
-          ],
-          ligacoes: [
-            ['c1', 's1', 'SYN seq=x'],
-            ['s1', 'c2', 'SYN+ACK seq=y ack=x+1'],
-            ['c2', 's2', 'ACK ack=y+1'],
-          ],
-        },
-      },
-      {
-        titulo: 'Encerramento: um sentido de cada vez',
-        texto: ['Quem fecha primeiro espera 2 MSL em TIME_WAIT, para os segmentos atrasados desta conexão morrerem antes que outra igual possa nascer.'],
-        visual: {
-          tipo: 'tabela',
-          cabecalho: ['Segmento', 'Quem fecha primeiro', 'O outro lado'],
-          linhas: [
-            ['FIN', 'FIN_WAIT_1', 'CLOSE_WAIT'],
-            ['ACK do FIN', 'FIN_WAIT_2', 'CLOSE_WAIT'],
-            ['FIN do outro lado', 'TIME_WAIT', 'LAST_ACK'],
-            ['ACK final', 'TIME_WAIT, por 2 MSL', 'CLOSED'],
-          ],
-        },
+        titulo: 'Janela: quanto cabe do outro lado',
+        texto: ['O receptor anuncia quantos bytes ainda aceita além do que confirmou. O emissor pode ter isso em voo, sem esperar confirmação; o que confirma desliza a janela para a frente.'],
+        visual: { tipo: 'janela', total: 12, janela: 4, perdido: 6 },
       },
     ],
     checagem: {
-      pergunta: 'O cliente manda SYN com seq=1000. O que vem no SYN+ACK do servidor?',
-      opcoes: ['ack=1001, e no seq o número inicial do próprio servidor', 'ack=1000, porque o SYN não leva dados', 'ack=2460, um MSS depois', 'seq=1001 e nenhuma confirmação'],
+      pergunta: 'A estação mandou 3000 bytes a partir de seq=1. Chegaram do byte 1 ao 1460 e do 2921 ao 3000; o do meio se perdeu. Que confirmação o receptor manda?',
+      opcoes: ['ack=1461: o próximo byte que falta', 'ack=3001: o fim do que chegou', 'ack=2921: o começo do último pedaço', 'Nenhuma, até chegar tudo'],
       certa: 0,
-      explicacao: 'O SYN gasta um número de sequência. O servidor confirma 1001, o próximo número que espera do cliente, e manda no seq o seu próprio número inicial, sorteado. O cliente vai confirmar esse número mais 1.',
+      explicacao: 'A confirmação acumulativa diz o próximo byte esperado em ordem. O receptor guarda do 2921 ao 3000, mas continua pedindo o 1461 até o buraco ser preenchido.',
     },
   },
   desafio: {
     carta: [
-      'A estação de telemedicina ganhou um buffer de recepção de 1 MiB para as consultas com imagem, e desde então o SYN dela leva também a opção de escala de janela. O suporte da regional quer saber de quanto ficou o cabeçalho.',
-      'Na mesma semana, o servidor de videoconsulta foi reinstalado e voltou só com o site antigo, na porta 80. A estação recebe "conexão recusada" de novo, e há um exame de 2M esperando para subir.',
+      'A regional passou a atender pela rede privada da saúde, num túnel que gasta 100 bytes de cada pacote. Para caber, o MSS da estação desceu para 1360 bytes. O suporte quer saber em quantos segmentos sobe o exame grande, de 2M.',
+      'Na mesma semana, o servidor de videoconsulta foi reinstalado e voltou só com o site antigo, na porta 80. A estação leva "conexão recusada" de novo, e o exame de 2M está esperando.',
       'Objetivo: o video-regional escutando em TCP 443, o exame de 2M transferido por ela e as duas perguntas do suporte respondidas.',
     ],
-    montar: () => mundo106({ semente: 2106, tcp: { janela: 1 << 20, escala: 7 }, escutas: [['tcp', 80, 'site antigo']] }),
+    montar: () => mundo106({ semente: 2106, tcp: { mss: 1360 }, escutas: [['tcp', 80, 'site antigo']] }),
     objetivo: (m) => [
       item('o video-regional escuta em TCP 443', escutando(m, 'video-regional', 'tcp', 443)),
       item('o exame de 2M transferido inteiro pela porta 443', transferenciaOk(m, 443, 2e6), detalheTransferencia(m)),
@@ -947,7 +926,7 @@ const dia106: Dia = {
     ],
     dicas: [
       'Conexão recusada é RST: falta quem escute na 443. A 80 não serve, a videoconsulta usa a 443.',
-      'O SYN agora leva MSS (4 bytes), SACK permitido (2 bytes) e escala de janela (3 bytes). Some aos 20 fixos e complete até múltiplo de 4. "Ver o cabeçalho TCP" depois de conectar confirma.',
+      'São 2000000 bytes em pedaços de no máximo 1360. Divida e arredonde para cima; a transferência mostra o número de segmentos para conferir.',
       'A confirmação é o próximo byte esperado. Se o 7001 não chegou, o receptor continua pedindo por ele, não importa o que chegue depois.',
     ],
     perguntas: d106D,
@@ -955,7 +934,7 @@ const dia106: Dia = {
       ['equip', 'video-regional', 'tr-escutar', { proto: 'tcp', porta: '443' }],
       ['equip', 'telemed', 'tr-transferir', { porta: '443', bytes: '2M' }],
     ],
-    respostas: { '1': '32', '2': '7001' },
+    respostas: { '1': '1471', '2': '7001' },
   },
 };
 
