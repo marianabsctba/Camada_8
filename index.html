@@ -9,9 +9,28 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Fira+Code:wght@400;500&family=Saira+Condensed:wght@500;700;800&display=swap" rel="stylesheet" />
+    <script>
+      // se algo falhar antes da capa aparecer, diga na tela em vez de ficar parado
+      (function () {
+        function avisar(msg) {
+          var app = document.getElementById('app');
+          if (!app || document.querySelector('main')) return;
+          app.innerHTML = '<div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#0b1016;color:#c9d3dc;font-family:system-ui,sans-serif;padding:16px;text-align:center"><div style="font-size:32px;font-weight:800">CAMADA <span style="color:#ff7a1a">8</span></div><div>O jogo não conseguiu abrir. Aperte Ctrl+F5 para buscar a versão nova.</div><code style="color:#ff5d5d;font-size:12px"></code></div>';
+          app.querySelector('code').textContent = msg;
+        }
+        window.addEventListener('error', function (e) { avisar(String(e.message || (e.target && e.target.src) || 'erro')); }, true);
+        window.addEventListener('unhandledrejection', function (e) { avisar(String(e.reason && e.reason.message || e.reason)); });
+      })();
+    </script>
   </head>
-  <body>
-    <div id="app"></div>
+  <body style="margin:0;background:#0b1016">
+    <div id="app">
+      <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#0b1016;color:#c9d3dc;font-family:system-ui,sans-serif">
+        <div style="font-size:44px;font-weight:800;letter-spacing:2px">CAMADA <span style="color:#ff7a1a">8</span></div>
+        <div>Carregando o jogo...</div>
+        <noscript>O jogo precisa de JavaScript ligado no navegador.</noscript>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
