@@ -1,7 +1,7 @@
 // Camada 8: capa, sala em 3D e o modo guiado, passo a passo.
 
 import './ui/estilo.css';
-import { DIAS } from './conteudo/dias';
+import { diaJaCarregado, diaPorNumero, NUMEROS_JOGAVEIS, preCarregarAto } from './conteudo/carregar';
 import { ATOS } from './conteudo/tipos';
 import { camposDoPasso, executarPasso } from './conteudo/guia';
 import { Terminal } from './motor/cli';
@@ -80,6 +80,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string,
 /* ---------- Capa ---------- */
 
 function capa() {
+  ficha++;
   ambiente(null);
   const cores = ['var(--laranja)', 'var(--verde)', 'var(--azul)', 'var(--marrom)'];
   const patch = el('div', { class: 'patch', 'aria-hidden': 'true' });
@@ -127,7 +128,11 @@ function classe(l: string) {
 }
 
 function abrirDia(numero: number) {
-  const dia = DIAS.find((d) => d.numero === numero)!;
+  comDia(numero, praticaDoDia);
+}
+
+function praticaDoDia(dia: Dia) {
+  const numero = dia.numero;
   const term = new Terminal(dia.montar(), dia);
   const passos = dia.passos ?? [];
   ambiente(dia.ato);
@@ -136,19 +141,20 @@ function abrirDia(numero: number) {
 
   const seletor = el('select', { 'aria-label': 'Escolher dia' });
   for (const ato of ATOS) {
-    const dias = DIAS.filter((d) => d.ato === ato.numero);
+    // só metadados do currículo: a lista não obriga a baixar os outros atos
+    const dias = CURRICULO.filter((e) => e.ato === ato.numero && jogavel(e));
     if (!dias.length) continue;
     const grupo = el('optgroup', { label: `Ato ${ato.numero}: ${ato.nome}` });
     for (const d of dias) {
       const liberado = resolvidos.includes(d.numero) || proximaEntrada()?.numero === d.numero;
-      const o = el('option', { value: String(d.numero) }, `${resolvidos.includes(d.numero) ? '● ' : ''}Dia ${d.numero}: ${d.titulo}`);
+      const o = el('option', { value: String(d.numero) }, `${resolvidos.includes(d.numero) ? '● ' : ''}Dia ${d.numero}: ${diaJaCarregado(d.numero)?.titulo ?? d.titulo}`);
       if (!liberado) o.setAttribute('disabled', '');
       if (d.numero === numero) o.setAttribute('selected', '');
       grupo.append(o);
     }
     seletor.append(grupo);
   }
-  seletor.addEventListener('change', () => iniciarDia(DIAS.find((d) => d.numero === Number(seletor.value))!));
+  seletor.addEventListener('change', () => comDia(Number(seletor.value), iniciarDia));
 
   const marca = el('button', { class: 'marca', title: 'Voltar à capa' });
   marca.innerHTML = 'CAMADA <span>8</span>';
@@ -356,33 +362,92 @@ function sairDo3d() {
   soltarMouse();
 }
 
-const jogavel = (e: EntradaCurriculo) => DIAS.some((d) => d.numero === e.numero);
+const jogavel = (e: EntradaCurriculo) => NUMEROS_JOGAVEIS.has(e.numero);
 
 /** Próximo dia jogável ainda não feito, na ordem do currículo. */
 function proximaEntrada(): EntradaCurriculo | undefined {
   return CURRICULO.find((e) => jogavel(e) && !resolvidos.includes(e.numero));
 }
 
-function diaDaEntrada(e: EntradaCurriculo): Dia | undefined {
-  return DIAS.find((d) => d.numero === e.numero);
+/** Muda a cada troca de tela: um ato que chega atrasado não passa por cima da tela que a pessoa já escolheu. */
+let ficha = 0;
+
+/**
+ * Entrega o dia a `seguir` assim que o conteúdo do ato dele estiver no navegador. Se já está, segue
+ * na hora; se demora, mostra um aviso curto de carregando; se a rede falha, explica e deixa tentar de
+ * novo. Depois de abrir, o próximo ato desce em segundo plano.
+ */
+function comDia(numero: number, seguir: (d: Dia) => void) {
+  const minha = ++ficha;
+  const abrir = (d: Dia) => {
+    seguir(d);
+    preCarregarAto(d.ato + 1);
+  };
+  const pronto = diaJaCarregado(numero);
+  if (pronto) return abrir(pronto);
+  const ato = CURRICULO.find((e) => e.numero === numero)?.ato ?? 0;
+  const voltar = () => {
+    const b = el('button', { class: 'botao fantasma' }, 'Voltar ao mapa');
+    b.addEventListener('click', () => mapaTela());
+    return b;
+  };
+  // só aparece se passar de um instante, para não piscar quando o ato chega rápido
+  const aviso = setTimeout(() => {
+    if (minha !== ficha) return;
+    sairDo3d();
+    app.replaceChildren(el('main', { class: 'carta-tela' }, el('div', { class: 'carta' }, el('div', { class: 'etiqueta' }, `Ato ${ato}`), el('p', { class: 'nota', role: 'status' }, 'Carregando...'))));
+  }, 200);
+  diaPorNumero(numero).then(
+    (d) => {
+      clearTimeout(aviso);
+      if (minha === ficha) abrir(d);
+    },
+    (erro: unknown) => {
+      clearTimeout(aviso);
+      if (minha !== ficha) return;
+      console.error(erro);
+      sairDo3d();
+      const tentar = el('button', { class: 'botao' }, 'Tentar de novo');
+      tentar.addEventListener('click', () => comDia(numero, seguir));
+      app.replaceChildren(
+        el(
+          'main',
+          { class: 'carta-tela' },
+          el(
+            'div',
+            { class: 'carta' },
+            el('div', { class: 'etiqueta' }, `Ato ${ato}`),
+            el('h1', {}, 'O conteúdo do dia não chegou'),
+            el('p', {}, 'A conexão caiu no meio do caminho, ou o jogo foi atualizado enquanto esta aba estava aberta.'),
+            el('p', { class: 'nota' }, 'Tente de novo. Se continuar, recarregue a página sem cache (Ctrl+F5, ou Cmd+Shift+R no Mac): o progresso fica guardado.'),
+            el('div', { class: 'linha-botoes' }, tentar, voltar()),
+          ),
+        ),
+      );
+      queueMicrotask(() => tentar.focus());
+    },
+  );
 }
 
 function mapaTela(recente?: number) {
+  ficha++;
   sairDo3d();
   ambiente(null);
   const prox = proximaEntrada();
   const { lugares, casas } = contarConectados(resolvidos);
   const atoAtual = prox?.ato ?? 7;
   preCarregarLugar(atoAtual);
+  preCarregarAto(atoAtual);
   const ato = ATOS[atoAtual]!;
   const marca = el('button', { class: 'marca', title: 'Voltar à capa' });
   marca.innerHTML = 'CAMADA <span>8</span>';
   marca.addEventListener('click', capa);
   const abrir = (e: EntradaCurriculo) => {
-    const d = diaDaEntrada(e);
-    if (!d) return;
-    if (!atosAbertos.includes(e.ato)) aberturaAto(e.ato, () => iniciarDia(d));
-    else iniciarDia(d);
+    if (!jogavel(e)) return;
+    if (atosAbertos.includes(e.ato)) return comDia(e.numero, iniciarDia);
+    // o ato desce enquanto a pessoa lê a abertura
+    preCarregarAto(e.ato);
+    aberturaAto(e.ato, () => comDia(e.numero, iniciarDia));
   };
   const svg = desenharMapa({ feitos: resolvidos, recente, proximo: prox, aoEscolher: abrir });
   const lista = el('ol', { class: 'lista-dias' });

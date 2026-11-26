@@ -92,7 +92,8 @@ const ATO3: Linha[] = [
   ['4.4.1 e 4.4.2', 'Canal lotado', ['padaria'], 16],
   ['4.4.3', 'Pedir a vez no ar', ['praca-3'], 69],
   ['4.4.4 e 4.4.5', 'Associar e autenticar', ['cafe'], 70],
-  ['4.5', 'Bluetooth', ['academia'], 71],
+  ['4.5.1 a 4.5.4', 'Bluetooth', ['academia'], 71],
+  ['4.5.5 a 4.5.7', 'Bluetooth por dentro', ['academia-2'], 130],
   ['4.6', 'DOCSIS por dentro', ['bairro-sul'], 72],
   ['4.7.1 e 4.7.2', 'A ponte que aprende', ['bairro-sul-2'], 73],
   ['4.7.3', 'Matando o laço', ['bairro-sul-3'], 74],
@@ -133,12 +134,14 @@ const ATO5: Linha[] = [
   ['6.2.4 a 6.2.6', 'Fluxo e falhas', ['servidores-3'], 103],
   ['6.3', 'Dividir a banda com justiça', ['servidores-4'], 104],
   ['6.4', 'UDP e tempo real', ['radio-web'], 105],
-  ['6.5.1 a 6.5.6', 'TCP por dentro', ['hospital-video'], 106],
+  ['6.5.1 a 6.5.3', 'TCP por dentro', ['hospital-video'], 106],
+  ['6.5.4 a 6.5.6', 'Cabeçalho, abrir e fechar', ['hospital-video-3'], 129],
   ['6.5.7 e 6.5.8', 'Estados e janela do TCP', ['hospital-video-2'], 107],
   ['6.5.9', 'Timers do TCP', ['fazenda-video'], 108],
   ['6.5.10 e 6.5.11', 'Partida lenta e CUBIC', ['servidores-5'], 109],
   ['6.6', 'QUIC e BBR', ['servidores-6'], 110],
-  ['6.7', 'Medir de verdade', ['servidores-7'], 111],
+  ['6.7.1 a 6.7.4', 'Medir de verdade', ['servidores-7'], 111],
+  ['6.7.5 a 6.7.8', 'Redes rápidas', ['servidores-8'], 128],
 ];
 
 const ATO6: Linha[] = [
@@ -153,13 +156,18 @@ const ATO6: Linha[] = [
 ];
 
 const ATO7: Linha[] = [
-  ['8.1 e 8.2', 'Anatomia de um ataque', ['soc'], 120],
+  ['8.1', 'Princípios da segurança', ['soc-8'], 131],
+  ['8.2', 'Anatomia de um ataque', ['soc'], 120],
   ['8.3', 'Firewall', ['soc-2'], 121],
-  ['8.4 e 8.5', 'Segredos', ['soc-3'], 122],
-  ['8.6 e 8.7', 'Chave pública e assinatura', ['soc-4'], 123],
-  ['8.8 e 8.9', 'Certificados e autenticação', ['soc-5'], 124],
+  ['8.4', 'Segredos', ['soc-3'], 122],
+  ['8.5', 'Chave simétrica', ['soc-9'], 132],
+  ['8.6', 'Chave pública', ['soc-4'], 123],
+  ['8.7', 'Assinaturas e resumos', ['soc-10'], 133],
+  ['8.8', 'Certificados', ['soc-5'], 124],
+  ['8.9', 'Autenticação', ['soc-11'], 134],
   ['8.10', 'VPN e Wi-Fi seguro', ['soc-6'], 125],
-  ['8.11 e 8.12', 'Correio e web seguros', ['soc-7'], 126],
+  ['8.11', 'Correio seguro', ['soc-12'], 135],
+  ['8.12', 'Web segura', ['soc-7'], 126],
   ['8.13', 'O ponto de troca', ['ix'], 127],
 ];
 
