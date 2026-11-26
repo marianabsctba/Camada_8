@@ -7,14 +7,13 @@ Legenda: **287 subseções**: 278 com dia pronto, 9 resumos de capítulo. 181 su
 ## Correções feitas nesta auditoria
 
 - **Sem senha** (recuperar a senha do roteador pelo console) estava na subseção 1.8.3, que trata segurança como questão social. Virou o **prólogo** do jogo (dia 0): a chegada ao galpão com o roteador trancado. A 1.8.3 a 1.8.5 ganhou um dia próprio.
-- **Canal lotado** (canais do Wi-Fi em 2,4 GHz) estava na 2.2.1, que é o espectro eletromagnético em geral. Foi para a 4.4.1 e 4.4.2 (camada física do Wi-Fi), onde o assunto mora. A 2.2.1 ganhou um dia próprio.
+- **Canal lotado** (canais do Wi-Fi em 2,4 GHz) estava na 2.2.1, que é o espectro eletromagnético em geral. Foi para a 4.4.1 e 4.4.2 (arquitetura e camada física do Wi-Fi), onde o assunto mora, e ganhou a arquitetura do 802.11 (BSS, ESS, IBSS, pilha, varredura, autenticação e associação) e as camadas físicas do 802.11b ao 802.11ax, com modulação adaptativa. A 2.2.1 ganhou um dia próprio.
 - **PPP no último quilômetro** cobria só a 3.5.1. A 3.5.2 e 3.5.3 (o enlace do ADSL e do cabo) ganharam um dia próprio.
 - **Duas casas, um cabo** continua na 1.3.1 a 1.3.3: a aula ensina rede pessoal, local e doméstica, e a prática mostra o que define uma rede local (hosts que falam direto, sem roteador). Fica registrado que a prática adianta o endereçamento IP, aprofundado depois em 5.7.2.
 - Os dias de par trançado e de OTDR ensinam a seção e vão além dela com prática de campo (crimpagem, MDI-X, limite de 100 m, ruído, fusão). Isso é acréscimo, não troca de conteúdo.
 
 ## Ainda falta
 
-- Reforçar a arquitetura do 802.11 (4.4.1) no dia Canal lotado.
 - Subseções agrupadas podem ganhar um dia só delas quando o conteúdo pedir.
 
 ## Capítulo 1
@@ -149,8 +148,8 @@ Legenda: **287 subseções**: 278 com dia pronto, 9 resumos de capítulo. 181 su
 | 4.3.7 | 66: De 100 mega a 100 giga | pronta e fiel, agrupada |
 | 4.3.8 | 66: De 100 mega a 100 giga | pronta e fiel, agrupada |
 | 4.3.9 | 66: De 100 mega a 100 giga | pronta e fiel, agrupada |
-| 4.4.1 | 67: Canal lotado | pronta, parcial: cobre a camada física do Wi-Fi (canais); a arquitetura do 802.11 ainda pede reforço |
-| 4.4.2 | 67: Canal lotado | pronta, parcial: cobre a camada física do Wi-Fi (canais); a arquitetura do 802.11 ainda pede reforço |
+| 4.4.1 | 67: Canal lotado | pronta e fiel, agrupada |
+| 4.4.2 | 67: Canal lotado | pronta e fiel, agrupada |
 | 4.4.3 | 68: Pedir a vez no ar | pronta e fiel |
 | 4.4.4 | 69: Associar e autenticar | pronta e fiel |
 | 4.4.5 | 69: Associar e autenticar | pronta e fiel |

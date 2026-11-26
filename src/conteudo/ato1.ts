@@ -1,10 +1,11 @@
 // Ato 1: O Poste. Camada física, do par trançado ao satélite.
 
 import { wiremap } from '../motor/fisico';
-import { adicionar, aparelho, comutador, ligar, novoMundo, pc, TRANSCEPTORES, type Equipamento } from '../motor/mundo';
-import { avaliarE1, avaliarModem, snrWifi, type UsoSlot } from '../motor/aparelhos';
+import { adicionar, aparelho, comutador, ligar, novoMundo, pc, TRANSCEPTORES, type Equipamento, type Mundo } from '../motor/mundo';
+import { avaliarE1, avaliarModem, snrWifi, type EstadoAp, type UsoSlot } from '../motor/aparelhos';
 import { coaxDados, radioDados } from '../motor/fisico';
-import { lerCidr, LUZ } from '../motor/util';
+import { modulacaoAdaptativa, type TaxaWifi } from '../motor/mac';
+import { fmt, lerCidr, LUZ } from '../motor/util';
 import { enlace, item, numerica, pingOk, respondida, todasRespondidas } from './comum';
 import type { Dia, Pergunta } from './tipos';
 
@@ -544,51 +545,66 @@ const perguntas16: Pergunta[] = [
   },
 ];
 
+/** A rede da padaria: um BSS de infraestrutura, com o AP em 802.11g. O BSSID é o MAC do rádio do AP. */
+export const SSID_PADARIA = 'PADARIA_PAO_QUENTE';
+export const BSSID_PADARIA = '02:00:5e:16:00:01';
+export const estadoApPadaria = (): EstadoAp => ({
+  canal: 1,
+  sinalCliente: -55,
+  ruidoDbm: -95,
+  vizinhos: [
+    { nome: 'CASA_DA_TIA_2.4', canal: 1, dbm: -50 },
+    { nome: 'Bar do Zé Clientes', canal: 2, dbm: -80 },
+    { nome: 'Vizinho_Sem_Senha', canal: 10, dbm: -80 },
+    { nome: 'ImpressoraJatoDeTinta_SETUP', canal: 11, dbm: -55 },
+  ],
+});
+
+/** Taxa que o cliente 802.11g consegue com a SNR atual (modulação adaptativa), ou null se nem associa. */
+export const taxaClienteWifi = (m: Mundo, ap = 'ap') => modulacaoAdaptativa(snrWifi(m.equipamentos.get(ap)!.s as any).snr);
+const textoTaxa = (t: TaxaWifi | null) => (t ? `${fmt(t.mbps, t.mbps % 1 ? 1 : 0)} Mb/s em ${t.modulacao} ${t.codificacao}` : 'SNR baixa demais: nem associa');
+
 const dia16: Dia = {
   numero: 16,
   ato: 1,
   titulo: 'Canal lotado',
   chamado: [
     'CHAMADO #0016',
-    'O ponto de acesso da padaria está no canal 1, de fábrica. O Wi-Fi "funciona, mas não funciona". Ao redor tem uma dúzia de redes de vizinhos.',
-    'Objetivo: SNR de 25 dB ou mais no cliente, e responder a pergunta do chamado.',
+    `O ponto de acesso da padaria, rede "${SSID_PADARIA}", está no canal 1, de fábrica. O Wi-Fi "funciona, mas não funciona": o celular vê a rede e não consegue ficar nela. Ao redor tem uma dúzia de redes de vizinhos.`,
+    'Objetivo: SNR de 25 dB ou mais no cliente, o cliente a 54 Mb/s, e responder a pergunta do chamado.',
   ],
   manual: {
-    titulo: 'Espectro em 2,4 GHz',
+    titulo: 'Wi-Fi: arquitetura e camada física',
     texto: [
-      'A faixa de 2,4 GHz tem canais numerados de 1 a 13, separados de 5 MHz. Mas cada transmissão ocupa uns 22 MHz. Canais próximos se atropelam.',
-      'Só três canais não se sobrepõem: 1, 6 e 11. Rede em canal 3 ou 9 atrapalha dois desses de uma vez.',
+      `Modo infraestrutura: os aparelhos (estações) falam com um ponto de acesso (AP). AP e estações formam um BSS, identificado pelo BSSID, que é o MAC do rádio do AP (aqui, ${BSSID_PADARIA}). O SSID é o nome da rede, o que aparece na lista do celular.`,
+      'Vários APs com o mesmo SSID, ligados por um sistema de distribuição (em geral, um switch), formam um ESS: o celular troca de AP sem trocar de rede (roaming, com reassociação). No modo ad hoc não há AP: as estações falam direto, num IBSS.',
+      'O 802.11 cobre a camada física e a subcamada MAC da camada de enlace. Em cima vem o LLC (802.2), igual ao da Ethernet, que entrega os dados ao IP. Uma MAC só, várias camadas físicas embaixo.',
+      'Para entrar na rede, a estação acha o AP (varredura passiva, ouvindo o beacon que ele manda a cada 102,4 ms, ou ativa, mandando probe request e ouvindo o probe response), autentica e associa.',
+      'Camadas físicas: 802.11b (DSSS, 1 a 11 Mb/s, 2,4 GHz); 802.11a e g (OFDM, até 54 Mb/s, em 5 e 2,4 GHz); 802.11n (MIMO e canais de 40 MHz, até 600 Mb/s); 802.11ac (só 5 GHz, 80 e 160 MHz, MU-MIMO na descida); 802.11ax (OFDMA, em 2,4, 5 e 6 GHz). O rádio escolhe a modulação pela SNR: sinal limpo, 64-QAM; sinal sujo, BPSK.',
+      'A faixa de 2,4 GHz tem canais de 1 a 13, separados de 5 MHz, mas cada transmissão ocupa uns 22 MHz. Só três canais não se sobrepõem: 1, 6 e 11.',
       'SNR é a distância entre o sinal que interessa e tudo o que não interessa (ruído de fundo + interferência). A interferência de um vizinho conta pela fração do canal dele que cai dentro do seu.',
-      'Ferramentas: "espectro" no campo; "canal <n>" e "mostra" no console do AP.',
+      'Ferramentas: "espectro" no campo (lista as redes que anunciam beacon em cada canal); "canal <n>" e "mostra" no console do AP.',
     ],
   },
   dicas: ['"espectro": veja onde estão os vizinhos fortes.', 'Procure o canal que fique a 5 canais ou mais dos vizinhos fortes.', 'console ap; canal 6'],
   perguntas: perguntas16,
   montar: () => {
     const m = novoMundo(116);
-    adicionar(
-      m,
-      aparelho('ap', 'ap', 'Ponto de acesso 2,4 GHz da padaria', [{ nome: 'lan' }], {
-        canal: 1,
-        sinalCliente: -55,
-        ruidoDbm: -95,
-        vizinhos: [
-          { nome: 'CASA_DA_TIA_2.4', canal: 1, dbm: -50 },
-          { nome: 'Bar do Zé Clientes', canal: 2, dbm: -80 },
-          { nome: 'Vizinho_Sem_Senha', canal: 10, dbm: -80 },
-          { nome: 'ImpressoraJatoDeTinta_SETUP', canal: 11, dbm: -55 },
-        ],
-      }),
-    );
+    const ap = aparelho('ap', 'ap', `Ponto de acesso 802.11g da padaria, rede "${SSID_PADARIA}"`, [{ nome: 'lan' }], { ...estadoApPadaria(), ssid: SSID_PADARIA, bssid: BSSID_PADARIA });
+    adicionar(m, ap);
+    ap.mac = BSSID_PADARIA;
     return m;
   },
   objetivo: (m) => {
     const r = snrWifi(m.equipamentos.get('ap')!.s as any);
-    return [item('SNR de 25 dB ou mais no cliente', r.snr >= 25, `${r.snr.toFixed(1)} dB`), respondida(m, perguntas16[0]!)];
+    const t = taxaClienteWifi(m);
+    return [item('SNR de 25 dB ou mais no cliente', r.snr >= 25, `${r.snr.toFixed(1)} dB`), item('cliente associado a 54 Mb/s', t?.mbps === 54, textoTaxa(t)), respondida(m, perguntas16[0]!)];
   },
   posMorte: [
-    'No canal 1 a padaria disputava com a casa da tia, que chegava mais forte que o próprio AP. SNR negativa: o cliente ouvia mais a tia que a padaria.',
+    'No canal 1 a padaria disputava com a casa da tia, que chegava mais forte que o próprio AP. SNR negativa: o celular pegava o beacon da padaria nos intervalos em que a tia ficava quieta e achava a rede, mas com a tia falando por cima não sustentava nem a taxa mais baixa do 802.11g (6 Mb/s em BPSK).',
     'Canais 5 e 7 parecem livres no analisador, mas ficam a 4 canais de vizinhos fortes e herdam a borda deles. O 6 fica a 5 canais do 1 e do 11: sobreposição zero.',
+    `No canal 6 a SNR foi para ${fmt(snrWifi({ ...estadoApPadaria(), canal: 6 }).snr, 1)} dB e a modulação adaptativa subiu até o teto do 802.11g: ${textoTaxa(modulacaoAdaptativa(snrWifi({ ...estadoApPadaria(), canal: 6 }).snr))}.`,
+    `A rede da padaria é um BSS de infraestrutura: um AP (BSSID ${BSSID_PADARIA}) e os celulares associados a ele. Um segundo AP nos fundos, com o mesmo SSID e ligado pelo mesmo switch, viraria um ESS, de preferência no canal 1 ou 11 para não brigar com o primeiro.`,
     'Em 5 GHz há muito mais canais sem sobreposição. No ato 3 você volta aqui, com o Wi-Fi inteiro.',
   ],
 };

@@ -329,7 +329,7 @@ function acoesConsole(m: Mundo, e: Equipamento): Acao[] {
     case 'ap':
       a.push(
         { id: 'canal', rotulo: 'Trocar o canal', ajuda: 'Canais de 2,4 GHz vão de 1 a 13, espaçados de 5 MHz, mas cada um ocupa 22 MHz.', contexto: ctx, campos: [escolha('canal', 'Canal', Array.from({ length: 13 }, (_, i) => op(String(i + 1), `canal ${i + 1} (${2412 + 5 * i} MHz)`)), String(e.s.canal))], comandos: (v) => [`canal ${v.canal}`, 'mostra'] },
-        { id: 'espectro', rotulo: 'Analisador de espectro', ajuda: 'Mostra as redes vizinhas, o canal e a potência de cada uma.', comandos: () => ['espectro'] },
+        { id: 'espectro', rotulo: 'Analisador de espectro', ajuda: 'Mostra as redes vizinhas que anunciam beacon, o canal e a potência de cada uma: é a varredura passiva, canal por canal.', comandos: () => ['espectro'] },
         { id: 'mostra', rotulo: 'Ver SNR no cliente', ajuda: 'Sinal, ruído mais interferência e a SNR resultante.', contexto: ctx, comandos: () => ['mostra'] },
       );
       break;

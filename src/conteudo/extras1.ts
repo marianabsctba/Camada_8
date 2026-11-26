@@ -5,7 +5,8 @@ import { avaliar, coaxDados, radioDados } from '../motor/fisico';
 import { avaliarE1, avaliarModem, snrWifi, type UsoSlot } from '../motor/aparelhos';
 import { adicionar, aparelho, comutador, ligar, novoMundo, pc, TRANSCEPTORES, type Equipamento } from '../motor/mundo';
 import { lerCidr, LUZ } from '../motor/util';
-import { enlace, item, numerica, pingOk, respondida } from './comum';
+import { taxaClienteWifi } from './ato1';
+import { enlace, item, numerica, pingOk, respondida, todasRespondidas } from './comum';
 import type { Extra } from './extras';
 import type { Pergunta } from './tipos';
 
@@ -26,7 +27,14 @@ const p11: Pergunta[] = [numerica('1', 'O eco da emenda ruim volta 18,36 µs dep
 const p13: Pergunta[] = [numerica('1', 'Qual a capacidade de Shannon desta linha (2400 Hz, 24 dB), em kb/s?', (2400 * Math.log2(1 + 10 ** 2.4)) / 1000, 0.3)];
 const p14: Pergunta[] = [numerica('1', 'Com 18 canais de voz, quantos kb/s sobram para dados no E1?', 768, 0)];
 const p15: Pergunta[] = [numerica('1', 'Qual o raio da 1ª zona de Fresnel no meio do enlace de 14 km a 5,8 GHz, em metros?', 8.657 * Math.sqrt(14 / 5.8), 0.2)];
-const p16: Pergunta[] = [numerica('1', 'Qual a frequência central, em MHz, do único canal que serve na sorveteria?', 2472, 0)];
+const p16: Pergunta[] = [
+  numerica('1', 'Qual a frequência central, em MHz, do único canal que serve na sorveteria?', 2472, 0),
+  {
+    id: '2',
+    texto: 'Dois APs com o mesmo SSID, cada um com o seu BSSID, ligados pelo mesmo switch: que sigla o 802.11 dá a esse conjunto?',
+    confere: (r) => /^\s*(o\s+|um\s+)?ess\b/i.test(r) || /conjunto (de servi[çc]o )?estendido/i.test(r),
+  },
+];
 const p18: Pergunta[] = [numerica('1', 'Quanto tempo a luz leva para subir até um satélite de órbita média (8.062 km) e descer de volta, em ms?', ((2 * 8062e3) / LUZ) * 1000, 1)];
 
 export const EXTRAS1: Record<number, Extra> = {
@@ -1108,10 +1116,82 @@ export const EXTRAS1: Record<number, Extra> = {
     aula: {
       cartoes: [
         {
+          titulo: 'BSS, ESS e o sistema de distribuição',
+          texto: [
+            'No modo infraestrutura, cada aparelho é uma estação e fala com um ponto de acesso (AP). O AP e as estações associadas a ele formam um BSS, identificado pelo BSSID: o MAC do rádio do AP. O SSID é o nome da rede.',
+            'Vários BSS com o mesmo SSID, ligados por um sistema de distribuição (SD, quase sempre um switch), formam um ESS. A estação anda de um AP para outro e se reassocia sem trocar de rede: roaming.',
+            'No modo ad hoc não tem AP: as estações falam direto, num IBSS. Serve para juntar dois aparelhos às pressas, não para atender uma padaria.',
+          ],
+          visual: {
+            tipo: 'diagrama',
+            nos: [
+              { id: 'c1', rotulo: 'celular', x: 70, y: 40 },
+              { id: 'c2', rotulo: 'notebook', x: 70, y: 200 },
+              { id: 'ap1', rotulo: 'AP da frente', x: 200, y: 120 },
+              { id: 'sw', rotulo: 'switch (SD)', x: 300, y: 40 },
+              { id: 'ap2', rotulo: 'AP dos fundos', x: 400, y: 120 },
+              { id: 'c3', rotulo: 'maquininha', x: 530, y: 200 },
+            ],
+            ligacoes: [
+              ['c1', 'ap1', 'BSS 1'],
+              ['c2', 'ap1', 'BSS 1'],
+              ['ap1', 'sw', 'cabo'],
+              ['sw', 'ap2', 'cabo'],
+              ['c3', 'ap2', 'BSS 2'],
+            ],
+          },
+        },
+        {
+          titulo: 'Onde o 802.11 mora na pilha',
+          texto: [
+            'O 802.11 define a camada física e a subcamada MAC da camada de enlace. Por cima vem o LLC (802.2), o mesmo da Ethernet, que entrega os dados ao IP sem saber se vieram pelo ar.',
+            'Uma MAC só, várias camadas físicas embaixo: trocar de 802.11g para 802.11ax é trocar o rádio, não o jeito de entrar na rede.',
+          ],
+          visual: { tipo: 'camadas', camadas: ['rede: IP', 'enlace, subcamada LLC: 802.2', 'enlace, subcamada MAC: 802.11', 'física: 802.11b, a, g, n, ac, ax'], rotulo: 'o Wi-Fi na pilha, de cima para baixo' },
+        },
+        {
+          titulo: 'Achar, autenticar, associar',
+          texto: [
+            'Varredura passiva: a estação escuta o beacon, que cada AP manda a cada 102,4 ms com o SSID, o BSSID e as taxas. Varredura ativa: a estação manda um probe request e os APs respondem com um probe response.',
+            'Achada a rede, dois passos: autenticação (no sistema aberto, só "posso?" e "pode") e associação, em que o AP dá um número à estação (o AID) e passa a encaminhar os quadros dela. A senha do WPA2 ou WPA3 vem depois.',
+          ],
+          visual: {
+            tipo: 'tabela',
+            cabecalho: ['Quadro de gerenciamento', 'Quem manda', 'Subtipo'],
+            linhas: [
+              ['beacon', 'AP, para todos', '8'],
+              ['probe request', 'estação, para todos', '4'],
+              ['probe response', 'AP, para a estação', '5'],
+              ['authentication', 'os dois, um de cada vez', '11'],
+              ['association request', 'estação', '0'],
+              ['association response', 'AP', '1'],
+            ],
+          },
+        },
+        {
+          titulo: 'As camadas físicas do 802.11',
+          texto: [
+            'Cada geração trocou o rádio. No OFDM, a taxa é subportadoras de dados × bits por subportadora × codificação ÷ duração do símbolo: no 802.11g, 48 × 6 × 3/4 ÷ 4 µs = 54 Mb/s.',
+            'O rádio escolhe a modulação pela SNR (modulação adaptativa): com sinal limpo, 64-QAM e 54 Mb/s; com sinal sujo, BPSK e 6 Mb/s; abaixo disso, nem associa.',
+          ],
+          visual: {
+            tipo: 'tabela',
+            cabecalho: ['Padrão', 'Faixa', 'Técnica', 'Teto'],
+            linhas: [
+              ['802.11b', '2,4 GHz', 'DSSS, 22 MHz', '11 Mb/s'],
+              ['802.11a', '5 GHz', 'OFDM, 20 MHz', '54 Mb/s'],
+              ['802.11g', '2,4 GHz', 'OFDM, 20 MHz', '54 Mb/s'],
+              ['802.11n', '2,4 e 5 GHz', 'MIMO, até 40 MHz', '600 Mb/s'],
+              ['802.11ac', '5 GHz', '80 e 160 MHz, MU-MIMO na descida', 'uns 6,9 Gb/s'],
+              ['802.11ax', '2,4, 5 e 6 GHz', 'OFDMA, MU-MIMO', 'uns 9,6 Gb/s'],
+            ],
+          },
+        },
+        {
           titulo: 'Treze canais, três sem briga',
           texto: [
-            'A faixa de 2,4 GHz tem canais de 1 a 13, com centros separados de 5 MHz. Mas cada transmissão ocupa uns 22 MHz: mais de quatro canais de largura.',
-            'Por isso só três canais não se sobrepõem entre si: 1, 6 e 11.',
+            'A faixa de 2,4 GHz tem canais de 1 a 13, com centros separados de 5 MHz. Mas cada transmissão ocupa uns 22 MHz: mais de quatro canais de largura. Por isso só três canais não se sobrepõem entre si: 1, 6 e 11. No OFDM do g e do n o canal tem 20 MHz, e 1, 5, 9 e 13 até caberiam; mas as bordas vazam e ainda tem 802.11b na rua, então o costume ficou 1, 6 e 11.',
+            'A interferência de um vizinho conta pela fração do canal dele que cai dentro do seu: 1 - (distância em canais × 5) ÷ 22. A 1 canal, 77 %; a 2, 55 %; a 3, 32 %; a 4, 9 %; a 5 ou mais, zero.',
           ],
           visual: {
             tipo: 'espectro',
@@ -1123,26 +1203,10 @@ export const EXTRAS1: Record<number, Extra> = {
           },
         },
         {
-          titulo: 'Quanto um vizinho invade',
-          texto: ['A interferência de um vizinho conta pela fração do canal dele que cai dentro do seu: 1 - (distância em canais × 5) ÷ 22. A partir de 5 canais de distância, zero.'],
-          visual: {
-            tipo: 'tabela',
-            cabecalho: ['Distância em canais', 'Fração que invade'],
-            linhas: [
-              ['0 (mesmo canal)', '100 %'],
-              ['1', '77 %'],
-              ['2', '55 %'],
-              ['3', '32 %'],
-              ['4', '9 %'],
-              ['5 ou mais', '0 %'],
-            ],
-          },
-        },
-        {
-          titulo: 'SNR: o que interessa contra o resto',
+          titulo: 'SNR, armadilha e exceção',
           texto: [
             'SNR é a distância, em dB, entre o sinal do seu AP no cliente e tudo o que não interessa: ruído de fundo mais a interferência dos vizinhos.',
-            'Canal "vazio" no analisador pode ser uma armadilha: se fica a 3 ou 4 canais de um vizinho forte, herda a borda dele.',
+            'Canal "vazio" no analisador pode ser uma armadilha: se fica a 3 ou 4 canais de um vizinho forte, herda a borda dele. E 1, 6 e 11 é regra de bolso: quando a vizinhança é bagunçada, vale a conta, mesmo que dê um canal fora dos três famosos.',
           ],
           visual: {
             tipo: 'espectro',
@@ -1153,36 +1217,32 @@ export const EXTRAS1: Record<number, Extra> = {
             ],
           },
         },
-        {
-          titulo: 'Regra de bolso e exceção',
-          texto: ['1, 6 e 11 é uma boa regra quando todo mundo segue. Quando a vizinhança é bagunçada, o que vale é a conta: procure o canal que fique a 5 canais ou mais dos vizinhos fortes, mesmo que ele não seja um dos três famosos.'],
-        },
       ],
       checagem: {
-        pergunta: 'Seu AP está no canal 6 e um vizinho forte está no canal 9. Quanto do canal dele cai dentro do seu?',
-        opcoes: ['Nada', 'Uns 32 %', 'Metade', 'Tudo'],
+        pergunta: 'A padaria pôs um segundo AP nos fundos, com o mesmo SSID, ligado ao mesmo switch. O que a rede virou?',
+        opcoes: ['Um BSS só, porque o SSID é o mesmo', 'Um ESS: dois BSS, cada um com o seu BSSID, e o celular faz roaming entre eles', 'Uma rede ad hoc (IBSS)', 'Duas redes que o celular precisa escolher na mão'],
         certa: 1,
-        explicacao: 'São 3 canais de distância: 1 - (3 × 5) ÷ 22 ≈ 0,32. Para não sobrar nada, precisaria de 5 canais.',
+        explicacao: 'Cada AP forma o seu BSS, com o próprio BSSID. O mesmo SSID e o sistema de distribuição (o switch) juntam os dois num ESS: para o celular, uma rede só, e ele se reassocia ao AP mais forte.',
       },
     },
     desafio: {
       carta: [
-        'O AP da sorveteria da praça está no canal 11. Ao redor tem o Wi-Fi da prefeitura no 1, uma lan house no 4 e um decodificador de TV berrando no 8.',
-        'O dono já trocou de canal "uns dez", sem sorte. Nenhum dos três canais famosos resolve.',
-        'Objetivo: SNR de 25 dB ou mais no cliente, e responder a pergunta do chamado.',
+        `O AP da sorveteria da praça, rede "SORVETE_DE_FIBRA", está no canal 11. Ao redor tem o Wi-Fi da prefeitura no 1, uma lan house no 4 e um decodificador de TV berrando no 8.`,
+        'O dono já trocou de canal "uns dez", sem sorte. Nenhum dos três canais famosos resolve. E ele quer saber como pôr um segundo AP no fundo da sorveteria sem o celular do cliente cair no caminho.',
+        'Objetivo: SNR de 25 dB ou mais no cliente, o cliente a 54 Mb/s, e responder as perguntas do chamado.',
       ],
       dicas: [
         'Abra o analisador de espectro e anote o canal e a força de cada vizinho.',
         'Procure um canal a 5 canais ou mais de todos os vizinhos fortes. Os canais vão até 13.',
-        'Canal 13, em 2472 MHz: fica a 5 canais do 8 e longe do resto.',
+        'Canal 13, em 2472 MHz: fica a 5 canais do 8 e longe do resto. Dois APs com o mesmo SSID, ligados pelo mesmo switch, formam um ESS.',
       ],
       perguntas: p16,
-      respostas: { '1': '2472' },
+      respostas: { '1': '2472', '2': 'ESS' },
       montar: () => {
         const m = novoMundo(1516);
         adicionar(
           m,
-          aparelho('ap', 'ap', 'Ponto de acesso 2,4 GHz da sorveteria', [{ nome: 'lan' }], {
+          aparelho('ap', 'ap', 'Ponto de acesso 802.11g da sorveteria, rede "SORVETE_DE_FIBRA"', [{ nome: 'lan' }], {
             canal: 11,
             sinalCliente: -55,
             ruidoDbm: -95,
@@ -1197,7 +1257,8 @@ export const EXTRAS1: Record<number, Extra> = {
       },
       objetivo: (m) => {
         const r = snrWifi(m.equipamentos.get('ap')!.s as any);
-        return [item('SNR de 25 dB ou mais no cliente', r.snr >= 25, `${r.snr.toFixed(1)} dB`), respondida(m, p16[0]!)];
+        const t = taxaClienteWifi(m);
+        return [item('SNR de 25 dB ou mais no cliente', r.snr >= 25, `${r.snr.toFixed(1)} dB`), item('cliente associado a 54 Mb/s', t?.mbps === 54, t ? `${t.mbps} Mb/s em ${t.modulacao} ${t.codificacao}` : 'nem associa'), ...todasRespondidas(m, p16)];
       },
       solucao: [['equip', 'ap', 'canal', { canal: '13' }]],
     },

@@ -33,7 +33,8 @@ describe('modo guiado', () => {
       [8, 1, { meio: 'cat6' }, /55 m/],
       [10, 2, { modelo: 'LX-10' }, /1550/],
       [13, 2, { baud: '6000', mod: 'qam64' }, /Shannon/],
-      [16, 2, { canal: '7' }, /SNR/],
+      [16, 1, { resposta: '2' }, /BSSID/],
+      [16, 8, { canal: '7' }, /SNR/],
       [18, 2, { orbita: 'meo' }, /100 ms/],
     ];
     for (const [n, idx, escolha, re] of casos) {

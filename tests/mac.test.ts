@@ -1,7 +1,16 @@
 // Ato 3: subcamada MAC, switch que aprende, spanning tree e VLANs.
 import { describe, expect, it } from 'vitest';
 import {
+  bssidIbss,
+  CAMADAS_FISICAS_80211,
+  canaisSemSobreposicao,
   canal,
+  entrarNaRede,
+  frequenciaCanal24,
+  INTERVALO_BEACON_MS,
+  modulacaoAdaptativa,
+  TAXAS_80211AG,
+  TAXAS_80211B,
   eficienciaBitmap,
   eficienciaEthernet,
   eficienciaToken,
@@ -245,5 +254,53 @@ describe('VLANs', () => {
     executarAcao(t, vlan, { ...padroes(vlan), porta: 'p1', id: '30' });
     expect(m.equipamentos.get('sw1')!.portas[0]!.vlan).toBe(30);
     expect(ping(m, 'a', ip('192.0.2.2')).recebidos).toBe(0);
+  });
+});
+
+describe('802.11: arquitetura e camadas físicas', () => {
+  const bss = { ssid: 'Padaria', bssid: '02:00:5e:10:00:01', canal: 6, modo: 'infraestrutura' as const };
+  it('estação entra no BSS: acha, autentica e associa', () => {
+    const passiva = entrarNaRede(bss, '02:00:5e:20:00:02', 'passiva');
+    expect(passiva.map((p) => p.quadro)).toEqual(['beacon', 'authentication', 'authentication', 'association request', 'association response']);
+    expect(passiva[0]!.subtipo).toBe(8);
+    expect(passiva[0]!.para).toBe('ff:ff:ff:ff:ff:ff');
+    const ativa = entrarNaRede(bss, '02:00:5e:20:00:02', 'ativa');
+    expect(ativa.slice(0, 2).map((p) => [p.quadro, p.subtipo])).toEqual([
+      ['probe request', 4],
+      ['probe response', 5],
+    ]);
+    expect(ativa.at(-1)!.de).toBe(bss.bssid);
+    expect(entrarNaRede({ ...bss, modo: 'ad-hoc' }, 'x', 'passiva')).toEqual([]);
+    expect(INTERVALO_BEACON_MS).toBeCloseTo(102.4, 6);
+  });
+  it('BSSID de IBSS é individual e administrado localmente', () => {
+    const b = bssidIbss(rngSemente(3));
+    const primeiro = parseInt(b.slice(0, 2), 16);
+    expect(b).toMatch(/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/);
+    expect(primeiro & 1).toBe(0);
+    expect(primeiro & 2).toBe(2);
+  });
+  it('taxas máximas saem da conta do OFDM', () => {
+    expect(CAMADAS_FISICAS_80211['802.11b'].taxaMaxMbps).toBe(11);
+    expect(CAMADAS_FISICAS_80211['802.11a'].taxaMaxMbps).toBe(54);
+    expect(CAMADAS_FISICAS_80211['802.11g'].taxaMaxMbps).toBe(54);
+    expect(CAMADAS_FISICAS_80211['802.11n'].taxaMaxMbps).toBeCloseTo(600, 6);
+    expect(CAMADAS_FISICAS_80211['802.11ac'].taxaMaxMbps).toBeCloseTo(6933.3, 1);
+    expect(CAMADAS_FISICAS_80211['802.11ax'].taxaMaxMbps).toBeCloseTo(9607.8, 1);
+    expect(TAXAS_80211AG.map((t) => t.mbps)).toEqual([6, 9, 12, 18, 24, 36, 48, 54]);
+  });
+  it('modulação adaptativa acompanha a SNR', () => {
+    expect(modulacaoAdaptativa(31.7)!.mbps).toBe(54);
+    expect(modulacaoAdaptativa(20)!.mbps).toBe(36);
+    expect(modulacaoAdaptativa(10)!.modulacao).toBe('QPSK');
+    expect(modulacaoAdaptativa(-5)).toBeNull();
+    expect(modulacaoAdaptativa(9, TAXAS_80211B)!.mbps).toBe(5.5);
+  });
+  it('canais de 2,4 GHz: 1, 6 e 11 com 22 MHz', () => {
+    expect(canaisSemSobreposicao()).toEqual([1, 6, 11]);
+    expect(canaisSemSobreposicao(20, 13)).toEqual([1, 5, 9, 13]);
+    expect(frequenciaCanal24(1)).toBe(2412);
+    expect(frequenciaCanal24(13)).toBe(2472);
+    expect(frequenciaCanal24(14)).toBe(2484);
   });
 });

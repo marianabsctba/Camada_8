@@ -379,3 +379,166 @@ export function simularCanal(s: EstadoMac, rng: () => number): ResultadoMac {
   ];
   return { protocolo: s.protocolo, vazao: S, colisoes: col, formula, linhas };
 }
+
+/* ---------- 802.11: arquitetura (IEEE 802.11-2020, cláusula 4) ---------- */
+
+/**
+ * Infraestrutura: as estações falam com um ponto de acesso, que forma um BSS (conjunto básico de serviço)
+ * identificado pelo BSSID, o MAC do rádio do AP. Vários BSS com o mesmo SSID, ligados por um sistema de
+ * distribuição (em geral um switch Ethernet), formam um ESS, e a estação passa de um AP para outro sem
+ * trocar de rede (roaming, com reassociação). Ad hoc: um IBSS, estações falando direto, sem AP; o BSSID
+ * é sorteado, com o bit de administração local ligado (IEEE 802.11-2020, campo BSSID do cabeçalho).
+ */
+export type ModoWifi = 'infraestrutura' | 'ad-hoc';
+
+/** Quadros de gerenciamento: tipo 0 no campo de controle, com estes subtipos (IEEE 802.11-2020, 9.2.4.1.3). */
+export const SUBTIPOS_GERENCIAMENTO = {
+  'association request': 0,
+  'association response': 1,
+  'reassociation request': 2,
+  'reassociation response': 3,
+  'probe request': 4,
+  'probe response': 5,
+  beacon: 8,
+  disassociation: 10,
+  authentication: 11,
+  deauthentication: 12,
+} as const;
+
+export type QuadroGerenciamento = keyof typeof SUBTIPOS_GERENCIAMENTO;
+
+/** Unidade de tempo do 802.11 (TU): 1024 µs. O beacon sai, por padrão, a cada 100 TU. */
+export const TU_US = 1024;
+export const INTERVALO_BEACON_MS = (100 * TU_US) / 1000;
+
+export const BROADCAST_MAC = 'ff:ff:ff:ff:ff:ff';
+
+export interface Bss {
+  ssid: string;
+  bssid: string;
+  canal: number;
+  modo: ModoWifi;
+}
+
+export interface PassoEntrada {
+  quadro: QuadroGerenciamento;
+  subtipo: number;
+  de: string;
+  para: string;
+  explicacao: string;
+}
+
+/** BSSID de um IBSS: 46 bits sorteados, bit individual/grupo em 0 e bit local em 1, como manda o padrão para o IBSS. */
+export function bssidIbss(rng: () => number): string {
+  const b = Array.from({ length: 6 }, () => Math.floor(rng() * 256));
+  b[0] = (b[0]! & 0xfc) | 0x02;
+  return b.map((x) => x.toString(16).padStart(2, '0')).join(':');
+}
+
+/**
+ * Como uma estação entra num BSS de infraestrutura: acha a rede (varredura passiva, ouvindo o beacon,
+ * ou ativa, mandando probe request), autentica (sistema aberto: dois quadros) e associa, recebendo
+ * o identificador de associação (AID). Num IBSS não há AP nem associação. Cifra (WPA2/WPA3) fica para depois.
+ */
+export function entrarNaRede(bss: Bss, estacao: string, varredura: 'passiva' | 'ativa', aid = 1): PassoEntrada[] {
+  if (bss.modo === 'ad-hoc') return [];
+  const q = (quadro: QuadroGerenciamento, de: string, para: string, explicacao: string): PassoEntrada => ({ quadro, subtipo: SUBTIPOS_GERENCIAMENTO[quadro], de, para, explicacao });
+  const achar =
+    varredura === 'passiva'
+      ? [q('beacon', bss.bssid, BROADCAST_MAC, `o AP anuncia "${bss.ssid}" no canal ${bss.canal}, a cada ${fmt(INTERVALO_BEACON_MS, 1)} ms; a estação só escuta`)]
+      : [
+          q('probe request', estacao, BROADCAST_MAC, `a estação pergunta, no canal ${bss.canal}, quem atende "${bss.ssid}" (ou qualquer rede, com SSID vazio)`),
+          q('probe response', bss.bssid, estacao, 'o AP responde com o SSID, as taxas que aceita e o canal'),
+        ];
+  return [
+    ...achar,
+    q('authentication', estacao, bss.bssid, 'sistema aberto, sequência 1: a estação pede para se autenticar'),
+    q('authentication', bss.bssid, estacao, 'sequência 2: o AP aceita (a senha, se houver, vem depois, no WPA2 ou WPA3)'),
+    q('association request', estacao, bss.bssid, `a estação pede para entrar no BSS ${bss.bssid}`),
+    q('association response', bss.bssid, estacao, `o AP aceita e dá o AID ${aid}; daqui em diante o AP encaminha os quadros dela`),
+  ];
+}
+
+/* ---------- 802.11: camadas físicas (IEEE 802.11-2020, cláusulas 15 a 21, e 802.11ax-2021) ---------- */
+
+export type PadraoWifi = '802.11b' | '802.11a' | '802.11g' | '802.11n' | '802.11ac' | '802.11ax';
+
+export interface CamadaFisica80211 {
+  padrao: PadraoWifi;
+  faixas: string;
+  tecnica: string;
+  /** Larguras de canal, em MHz. */
+  larguras: number[];
+  /** Fluxos espaciais (MIMO). */
+  fluxos: number;
+  taxaMaxMbps: number;
+}
+
+/** Taxa de uma camada física OFDM, em Mb/s: fluxos × subportadoras de dados × bits por subportadora × codificação ÷ duração do símbolo em µs. */
+export function taxaOfdm(subportadorasDados: number, bitsPorSimbolo: number, codificacao: number, simboloUs: number, fluxos = 1): number {
+  return (fluxos * subportadorasDados * bitsPorSimbolo * codificacao) / simboloUs;
+}
+
+export const CAMADAS_FISICAS_80211: Record<PadraoWifi, CamadaFisica80211> = {
+  // DSSS com código de Barker (1 e 2 Mb/s) e CCK (5,5 e 11 Mb/s), canal de 22 MHz.
+  '802.11b': { padrao: '802.11b', faixas: '2,4 GHz', tecnica: 'DSSS (Barker e CCK)', larguras: [22], fluxos: 1, taxaMaxMbps: 11 },
+  // 48 subportadoras de dados, símbolo de 4 µs, 64-QAM 3/4.
+  '802.11a': { padrao: '802.11a', faixas: '5 GHz', tecnica: 'OFDM', larguras: [20], fluxos: 1, taxaMaxMbps: taxaOfdm(48, 6, 3 / 4, 4) },
+  '802.11g': { padrao: '802.11g', faixas: '2,4 GHz', tecnica: 'OFDM (e DSSS para conversar com o b)', larguras: [20], fluxos: 1, taxaMaxMbps: taxaOfdm(48, 6, 3 / 4, 4) },
+  // 108 subportadoras em 40 MHz, 64-QAM 5/6, intervalo de guarda curto (símbolo de 3,6 µs), 4 fluxos.
+  '802.11n': { padrao: '802.11n', faixas: '2,4 e 5 GHz', tecnica: 'OFDM com MIMO', larguras: [20, 40], fluxos: 4, taxaMaxMbps: taxaOfdm(108, 6, 5 / 6, 3.6, 4) },
+  // 468 subportadoras em 160 MHz, 256-QAM 5/6, símbolo de 3,6 µs, 8 fluxos; MU-MIMO só na descida.
+  '802.11ac': { padrao: '802.11ac', faixas: '5 GHz', tecnica: 'OFDM com MIMO e MU-MIMO na descida', larguras: [20, 40, 80, 160], fluxos: 8, taxaMaxMbps: taxaOfdm(468, 8, 5 / 6, 3.6, 8) },
+  // 1960 subportadoras em 160 MHz, 1024-QAM 5/6, símbolo de 12,8 µs + 0,8 µs de guarda, 8 fluxos.
+  '802.11ax': { padrao: '802.11ax', faixas: '2,4, 5 e 6 GHz', tecnica: 'OFDMA com MU-MIMO nos dois sentidos', larguras: [20, 40, 80, 160], fluxos: 8, taxaMaxMbps: taxaOfdm(1960, 10, 5 / 6, 13.6, 8) },
+};
+
+export interface TaxaWifi {
+  mbps: number;
+  modulacao: string;
+  codificacao: string;
+  /** SNR mínima aproximada para essa taxa, em dB. Aproximação de bancada: o padrão fixa sensibilidade, não SNR. */
+  snrMin: number;
+}
+
+const ofdm = (bits: number, cod: number, codTxt: string, modulacao: string, snrMin: number): TaxaWifi => ({ mbps: taxaOfdm(48, bits, cod, 4), modulacao, codificacao: codTxt, snrMin });
+
+/** As oito taxas do OFDM de 20 MHz do 802.11a e do 802.11g (IEEE 802.11-2020, tabela 17-4). */
+export const TAXAS_80211AG: TaxaWifi[] = [
+  ofdm(1, 1 / 2, '1/2', 'BPSK', 5),
+  ofdm(1, 3 / 4, '3/4', 'BPSK', 7),
+  ofdm(2, 1 / 2, '1/2', 'QPSK', 9),
+  ofdm(2, 3 / 4, '3/4', 'QPSK', 11),
+  ofdm(4, 1 / 2, '1/2', '16-QAM', 15),
+  ofdm(4, 3 / 4, '3/4', '16-QAM', 18),
+  ofdm(6, 2 / 3, '2/3', '64-QAM', 22),
+  ofdm(6, 3 / 4, '3/4', '64-QAM', 25),
+];
+
+/** As quatro taxas do 802.11b (IEEE 802.11-2020, cláusulas 15 e 16). */
+export const TAXAS_80211B: TaxaWifi[] = [
+  { mbps: 1, modulacao: 'DBPSK com Barker', codificacao: '11 chips por bit', snrMin: 2 },
+  { mbps: 2, modulacao: 'DQPSK com Barker', codificacao: '11 chips por símbolo', snrMin: 5 },
+  { mbps: 5.5, modulacao: 'CCK', codificacao: '4 bits por símbolo', snrMin: 8 },
+  { mbps: 11, modulacao: 'CCK', codificacao: '8 bits por símbolo', snrMin: 11 },
+];
+
+/** Modulação adaptativa: o rádio usa a taxa mais alta que a SNR aguenta. Abaixo da mais baixa, não associa. */
+export function modulacaoAdaptativa(snrDb: number, tabela: TaxaWifi[] = TAXAS_80211AG): TaxaWifi | null {
+  let melhor: TaxaWifi | null = null;
+  for (const t of tabela) if (snrDb >= t.snrMin && (!melhor || t.mbps > melhor.mbps)) melhor = t;
+  return melhor;
+}
+
+/** Frequência central de um canal de 2,4 GHz, em MHz: 2407 + 5n, de 1 a 13; o 14 (só no Japão, só 802.11b) fica em 2484. */
+export function frequenciaCanal24(n: number): number {
+  return n === 14 ? 2484 : 2407 + 5 * n;
+}
+
+/** Canais de 2,4 GHz sem sobreposição, do 1 em diante, para canais da largura dada (centros a 5 MHz). */
+export function canaisSemSobreposicao(larguraMhz = 22, ultimo = 11): number[] {
+  const passo = Math.ceil(larguraMhz / 5);
+  const out: number[] = [];
+  for (let c = 1; c <= ultimo; c += passo) out.push(c);
+  return out;
+}

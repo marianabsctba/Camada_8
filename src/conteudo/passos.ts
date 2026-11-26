@@ -3,9 +3,15 @@
 import { avaliarE1, avaliarModem, snrWifi } from '../motor/aparelhos';
 import { avaliar, coaxDados, radioDados, wiremap } from '../motor/fisico';
 import type { Mundo } from '../motor/mundo';
-import { ipTexto, mesmaRede } from '../motor/util';
+import { modulacaoAdaptativa } from '../motor/mac';
+import { fmt, ipTexto, mesmaRede } from '../motor/util';
+import { BSSID_PADARIA, estadoApPadaria, SSID_PADARIA } from './ato1';
 import { registroPing } from './comum';
 import type { Passo } from './tipos';
+
+/** SNR e taxa do cliente da padaria no canal 6, direto do motor. */
+const SNR_PADARIA_6 = snrWifi({ ...estadoApPadaria(), canal: 6 }).snr;
+const TAXA_PADARIA_6 = modulacaoAdaptativa(SNR_PADARIA_6)!;
 
 const SENHA_ANTIGA = 'Xq7!pindorama';
 const T568B = 'branco-laranja laranja branco-verde azul branco-azul verde branco-marrom marrom';
@@ -654,11 +660,101 @@ export const PASSOS: Record<number, Passo[]> = {
   /* ---------- Dia 16: Canal lotado ---------- */
   16: [
     {
+      escolha: {
+        opcoes: ['Infraestrutura: os celulares falam com o AP, e o AP com o resto da rede', 'Ad hoc: os celulares falam direto um com o outro', 'Ponto a ponto, como o rádio do morro', 'Nenhum: Wi-Fi não tem arquitetura, é só rádio'],
+        certa: 0,
+        errada: {
+          1: 'Ad hoc (um IBSS) é quando não há AP nenhum e as estações conversam entre si. Na padaria tudo passa pelo AP.',
+          2: 'O enlace do morro liga dois rádios fixos com antenas apontadas. Aqui é um AP atendendo vários celulares que entram e saem.',
+          3: 'O 802.11 define quem é estação, quem é AP e como uma entra na rede da outra. Isso é arquitetura.',
+        },
+      },
+      exemplo: { resposta: '0' },
+      instrucao: 'Os celulares dos clientes usam o Wi-Fi da padaria para chegar na internet. Em que modo do 802.11 essa rede funciona?',
+      porque: 'O 802.11 tem dois modos: infraestrutura, com um ponto de acesso (AP) no meio, e ad hoc, com as estações falando direto. Cada aparelho que usa o Wi-Fi é uma estação.',
+      feito: `Infraestrutura. O AP e os celulares associados a ele formam um BSS, o conjunto básico de serviço. O AP também é a ponte entre o ar e o cabo da padaria.`,
+    },
+    {
+      escolha: {
+        opcoes: [`O SSID é "${SSID_PADARIA}", o nome da rede; o BSSID é ${BSSID_PADARIA}, o MAC do rádio do AP`, `O SSID é ${BSSID_PADARIA} e o BSSID é o nome da rede`, 'SSID e BSSID são a mesma coisa, escrita de dois jeitos', `O BSSID é o endereço IP do AP`],
+        certa: 0,
+        errada: {
+          1: 'Ao contrário: SSID é o nome que aparece na lista do celular; BSSID é um endereço de 48 bits, igual a um MAC.',
+          2: 'Dois APs podem anunciar o mesmo SSID, mas cada um tem o seu BSSID. É assim que o celular sabe com qual AP está falando.',
+          3: 'O BSSID vive na camada de enlace: é o MAC do rádio do AP, e vai no cabeçalho de todo quadro do BSS. IP é outra camada.',
+        },
+      },
+      exemplo: { resposta: '0' },
+      instrucao: 'Qual é o SSID e qual é o BSSID da rede da padaria?',
+      porque: 'O SSID é o nome que a pessoa escolhe para a rede. O BSSID identifica o BSS no cabeçalho dos quadros: no modo infraestrutura, é o MAC do rádio do AP.',
+      feito: `SSID "${SSID_PADARIA}", BSSID ${BSSID_PADARIA}. O nome é para gente; o BSSID é para os quadros.`,
+    },
+    {
+      escolha: {
+        opcoes: ['O mesmo SSID nos dois, ligados pelo mesmo switch: um ESS, e o celular troca de AP sem trocar de rede', 'Um SSID diferente em cada AP, senão os dois brigam pelo nome', 'Os dois APs no mesmo canal, para o celular nem perceber a troca', 'Ligar o AP dos fundos no da frente pelo ar, em modo ad hoc'],
+        certa: 0,
+        errada: {
+          1: 'Com SSIDs diferentes, o celular acha que são duas redes: cai na troca e a pessoa tem que escolher na mão.',
+          2: 'No mesmo canal os dois APs disputam o ar e se atrapalham. APs vizinhos ficam em canais sem sobreposição, como 1 e 6.',
+          3: 'Ad hoc é estação com estação, sem AP. O que liga APs é o sistema de distribuição, quase sempre um switch Ethernet.',
+        },
+      },
+      exemplo: { resposta: '0' },
+      instrucao: 'O dono quer um segundo AP nos fundos, e que o celular não caia quando o cliente anda até lá. Como montar?',
+      porque: 'Vários BSS com o mesmo SSID, ligados por um sistema de distribuição, formam um ESS (conjunto estendido de serviço). Para quem usa, é uma rede só.',
+      feito: 'Um ESS: dois BSS, dois BSSIDs, um SSID. Quando o sinal do AP da frente enfraquece, o celular se reassocia ao dos fundos. Isso é roaming.',
+    },
+    {
+      escolha: {
+        opcoes: ['Camada física e subcamada MAC da camada de enlace, com o LLC (802.2) por cima', 'Só a camada física: o resto é igual à Ethernet', 'Camada de rede, porque o AP entrega o celular à internet', 'Camada de transporte, porque o Wi-Fi retransmite quadro perdido'],
+        certa: 0,
+        errada: {
+          1: 'O 802.11 tem MAC própria (CSMA/CA, quadros com confirmação, gerenciamento da associação). Só o LLC de cima é o mesmo da Ethernet.',
+          2: 'Quem roteia é o roteador da padaria, na camada de rede. O AP é uma ponte da camada de enlace: troca quadro 802.11 por quadro Ethernet.',
+          3: 'O Wi-Fi confirma cada quadro entre vizinhos, na camada de enlace. Transporte é conversa de ponta a ponta, entre programas.',
+        },
+      },
+      exemplo: { resposta: '0' },
+      instrucao: 'Onde o 802.11 se encaixa no modelo de camadas?',
+      porque: 'A família 802 divide a camada de enlace em duas: a subcamada MAC (quem fala quando, e como é o quadro) e o LLC, comum a todas. O 802.11 define a MAC e várias camadas físicas embaixo dela.',
+      feito: 'Física e MAC. Em cima, o LLC entrega os dados ao IP sem saber se vieram pelo ar ou pelo cabo. Por isso o 802.11b, o g e o ax trocam o rádio e mantêm a mesma MAC.',
+    },
+    {
       instrucao: 'Abra o analisador de espectro no ponto de acesso.',
-      porque: 'Wi-Fi divide o ar com os vizinhos. O analisador mostra quem está em qual canal e com que força.',
+      porque: 'Wi-Fi divide o ar com os vizinhos. Cada AP anuncia a própria rede num quadro chamado beacon, uns 10 por segundo. Ouvir os beacons canal por canal é a varredura passiva.',
       alvo: ['equip', 'ap'],
       acao: 'espectro',
-      feito: 'Tem vizinho forte nos canais 1 e 11, e fracos no 2 e no 10. A padaria está no 1, disputando com a casa da tia.',
+      feito: 'Cada linha é um BSS vizinho, achado pelo beacon. Tem vizinho forte nos canais 1 e 11, e fracos no 2 e no 10. A padaria está no 1, disputando com a casa da tia.',
+    },
+    {
+      escolha: {
+        opcoes: ['Um probe request; quem atende responde com um probe response', 'Um association request para cada AP da rua', 'Um ping para o endereço de broadcast', 'Nada: só dá para esperar o beacon'],
+        certa: 0,
+        errada: {
+          1: 'Associar é o último passo, e só com o AP escolhido. Antes, o celular precisa saber quem está por perto.',
+          2: 'O celular ainda nem tem endereço IP. Achar a rede é trabalho da camada de enlace, com quadros de gerenciamento do 802.11.',
+          3: 'Esperar o beacon é a varredura passiva. Tem também a ativa, mais rápida.',
+        },
+      },
+      exemplo: { resposta: '0' },
+      instrucao: 'O celular de um cliente quer achar as redes sem esperar o beacon de cada canal. O que ele manda?',
+      porque: 'O beacon sai a cada 100 unidades de tempo de 1024 µs: 102,4 ms. Esperar isso em cada canal demora. Na varredura ativa, o celular pergunta.',
+      feito: 'Varredura ativa: probe request (para um SSID ou para qualquer um), e cada AP responde com um probe response. A passiva só escuta; a ativa pergunta.',
+    },
+    {
+      escolha: {
+        opcoes: ['Autenticação e depois associação', 'Associação e depois autenticação', 'Só associação: autenticação é a senha, e a padaria pode não ter senha', 'Beacon e depois probe request'],
+        certa: 0,
+        errada: {
+          1: 'O AP só aceita associar uma estação já autenticada. A ordem é autenticar, depois associar.',
+          2: 'Mesmo em rede aberta tem autenticação: a do sistema aberto, dois quadros que só dizem "posso?" e "pode". A senha (WPA2 ou WPA3) vem depois da associação.',
+          3: 'Beacon e probe servem para achar a rede. Depois de achar, ainda falta entrar nela.',
+        },
+      },
+      exemplo: { resposta: '0' },
+      instrucao: 'Achada a rede da padaria, em que ordem o celular entra nela?',
+      porque: 'Entrar num BSS tem dois passos de gerenciamento, cada um com pedido e resposta. Só depois do último o AP passa a encaminhar os quadros da estação.',
+      feito: 'Autenticação (sistema aberto, dois quadros) e associação (pedido e resposta, com o número de associação, o AID). Daí em diante o celular é uma estação do BSS.',
     },
     {
       pergunta: '1',
@@ -679,6 +775,44 @@ export const PASSOS: Record<number, Passo[]> = {
         return r.snr >= 25 || `SNR de ${r.snr.toFixed(0)} dB: esse canal ainda pega a borda de um vizinho forte (1 ou 11). Fique a 5 canais deles.`;
       },
       feito: 'Canal 6: a 5 canais do 1 e do 11, sem sobreposição. SNR acima de 30 dB.',
+    },
+    {
+      instrucao: 'Veja a SNR no cliente.',
+      porque: 'Quem decide a taxa é a SNR: o rádio olha o quanto o sinal se destaca do ruído e escolhe a modulação mais densa que aguenta.',
+      alvo: ['equip', 'ap'],
+      acao: 'mostra',
+      conferir: (m) => snrWifi(m.equipamentos.get('ap')!.s as any).snr >= 25 || 'A SNR ainda está abaixo de 25 dB. Volte e troque o canal.',
+      feito: `SNR de ${fmt(SNR_PADARIA_6, 1)} dB no canal 6, contra ${fmt(snrWifi(estadoApPadaria()).snr, 1)} dB no canal 1.`,
+    },
+    {
+      escolha: {
+        opcoes: ['54 Mb/s em 64-QAM 3/4, o teto do 802.11g', '6 Mb/s em BPSK, por segurança', '11 Mb/s em CCK, como o 802.11b', '600 Mb/s, porque o canal ficou limpo'],
+        certa: 0,
+        errada: {
+          1: 'BPSK é para sinal sujo: 1 bit por subportadora. Com SNR acima de 25 dB, o rádio sobe até 64-QAM, 6 bits por subportadora.',
+          2: 'CCK é a camada física do 802.11b. O AP da padaria é 802.11g, que usa OFDM.',
+          3: '600 Mb/s é do 802.11n, com quatro fluxos MIMO e canal de 40 MHz. O 802.11g tem um fluxo e canal de 20 MHz.',
+        },
+      },
+      exemplo: { resposta: '0' },
+      instrucao: `O AP da padaria é 802.11g. Com ${fmt(SNR_PADARIA_6, 1)} dB de SNR, a que taxa o celular fica?`,
+      porque: 'No OFDM do 802.11a e do g, a taxa é 48 subportadoras de dados × bits por subportadora × codificação ÷ 4 µs por símbolo. Cada modulação precisa de uma SNR mínima: uns 5 dB para BPSK 1/2 (6 Mb/s), uns 25 dB para 64-QAM 3/4 (54 Mb/s).',
+      feito: `${fmt(TAXA_PADARIA_6.mbps, 0)} Mb/s: 48 × 6 × 3/4 ÷ 4 µs. No canal 1, com SNR negativa, não sustentava nem 6 Mb/s. Isso é modulação adaptativa: a taxa desce e sobe com a SNR.`,
+    },
+    {
+      escolha: {
+        opcoes: ['802.11ax: OFDMA reparte o canal entre vários clientes de uma vez, em 2,4, 5 e 6 GHz', '802.11ac: só 5 GHz, canais de 80 e 160 MHz, MU-MIMO na descida', '802.11n: MIMO e canais de 40 MHz, até 600 Mb/s', '802.11b: DSSS, até 11 Mb/s'],
+        certa: 0,
+        errada: {
+          1: 'O ac é rápido, mas só em 5 GHz, e o MU-MIMO dele só atende vários clientes na descida. Quem reparte o canal em pedaços (OFDMA) é o ax.',
+          2: 'O n trouxe o MIMO e o canal de 40 MHz, mas atende um cliente por vez.',
+          3: 'O b é de 1999: DSSS, até 11 Mb/s. Um cliente lento desses ainda segura o ar para todo mundo.',
+        },
+      },
+      exemplo: { resposta: '0' },
+      instrucao: 'No sábado de manhã tem 40 celulares na fila do pão. O dono pergunta que AP comprar para atender muita gente ao mesmo tempo. Qual padrão?',
+      porque: 'Cada geração do 802.11 trocou a camada física e manteve a MAC: b (DSSS), a e g (OFDM), n (MIMO), ac (canais largos e MU-MIMO na descida), ax (OFDMA).',
+      feito: 'O 802.11ax divide o canal em blocos de subportadoras (unidades de recurso) e dá um bloco para cada cliente no mesmo quadro, na subida e na descida. Com 40 celulares mandando pouco cada um, isso rende mais que canal largo.',
     },
   ],
 
