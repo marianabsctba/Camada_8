@@ -31,7 +31,9 @@ import {
   type TunelVpn,
 } from './filtro';
 import {
+  abrirEsp,
   associarWifi,
+  bytesDoMundo,
   cadeiaDoServidor,
   chavesPgp,
   conferirCadeia,
@@ -40,6 +42,7 @@ import {
   espDe,
   idChave,
   linhasIke,
+  montarCebola,
   quebrarAperto,
   relogio,
   segredosEm,
@@ -47,12 +50,21 @@ import {
   visaoDoFarejador,
   wifiDe,
   type ApertoWifi,
+  type PontoCebola,
   type ConfigWifi,
   type TipoCertificado,
 } from './seguranca';
 import {
+  aesGcmCifrar,
+  aesGcmDecifrar,
   assinarMensagem,
+  bitsDe,
   cesar,
+  deHex,
+  hexCurto,
+  paraHex,
+  sha256Bytes,
+  textoParaBytes,
   diffieHellman,
   ehPrimo,
   gerarChavesRsa,
@@ -486,7 +498,7 @@ function cmdWifiPc(m: Mundo, e: Equipamento, args: string[]): Saida {
       if (!a) return ['Ninguém se associou desde que você chegou. Espere alguém conectar, ou "wifi desautenticar <ssid>".'];
       e.s.capturaWifi = { ...a };
       anotarFlag(m, 'ataque', { tipo: 'wifi-captura', de: e.nome, ssid, seguranca: a.seguranca });
-      return [`Capturado o aperto de mão de ${ssid}: ANonce ${a.anonce}, SNonce ${a.snonce}, MACs ${a.macAp} e ${a.macCliente}${a.mic ? `, MIC ${a.mic.slice(0, 16)}...` : ' (WPA3: o que passou no ar não dá para testar senha fora dali)'}.`];
+      return [`Capturado o aperto de mão de ${ssid}: ANonce ${a.anonce.slice(0, 16)}..., SNonce ${a.snonce.slice(0, 16)}..., MACs ${a.macAp} e ${a.macCliente}${a.mic ? `, MIC ${a.mic}` : ' (WPA3: o que passou no ar não dá para testar senha fora dali)'}.`];
     }
     case 'quebrar': {
       const a = e.s.capturaWifi as ApertoWifi | undefined;
@@ -664,12 +676,17 @@ function cmdVpn(m: Mundo, e: Equipamento, args: string[]): Saida {
     const u = t.ultimo;
     const dentro = `IP ${u.origem} > ${u.destino} protocolo ${u.protocolo}, ${u.tamanho} bytes`;
     const hex = espDe(t, dentro, t.contadores.cifrados);
-    anotarFlag(m, 'vpn', { ...(m.flags.vpn ?? {}), captura: { externo: u.externo, protocolo: 50, legivel: false, cifrado: hex.slice(0, 48) } });
+    // um byte trocado no caminho: o ICV do GCM não confere e a outra ponta descarta
+    const adulterado = deHex(hex);
+    adulterado[20]! ^= 0x01;
+    const passa = abrirEsp(t, paraHex(adulterado)).ok;
+    anotarFlag(m, 'vpn', { ...(m.flags.vpn ?? {}), captura: { externo: u.externo, protocolo: 50, legivel: false, cifrado: hex.slice(0, 48), adulteradoPassa: passa } });
     return [
       'O QUE O MEIO DO CAMINHO VÊ (último pacote do túnel):',
       `  IP ${u.externo}, protocolo 50 (ESP), ${u.tamanho + SOBRA_ESP} bytes`,
-      `  ESP: SPI ${t.spi}, sequência ${t.contadores.cifrados}, carga cifrada ${hex.slice(0, 64)}...`,
+      `  ESP: SPI ${t.spi}, sequência ${t.contadores.cifrados} (os dois em claro), IV ${hex.slice(16, 32)}, carga cifrada em AES-128-GCM ${hex.slice(32, 80)}... e ICV de 16 bytes ${hex.slice(-32)}`,
       `  Dentro (só as pontas veem): ${dentro}`,
+      `  Se alguém no meio trocar um byte: ${passa ? 'passou (!)' : 'o ICV não confere e a outra ponta descarta o pacote sem decifrar'}.`,
       'Os roteadores do meio não sabem quem fala com quem do lado de dentro, nem a porta, nem o conteúdo. Só as duas pontas.',
     ];
   }
@@ -677,6 +694,41 @@ function cmdVpn(m: Mundo, e: Equipamento, args: string[]): Saida {
   if (!nome || lerIp(par ?? '') === null || !prefixoOuIp(local ?? '') || !prefixoOuIp(remota ?? '') || !seg.length) return ['vpn <nome> <ip da outra ponta> <rede daqui> <rede de lá> <segredo> | vpn mostra | vpn captura | vpn apagar <nome>'];
   tab[nome] = { nome, par: par!, local: local!, remota: remota!, segredo: seg.join(' '), spi: 0x1000 + (Object.keys(tab).length + 1) * 0x101, contadores: { cifrados: 0, decifrados: 0 } };
   return [`Túnel ${nome}: o que vai de ${local} para ${remota} entra em ESP até ${par}.`, ...mostra()];
+}
+
+/* ---------- Roteamento em cebola ---------- */
+
+function pontoCebola(m: Mundo, txt: string | undefined): PontoCebola | null {
+  if (!txt) return null;
+  const ip = lerIp(txt);
+  const e = ip !== null ? donoDoIp(m, ip)?.e : m.equipamentos.get(txt);
+  if (!e) return null;
+  const end = ip !== null ? ip : interfacesL3(e)[0]?.cidr.endereco;
+  return end === undefined ? null : { nome: e.nome, ip: ipTexto(end) };
+}
+
+function cmdCebola(m: Mundo, e: Equipamento, args: string[]): Saida {
+  const uso = ['cebola <destino> <nó de entrada> <nó do meio> <nó de saída> [mensagem]: monta um circuito em cebola de três nós e mostra o que cada um enxerga.'];
+  const eu = pontoCebola(m, e.nome);
+  const destino = pontoCebola(m, args[0]);
+  const nos = args.slice(1, 4).map((x) => pontoCebola(m, x));
+  if (!eu || !destino || nos.length !== 3 || nos.some((x) => !x)) return uso;
+  // o endereço que cada vizinho enxerga é o da interface no enlace entre os dois (a que divide a sub-rede)
+  const visto = (de: PontoCebola, para: PontoCebola): string => {
+    const a = m.equipamentos.get(de.nome);
+    const b = m.equipamentos.get(para.nome);
+    if (!a || !b) return de.ip;
+    const ib = interfacesL3(b);
+    const i = interfacesL3(a).find((x) => ib.some((y) => { const n = Math.min(x.cidr.prefixo, y.cidr.prefixo); return n === 0 || ((x.cidr.endereco ^ y.cidr.endereco) >>> 0) >>> (32 - n) === 0; }));
+    return i ? ipTexto(i.cidr.endereco) : de.ip;
+  };
+  const r = montarCebola(m, eu, nos as PontoCebola[], destino, args.slice(4).join(' ') || `GET / HTTP/1.1 de ${e.nome}`, visto);
+  anotarFlag(m, 'cebola', {
+    de: e.nome, destino: destino.nome, ipDestino: destino.ip, nos: r.nos, ok: r.ok, motivo: r.motivo ?? null,
+    visoes: r.visoes.map((v) => ({ no: v.no, papel: v.papel, anterior: v.anterior, proximo: v.proximo, sabeOrigem: v.sabeOrigem, sabeDestino: v.sabeDestino })),
+    ninguemSabeOsDois: r.ok && r.visoes.every((v) => !(v.sabeOrigem && v.sabeDestino)),
+  });
+  return r.linhas;
 }
 
 /* ---------- Calculadora de criptografia ---------- */
@@ -710,6 +762,26 @@ function cmdCripto(m: Mundo, e: Equipamento, cmd: string, args: string[]): Saida
         return [`Não deu: ${(x as Error).message}.`];
       }
     }
+    case 'gcm': {
+      if (!args.length) return ['gcm <texto>: cifra com AES-128-GCM, mostra a etiqueta e troca um byte para ver a etiqueta falhar.'];
+      const chave = sha256Bytes('gcm|' + e.nome).slice(0, 16);
+      const iv = bytesDoMundo(m, 12);
+      const aad = textoParaBytes(`cabecalho de ${e.nome}`);
+      const r = aesGcmCifrar(chave, iv, resto(0), aad);
+      const volta = aesGcmDecifrar(chave, iv, r.cifrado, r.tag, aad);
+      const ruim = r.cifrado.slice();
+      if (ruim.length) ruim[0]! ^= 0x01;
+      const adulterada = aesGcmDecifrar(chave, iv, ruim, r.tag, aad);
+      const aadTrocado = aesGcmDecifrar(chave, iv, r.cifrado, r.tag, textoParaBytes('cabecalho de outro'));
+      anotarFlag(m, 'cripto', { op: 'gcm', etiqueta: paraHex(r.tag), confere: volta.ok, adulteradaConfere: adulterada.ok, aadTrocadoConfere: aadTrocado.ok });
+      return [
+        `AES-128-GCM (NIST SP 800-38D), chave ${paraHex(chave).slice(0, 12)}..., IV de 96 bits ${paraHex(iv)}, dado adicional "cabecalho de ${e.nome}" (vai em claro, mas protegido).`,
+        ...r.passos,
+        `Decifrando com tudo intacto: ${volta.ok ? `etiqueta confere, volta "${resto(0)}"` : 'não confere (!)'}.`,
+        `Trocando o primeiro bit do cifrado: ${adulterada.ok ? 'confere (!)' : 'a etiqueta não confere e nada é decifrado'}.`,
+        `Trocando o dado adicional: ${aadTrocado.ok ? 'confere (!)' : 'também não confere'}. É assim que o TLS, o ESP e o PGP do jogo pegam quem mexe no meio.`,
+      ];
+    }
     case 'sha256': {
       if (!args.length) return ['sha256 <texto>'];
       const r = sha256Explicado(resto(0));
@@ -729,8 +801,8 @@ function cmdCripto(m: Mundo, e: Equipamento, cmd: string, args: string[]): Saida
       const a = assinarMensagem(resto(0), k.privada);
       const v = verificarAssinatura(resto(0), a.assinatura, k.publica);
       const alterada = verificarAssinatura(resto(0) + '!', a.assinatura, k.publica);
-      anotarFlag(m, 'cripto', { op: 'assinar', de: quem, idChave: idChave(quem), assinatura: String(a.assinatura), confere: v.valida, alteradaConfere: alterada.valida });
-      return [...a.passos, `Assinatura: ${a.assinatura} (chave ${idChave(quem)})`, ...v.passos, `Com um caractere a mais no texto: ${alterada.valida ? 'confere (colisão do RSA de brinquedo)' : 'não confere mais'}.`];
+      anotarFlag(m, 'cripto', { op: 'assinar', de: quem, idChave: idChave(quem), assinatura: hexCurto(a.assinatura), bits: bitsDe(k.n), confere: v.valida, alteradaConfere: alterada.valida });
+      return [...a.passos, `Assinatura: ${hexCurto(a.assinatura)} (RSA de ${bitsDe(k.n)} bits, chave ${idChave(quem)})`, ...v.passos, `Com um caractere a mais no texto: ${alterada.valida ? 'confere (!)' : 'não confere mais'}.`];
     }
     case 'verificar-cadeia': {
       const nome = args[0];
@@ -768,7 +840,7 @@ function cmdCripto(m: Mundo, e: Equipamento, cmd: string, args: string[]): Saida
         e.s.pgp = true;
         const k = chavesPgp(conta.endereco);
         anotarFlag(m, 'pgp', { ...(m.flags.pgp ?? {}), chave: { endereco: conta.endereco, id: idChave(conta.endereco) } });
-        return [`Par de chaves de ${conta.endereco}: id ${idChave(conta.endereco)}, pública (n = ${k.n}, e = ${k.e}). A privada fica só aqui.`, 'A pública vai para quem quiser mandar mensagem cifrada para você (e para conferir o que você assina). Confira a impressão digital por outro canal.'];
+        return [`Par de chaves RSA de ${bitsDe(k.n)} bits de ${conta.endereco}: id ${idChave(conta.endereco)}, pública (n = ${hexCurto(k.n)} em hexadecimal, ${k.n.toString().length} dígitos decimais, e = ${k.e}). A privada fica só aqui.`, 'A pública vai para quem quiser mandar mensagem cifrada para você (e para conferir o que você assina). Confira a impressão digital por outro canal.'];
       }
       const l = ['CHAVES PÚBLICAS CONHECIDAS'];
       for (const x of m.equipamentos.values()) {
@@ -916,6 +988,8 @@ export function comandosSeguranca(m: Mundo, e: Equipamento, cmd: string, args: s
     }
     case 'wifi':
       return cmdWifiPc(m, e, args);
+    case 'cebola':
+      return cmdCebola(m, e, args);
     case 'executar':
       return cmdExecutar(m, args);
   }
@@ -928,8 +1002,9 @@ export const AJUDA_SEGURANCA: Partial<Record<Equipamento['tipo'], string[]>> = {
     'ip-falso <ip forjado> <destino> [porta] | inundar <ip> <porta> [SYN/s] [falsificado] | ddos <ip> <porta> [zumbis] [pps] | parar-ataque',
     'envenenar-dns <resolvedor> <nome> <ip falso> [tentativas] | syncookies <on|off> | backlog <n>',
     'wifi redes | wifi conectar <ssid> <senha> | wifi desautenticar <ssid> | wifi capturar <ssid> | wifi quebrar <ssid> [palavras]',
-    'cesar <chave> <texto> | quebrar-cesar <texto> | rsa <p> <q> <m> | sha256 <texto> | hmac <chave> <texto> | assinar <texto>',
+    'cesar <chave> <texto> | quebrar-cesar <texto> | rsa <p> <q> <m> | sha256 <texto> | hmac <chave> <texto> | gcm <texto> | assinar <texto>',
     'verificar-cadeia <nome> [tipo] | kerberos <usuário> <senha> [cadastrada] [serviço] | dh <a> <b> [m] | pgp [gerar] | correio enviar-seguro ...',
+    'cebola <destino> <nó de entrada> <nó do meio> <nó de saída> [mensagem]',
     'executar <planilha|jogo-gratis|extensao> [sandbox|direto]',
   ],
   roteador: [
@@ -1012,6 +1087,7 @@ export function acoesSeguranca(m: Mundo, e: Equipamento): Acao[] {
   const redes = pontosWifi(m).map((x) => op(wifiDe(x)!.ssid));
   const ssid = () => (redes.length ? escolha('ssid', 'Rede', redes) : texto('ssid', 'Rede', 'LAB-Visitantes'));
   const rec = ipsDe(m, e.nome, (x) => !!servicosDe(x)?.dns?.recursivo);
+  const nosCebola = [...m.equipamentos.values()].filter((x) => x.nome !== e.nome && ehRoteador(x) && interfacesL3(x).length).map((x) => op(x.nome));
   return [
     { id: 'sg-varrer', rotulo: 'Varredura de portas', ajuda: 'Manda SYN para várias portas: SYN+ACK quer dizer aberta, RST fechada, silêncio filtrada. Só no laboratório: fora dele, sem autorização, é crime.', contexto: ctx, campos: [campoIp(m, e, 'ip', 'Alvo', '203.0.113.10'), texto('portas', 'Portas', '1-1024')], comandos: (v) => [`varrer ${v.ip} ${v.portas || '1-1024'}`] },
     { id: 'sg-farejar', rotulo: 'Farejar a rede', ajuda: 'Placa em modo promíscuo: num hub ou numa porta espelhada, ouve todo mundo. Mostra o que o tráfego sem cifra revela.', contexto: ctx, comandos: () => ['farejar'] },
@@ -1029,6 +1105,7 @@ export function acoesSeguranca(m: Mundo, e: Equipamento): Acao[] {
     { id: 'sg-cesar', rotulo: 'Cifra de César', ajuda: 'Cada letra anda a mesma quantidade de casas. Só 25 chaves: força bruta ou frequência das letras quebram.', contexto: ctx, campos: [numero('k', 'Chave', undefined, '3'), texto('t', 'Texto', 'ATAQUE AO AMANHECER')], comandos: (v) => [`cesar ${v.k || 3} ${v.t || 'ATAQUE'}`] },
     { id: 'sg-quebrar-cesar', rotulo: 'Quebrar César pela frequência', ajuda: 'Compara a frequência das letras de cada deslocamento com a do português.', contexto: ctx, campos: [texto('t', 'Texto cifrado', 'DWDTXH DR DPDQKHFHU')], comandos: (v) => [`quebrar-cesar ${v.t || 'DWDTXH DR DPDQKHFHU'}`] },
     { id: 'sg-rsa', rotulo: 'RSA pequeno', ajuda: 'Dois primos, n = p × q, e e d inversos módulo φ(n). Cifra com a pública, decifra com a privada.', contexto: ctx, campos: [numero('p', 'Primo p', undefined, '61'), numero('q', 'Primo q', undefined, '53'), numero('m', 'Mensagem (número)', undefined, '65')], comandos: (v) => [`rsa ${v.p || 61} ${v.q || 53} ${v.m || 65}`] },
+    { id: 'sg-gcm', rotulo: 'AES-GCM: cifrar e adulterar', ajuda: 'Cifra com AES-128-GCM e mostra a etiqueta de 128 bits. Depois troca um bit do cifrado e do dado adicional: a etiqueta não confere e nada é decifrado.', contexto: ctx, campos: [texto('t', 'Texto', 'Pague 100 ao portador')], comandos: (v) => [`gcm ${v.t || 'teste'}`] },
     { id: 'sg-sha256', rotulo: 'Resumo SHA-256', ajuda: 'Qualquer tamanho vira 256 bits. Uma letra muda tudo.', contexto: ctx, campos: [texto('t', 'Texto', 'camada 8')], comandos: (v) => [`sha256 ${v.t || 'camada 8'}`] },
     { id: 'sg-assinar', rotulo: 'Assinar e conferir', ajuda: 'Resume, assina o resumo com a chave privada e confere com a pública. Mudou o texto, não confere mais.', contexto: ctx, campos: [texto('t', 'Texto', 'Pago 100 a quem trouxer o cabo')], comandos: (v) => [`assinar ${v.t || 'teste'}`] },
     { id: 'sg-cadeia', rotulo: 'Conferir uma cadeia de certificados', ajuda: 'Nome, validade, revogação, quem assinou quem, até uma raiz confiável.', contexto: ctx, campos: [texto('nome', 'Nome', 'www.loja.exemplo'), escolha('tipo', 'Certificado', TIPOS_CERTIFICADO.map((x) => op(x)))], comandos: (v) => [`verificar-cadeia ${v.nome || 'www.loja.exemplo'} ${v.tipo}`] },
@@ -1036,6 +1113,14 @@ export function acoesSeguranca(m: Mundo, e: Equipamento): Acao[] {
     { id: 'sg-dh', rotulo: 'Diffie-Hellman (e o homem no meio)', ajuda: 'Duas pessoas chegam à mesma chave sem ela passar pelo fio. Sem autenticação, quem está no meio fecha uma chave com cada lado.', contexto: ctx, campos: [numero('a', 'Segredo de Alice', undefined, '6'), numero('b', 'Segredo de Bob', undefined, '15'), texto('m', 'Segredo do atacante (vazio: sem ataque)', '')], comandos: (v) => [`dh ${v.a || 6} ${v.b || 15}${v.m ? ` ${v.m}` : ''}`] },
     { id: 'sg-pgp', rotulo: 'Gerar chaves PGP', ajuda: 'Par de chaves para assinar e cifrar correio. A pública vai para os outros; a privada fica aqui.', contexto: ctx, comandos: () => ['pgp gerar', 'pgp'] },
     { id: 'sg-correio-seguro', rotulo: 'Mandar e-mail assinado e cifrado', ajuda: 'PGP: assina com a sua chave privada e cifra com a pública de quem recebe. No fio e no servidor, o corpo é ilegível.', contexto: ctx, campos: [texto('para', 'Para', 'contato@escola.exemplo'), texto('assunto', 'Assunto', 'Notas'), texto('corpo', 'Texto', 'As notas saem amanhã.')], comandos: (v) => [`correio enviar-seguro ${v.para} ${v.assunto || 'Teste'} | ${v.corpo || ''}`] },
+    {
+      id: 'sg-cebola',
+      rotulo: 'Circuito em cebola (três nós)',
+      ajuda: 'Combina uma chave com cada um de três nós (X25519) e embrulha a mensagem em três camadas de AES-GCM. Cada nó tira a sua e só conhece o anterior e o próximo: a entrada sabe quem você é, a saída sabe aonde vai, ninguém sabe os dois.',
+      contexto: ctx,
+      campos: [campoIp(m, e, 'destino', 'Destino', '203.0.113.10'), ...(['n1', 'n2', 'n3'] as const).map((n, i) => (nosCebola.length ? escolha(n, ['Nó de entrada', 'Nó do meio', 'Nó de saída'][i]!, nosCebola, nosCebola[Math.min(i, nosCebola.length - 1)]!.valor) : texto(n, ['Nó de entrada', 'Nó do meio', 'Nó de saída'][i]!, ''))), texto('msg', 'Mensagem', 'GET /pauta HTTP/1.1')],
+      comandos: (v) => [`cebola ${v.destino} ${v.n1} ${v.n2} ${v.n3} ${v.msg || 'GET / HTTP/1.1'}`],
+    },
     { id: 'sg-sandbox', rotulo: 'Rodar código não confiável', ajuda: 'O mesmo programa dentro e fora de uma caixa de areia: o que ele tenta e o que consegue.', contexto: ctx, campos: [escolha('p', 'Programa', Object.entries(PROGRAMAS).map(([k, v]) => op(k, v.descricao))), escolha('modo', 'Como', [op('sandbox', 'na sandbox'), op('direto', 'direto')])], comandos: (v) => [`executar ${v.p} ${v.modo}`] },
   ];
 }

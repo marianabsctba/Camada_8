@@ -2649,20 +2649,107 @@ export function consultarRastreador(enxame: string[], pedinte: string, maximo: n
   return outros.slice(0, maximo);
 }
 
-/** DHT em linhas gerais: a chave vira um identificador de 8 bits e fica no nó com menor distância XOR. */
+/** Bits do espaço de identificadores da DHT do jogo: 2^8 = 256 posições no anel. */
+export const BITS_DHT = 8;
+
+/** Os 8 nós da DHT da cidade (os mesmos em todo dia que usa a tabela). */
+export const NOS_DHT: readonly number[] = [3, 17, 42, 77, 101, 150, 199, 230];
+const TAMANHO_ANEL = 1 << BITS_DHT;
+
+/** O identificador de uma chave: o resumo do nome reduzido a BITS_DHT bits. */
+export function idDht(chave: string): number {
+  return parseInt(resumo32(chave), 16) & (TAMANHO_ANEL - 1);
+}
+
+const bin8 = (x: number) => x.toString(2).padStart(BITS_DHT, '0');
+
+/** Variante XOR (como no Kademlia): a chave fica no nó de menor distância XOR até o identificador dela. */
 export function dhtResponsavel(chave: string, nos: number[]): { id: number; responsavel: number; passos: string[] } {
-  const id = parseInt(resumo32(chave), 16) & 0xff;
+  const id = idDht(chave);
   const ordem = [...nos].sort((a, b) => (a ^ id) - (b ^ id));
   const responsavel = ordem[0]!;
   return {
     id,
     responsavel,
     passos: [
-      `Resumo de "${chave}" em 8 bits: ${id} (${id.toString(2).padStart(8, '0')}).`,
-      `Distância XOR até cada nó: ${nos.map((n) => `${n}→${n ^ id}`).join(', ')}.`,
-      `Responsável: nó ${responsavel}. Sem rastreador central, cada nó conhece alguns vizinhos e a busca chega lá em poucos saltos.`,
+      `Resumo de "${chave}" em ${BITS_DHT} bits: ${id} (${bin8(id)}).`,
+      `Variante XOR: distância de cada nó até a chave, d(x, y) = x XOR y: ${nos.map((n) => `${n}→${n ^ id}`).join(', ')}.`,
+      `Responsável: nó ${responsavel}. A distância XOR é a mesma nos dois sentidos, e cada bit de prefixo em comum corta o espaço pela metade: cada nó guarda contatos em cada faixa de distância (2^i a 2^(i+1)) e a busca também chega em uns log₂ N passos.`,
     ],
   };
+}
+
+/** Distância no anel, no sentido horário, de `a` até `b`. */
+const noSentido = (a: number, b: number) => (b - a + TAMANHO_ANEL) % TAMANHO_ANEL;
+
+/** Está em (a, b] andando no sentido horário do anel? */
+function noIntervalo(x: number, a: number, b: number, fechadoNoFim: boolean): boolean {
+  const dx = noSentido(a, x);
+  const db = noSentido(a, b) || TAMANHO_ANEL;
+  return fechadoNoFim ? dx > 0 && dx <= db : dx > 0 && dx < db;
+}
+
+/** sucessor(id): o primeiro nó igual ou depois do identificador, andando no anel (e dando a volta no 255). */
+export function chordSucessor(id: number, nos: number[]): number {
+  const ordem = [...new Set(nos)].sort((a, b) => a - b);
+  return ordem.find((n) => n >= id) ?? ordem[0]!;
+}
+
+export interface Atalho {
+  i: number;
+  /** n + 2^i, módulo 2^BITS_DHT. */
+  inicio: number;
+  no: number;
+}
+
+/** Tabela de atalhos do nó n: atalho[i] = sucessor(n + 2^i), para i de 0 a BITS_DHT - 1. O atalho 0 é o sucessor. */
+export function chordAtalhos(n: number, nos: number[]): Atalho[] {
+  return Array.from({ length: BITS_DHT }, (_, i) => {
+    const inicio = (n + (1 << i)) % TAMANHO_ANEL;
+    return { i, inicio, no: chordSucessor(inicio, nos) };
+  });
+}
+
+export interface BuscaAnel {
+  id: number;
+  responsavel: number;
+  /** Os nós por onde a busca passou, do primeiro ao que respondeu. */
+  caminho: number[];
+  saltos: number;
+  passos: string[];
+}
+
+/**
+ * Busca no anel do tipo Chord: o nó que pergunta confere se a chave cai entre ele e o sucessor dele; se não, pula
+ * para o atalho que mais se aproxima da chave sem passar dela (o predecessor mais próximo na tabela). Cada salto
+ * corta pelo menos metade da distância que falta: a busca termina em O(log N) saltos.
+ */
+export function chordBuscar(chave: string, nos: number[], inicio = Math.min(...nos)): BuscaAnel {
+  const id = idDht(chave);
+  const passos = [`Resumo de "${chave}" em ${BITS_DHT} bits: ${id} (${bin8(id)}). No anel de 0 a ${TAMANHO_ANEL - 1}, cada nó cuida das chaves desde o nó anterior (exclusive) até ele: o responsável é sucessor(${id}).`];
+  const caminho = [inicio];
+  let n = inicio;
+  for (let guarda = 0; guarda < nos.length + 1; guarda++) {
+    const tab = chordAtalhos(n, nos);
+    const suc = tab[0]!.no;
+    if (id === n) {
+      passos.push(`  Nó ${n}: a chave ${id} é o próprio identificador dele. Responde.`);
+      return { id, responsavel: n, caminho, saltos: caminho.length - 1, passos };
+    }
+    if (noIntervalo(id, n, suc, true)) {
+      passos.push(`  Nó ${n}: ${id} cai entre ele e o sucessor dele, ${suc}. O responsável é ${suc}.`);
+      if (suc !== n) caminho.push(suc);
+      passos.push(`Responsável: nó ${suc}, em ${caminho.length - 1} salto(s) com ${nos.length} nós (log₂ ${nos.length} ≈ ${Math.log2(nos.length).toFixed(1).replace('.', ',')}).`);
+      return { id, responsavel: suc, caminho, saltos: caminho.length - 1, passos };
+    }
+    let prox = n;
+    for (let i = tab.length - 1; i >= 0; i--) if (noIntervalo(tab[i]!.no, n, id, false)) { prox = tab[i]!.no; break; }
+    if (prox === n) prox = suc;
+    passos.push(`  Nó ${n}: atalhos ${tab.map((a) => `${a.inicio}→${a.no}`).join(', ')}. O que mais se aproxima de ${id} sem passar dele é ${prox}: pula para lá.`);
+    caminho.push(prox);
+    n = prox;
+  }
+  throw new Error('a busca no anel não terminou');
 }
 
 export interface ResultadoP2P {

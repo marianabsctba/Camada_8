@@ -137,7 +137,10 @@ describe('streaming, CDN e P2P no mundo', () => {
     expect(m.flags.cdn.simulacao.comCdn.trafegoEnlacePrincipal).toBeLessThan(m.flags.cdn.simulacao.semCdn.trafegoEnlacePrincipal);
     expect(m.flags.p2p.enxame.pares).toBe(6);
     expect(m.flags.p2p.comparacao.linhas[3].p2p).toBeLessThan(m.flags.p2p.comparacao.linhas[3].clienteServidor);
-    expect(typeof m.flags.p2p.dht.responsavel).toBe('number');
+    expect(m.flags.p2p.dht).toMatchObject({ chave: 'aula.mp4', modo: 'anel', responsavel: 150, saltos: 3 });
+    rodar(t, 'ana', ['p2p dht aula.mp4 xor']);
+    expect(m.flags.p2p.dht).toMatchObject({ modo: 'xor', responsavel: 101 });
+    expect(m.flags.p2p.dhtPor.anel.responsavel).toBe(150);
   });
 });
 

@@ -479,8 +479,8 @@ export function inspecionarTaxa(ids: ConfigIds, i: InfoPacote, taxa: number, syn
 
 /* ---------- VPN (IPsec em modo túnel) ---------- */
 
-/** Bytes que o ESP em modo túnel acrescenta: IP novo (20), SPI e sequência (8), IV (16), enchimento e trailer (até 13), ICV (16). */
-export const SOBRA_ESP = 73;
+/** Bytes que o ESP em modo túnel com AES-GCM acrescenta (RFC 4303 e RFC 4106): IP novo (20), SPI e sequência (8), IV explícito (8), enchimento e trailer (até 3 + 2), ICV (16). */
+export const SOBRA_ESP = 57;
 
 export interface TunelVpn {
   nome: string;

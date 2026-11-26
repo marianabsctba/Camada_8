@@ -17,6 +17,9 @@ import {
   CIDADES,
   compararDistribuicao,
   dhtResponsavel,
+  chordBuscar,
+  BITS_DHT,
+  NOS_DHT,
   dialogoSmtp,
   dnsCdn,
   dominioDe,
@@ -56,6 +59,7 @@ import {
 } from './aplicacao';
 import { caminhoTransporte, demultiplexar, escutar, ipPrincipal, portaEfemera, soquetesDe, type CaminhoMundo, type InundacaoSyn, type Protocolo } from './transporte';
 import { anotarFlag, idsDe, inspecionarConteudo, refrescarFiltros } from './filtro';
+import { hexCurto } from './cripto';
 import {
   abrirMensagem,
   apertoTls,
@@ -411,7 +415,7 @@ export function resolverNoMundo(m: Mundo, cliente: Equipamento, nome: string, ti
     const zona = zonaDe(mundo, finais[0]!.nome);
     if (mundo.assinadas.has(zona)) {
       const assin = forjado ? undefined : assinarRrset(zona, finais);
-      linhas.push(`  ${finais[0]!.nome} RRSIG ${tipo}: ${assin === undefined ? 'nenhuma assinatura válida' : `assinado pela chave da zona ${zona} (${String(assin)})`}; DS da zona na zona mãe: ${dsDe(zona)}.`);
+      linhas.push(`  ${finais[0]!.nome} RRSIG ${tipo}: ${assin === undefined ? 'nenhuma assinatura válida' : `assinado com RSA/SHA-256 de 2048 bits pela chave da zona ${zona} (${hexCurto(assin)})`}; DS da zona na zona mãe: ${dsDe(zona)}.`);
       if (cfg.validar) {
         dnssec = forjado ? 'rejeitada' : 'validada';
         linhas.push(forjado ? '  DNSSEC: a resposta não tem assinatura que confira com a chave da zona. O resolvedor descarta (SERVFAIL).' : '  DNSSEC: assinatura conferida com a chave da zona, e a chave conferida pelo DS da zona de cima até a raiz (flag ad).');
@@ -599,7 +603,7 @@ function cmdNavegar(m: Mundo, e: Equipamento, args: string[]): Saida {
   if (https) l.push('', `NO FIO (o que um farejador vê): TLS 1.3 para ${u.nome} (o nome vai no SNI), registro cifrado ${fio.slice(0, 64)}... Caminho, cookies e conteúdo ficaram ilegíveis.`);
   else l.push('', 'NO FIO: tudo acima passa em claro. Quem estiver num hub, numa porta espelhada ou no meio do caminho lê pedido, cookie e resposta.');
   anotarFlag(m, 'http', { ...base, ok: true, estado: b.origem === 'validado' ? 304 : r.estado, estadoFinal: r.estado, origem: b.origem, ip: ctx.ida!.ip, porta: u.porta, servidor: a.srv!.nome, cookies: { ...(nav.cookies.get(u.nome) ?? {}) }, enviouCookie: !!ctx.req?.cabecalhos['Cookie'], condicional: !!ctx.req?.cabecalhos['If-None-Match'], rttMs: r4(a.c.rtt * 1000), bytes: r.corpo.length, dns: ctx.ida!.dns ? { origem: ctx.ida!.dns.r?.origem, consultas: ctx.ida!.dns.r?.consultas } : null });
-  if (https) anotarFlag(m, 'tls', { ...base, ok: ctx.tls!.ok, motivo: ctx.tls!.motivo ?? null, versao: '1.3', troca: 'Diffie-Hellman efêmero', cifra: 'AES-128 em modo contador', certificado: ctx.tls!.certificado, cadeia: ctx.tls!.cadeia.motivo ?? 'valida', dh: ctx.tls!.dh, fioCifrado: fio.slice(0, 64), legivel: false, sni: u.nome });
+  if (https) anotarFlag(m, 'tls', { ...base, ok: ctx.tls!.ok, motivo: ctx.tls!.motivo ?? null, versao: '1.3', troca: 'X25519 (Diffie-Hellman efêmero em curva elíptica)', cifra: 'TLS_AES_128_GCM_SHA256', certificado: ctx.tls!.certificado, cadeia: ctx.tls!.cadeia.motivo ?? 'valida', dh: ctx.tls!.dh, fioCifrado: fio.slice(0, 64), legivel: false, sni: u.nome });
   return l;
 }
 
@@ -870,11 +874,16 @@ function cmdCdn(m: Mundo, e: Equipamento, args: string[]): Saida {
 function cmdP2p(m: Mundo, e: Equipamento, args: string[]): Saida {
   const sub = args[0] ?? 'simular';
   if (sub === 'dht') {
-    const chave = args.slice(1).join(' ') || 'aula.mp4';
-    const nos = [3, 17, 42, 77, 101, 150, 199, 230];
-    const r = dhtResponsavel(chave, nos);
-    anotarFlag(m, 'p2p', { ...(m.flags.p2p ?? {}), dht: { chave, id: r.id, responsavel: r.responsavel } });
-    return r.passos;
+    const resto = args.slice(1);
+    const modo = resto[resto.length - 1] === 'xor' ? 'xor' : 'anel';
+    if (resto[resto.length - 1] === 'xor' || resto[resto.length - 1] === 'anel') resto.pop();
+    const chave = resto.join(' ') || 'aula.mp4';
+    const nos = [...NOS_DHT];
+    const r = modo === 'anel' ? chordBuscar(chave, nos) : { ...dhtResponsavel(chave, nos), caminho: [] as number[], saltos: 0 };
+    const dht = { chave, id: r.id, responsavel: r.responsavel, modo, caminho: r.caminho, saltos: r.saltos };
+    const antes = (m.flags.p2p ?? {}) as { dhtPor?: Record<string, unknown> };
+    anotarFlag(m, 'p2p', { ...antes, dht, dhtPor: { ...(antes.dhtPor ?? {}), [modo]: dht } });
+    return [`Tabela de dispersão distribuída com ${nos.length} nós (${nos.join(', ')}) num espaço de ${BITS_DHT} bits, ${modo === 'anel' ? 'em anel (tipo Chord)' : 'na variante XOR (tipo Kademlia)'}:`, ...r.passos];
   }
   if (sub === 'comparar') {
     const mb = lerNumero(args[1] ?? '') ?? 100;
@@ -1161,7 +1170,7 @@ export const AJUDA_APLICACAO = [
   'navegar <url> [ignorar-aviso] | cookies [limpar]',
   'correio conta <endereço> <ip> | correio enviar <para> <assunto> | <texto> | correio ler [imap|pop3]',
   'assistir <url> [atraso] [adaptativo] | cdn <nome> [cidade] | cdn simular [espectadores] [Mb/s]',
-  'p2p simular [pares] [pedaços] [conexões] [aleatorio] [sem-olho] | p2p comparar [MB] [Mb/s servidor] [Mb/s par] | p2p dht <chave>',
+  'p2p simular [pares] [pedaços] [conexões] [aleatorio] [sem-olho] | p2p comparar [MB] [Mb/s servidor] [Mb/s par] | p2p dht <chave> [anel|xor]',
 ];
 
 /* ---------- Ações do menu ---------- */
@@ -1271,7 +1280,7 @@ export function acoesAplicacao(m: Mundo, e: Equipamento): Acao[] {
     { id: 'ap-cdn-simular', rotulo: 'Transmissão ao vivo com e sem CDN', ajuda: 'Milhares de espectadores em várias cidades: sem CDN, cada um puxa da origem; com CDN, cada borda puxa uma cópia e reparte.', contexto: ctx, campos: [numero('n', 'Espectadores por cidade', undefined, '2000'), numero('taxa', 'Taxa por espectador', 'Mb/s', '5')], comandos: (v) => [`cdn simular ${v.n || 2000} ${v.taxa || 5}`] },
     { id: 'ap-p2p', rotulo: 'Enxame P2P', ajuda: 'Uma semente e vários pares trocando pedaços em rodadas: mais raro primeiro e olho por olho (envia para quem mais lhe mandou).', contexto: ctx, campos: [numero('pares', 'Pares', undefined, '8'), numero('pedacos', 'Pedaços', undefined, '16'), escolha('pol', 'Política', [op('raro', 'mais raro primeiro'), op('aleatorio', 'aleatória')])], comandos: (v) => [`p2p simular ${v.pares || 8} ${v.pedacos || 16} 4${v.pol === 'aleatorio' ? ' aleatorio' : ''}`] },
     { id: 'ap-p2p-comparar', rotulo: 'Cliente-servidor contra P2P', ajuda: 'Tempo mínimo para N pessoas baixarem o mesmo arquivo: cresce com N no cliente-servidor, para de crescer no P2P.', contexto: ctx, campos: [numero('mb', 'Arquivo', 'MB', '100'), numero('us', 'Subida do servidor', 'Mb/s', '100'), numero('u', 'Subida de cada par', 'Mb/s', '10')], comandos: (v) => [`p2p comparar ${v.mb || 100} ${v.us || 100} ${v.u || 10}`] },
-    { id: 'ap-p2p-dht', rotulo: 'Tabela de dispersão distribuída', ajuda: 'Sem rastreador central: a chave vira um número e fica no nó de menor distância XOR.', contexto: ctx, campos: [texto('chave', 'Chave', 'aula.mp4')], comandos: (v) => [`p2p dht ${v.chave || 'aula.mp4'}`] },
+    { id: 'ap-p2p-dht', rotulo: 'Tabela de dispersão distribuída', ajuda: 'Sem rastreador central: a chave vira um número no mesmo espaço dos nós. No anel (tipo Chord), fica no primeiro nó depois dela, e os atalhos levam lá em uns log₂ N saltos; na variante XOR (tipo Kademlia), fica no nó de menor distância XOR.', contexto: ctx, campos: [texto('chave', 'Chave', 'aula.mp4'), escolha('modo', 'Forma', [op('anel', 'anel (tipo Chord)'), op('xor', 'distância XOR (tipo Kademlia)')])], comandos: (v) => [`p2p dht ${v.chave || 'aula.mp4'} ${v.modo || 'anel'}`] },
     { id: 'ap-servicos', rotulo: 'Ver os serviços desta máquina', ajuda: 'DNS, web, correio, streaming e CDN que rodam aqui, com as portas abertas.', contexto: ctx, comandos: () => ['servicos', 'soquetes'] },
     { id: 'ap-servico-dns', rotulo: 'Servir uma zona de DNS', ajuda: 'Esta máquina vira autoritativa para a zona. A zona mãe ganha a delegação sozinha. Depois acrescente registros A, MX, CNAME...', contexto: ctx, campos: [texto('zona', 'Zona', s?.dns?.zona?.replace(/\.$/, '') ?? 'loja.exemplo'), escolha('rec', 'Também resolver para os clientes (recursivo)?', [op('off', 'não'), op('on', 'sim')], s?.dns?.recursivo ? 'on' : 'off')], comandos: (v) => [`servico dns zona ${v.zona || 'loja.exemplo'}`, `servico dns recursivo ${v.rec}`] },
     {

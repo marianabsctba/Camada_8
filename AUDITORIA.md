@@ -290,8 +290,8 @@ Legenda: **287 subseções**: 278 com dia pronto, 9 resumos de capítulo. 181 su
 | 7.5.1 | 117: Perto de quem assiste | pronta e fiel, agrupada |
 | 7.5.2 | 117: Perto de quem assiste | pronta e fiel, agrupada |
 | 7.5.3 | 117: Perto de quem assiste | pronta e fiel, agrupada |
-| 7.5.4 | 118: De par em par | pronta e fiel; a DHT do simulador usa distância XOR, e o texto ensina também o anel |
-| 7.5.5 | 118: De par em par | pronta e fiel; a DHT do simulador usa distância XOR, e o texto ensina também o anel |
+| 7.5.4 | 118: De par em par | pronta e fiel; a DHT do simulador é o anel tipo Chord (sucessor, tabela de atalhos e busca em O(log N) saltos), com a distância XOR (tipo Kademlia) como variante escolhida no menu |
+| 7.5.5 | 118: De par em par | pronta e fiel; a DHT do simulador é o anel tipo Chord (sucessor, tabela de atalhos e busca em O(log N) saltos), com a distância XOR (tipo Kademlia) como variante escolhida no menu |
 | 7.6 | (nenhum) | resumo |
 
 ## Capítulo 8
@@ -315,30 +315,30 @@ Legenda: **287 subseções**: 278 com dia pronto, 9 resumos de capítulo. 181 su
 | 8.5.1 | 121: Segredos | pronta e fiel, agrupada |
 | 8.5.2 | 121: Segredos | pronta e fiel, agrupada |
 | 8.5.3 | 121: Segredos | pronta e fiel, agrupada |
-| 8.6.1 | 122: Chave pública e assinatura | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.6.2 | 122: Chave pública e assinatura | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.7.1 | 122: Chave pública e assinatura | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.7.2 | 122: Chave pública e assinatura | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.7.3 | 122: Chave pública e assinatura | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.7.4 | 122: Chave pública e assinatura | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.8.1 | 123: Certificados e autenticação | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.8.2 | 123: Certificados e autenticação | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.8.3 | 123: Certificados e autenticação | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.9.1 | 123: Certificados e autenticação | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.9.2 | 123: Certificados e autenticação | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.9.3 | 123: Certificados e autenticação | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.9.4 | 123: Certificados e autenticação | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.9.5 | 123: Certificados e autenticação | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.10.1 | 124: VPN e Wi-Fi seguro | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.10.2 | 124: VPN e Wi-Fi seguro | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.10.3 | 124: VPN e Wi-Fi seguro | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.11.1 | 125: Correio e web seguros | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.11.2 | 125: Correio e web seguros | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.12.1 | 125: Correio e web seguros | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.12.2 | 125: Correio e web seguros | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.12.3 | 125: Correio e web seguros | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.12.4 | 125: Correio e web seguros | pronta e fiel; a criptografia do simulador usa números pequenos, avisado no texto, agrupada |
-| 8.13.1 | 126: O ponto de troca | pronta e fiel na aula; a prática imita a cebola com túneis encadeados, avisado no texto, agrupada |
-| 8.13.2 | 126: O ponto de troca | pronta e fiel na aula; a prática imita a cebola com túneis encadeados, avisado no texto, agrupada |
-| 8.13.3 | 126: O ponto de troca | pronta e fiel na aula; a prática imita a cebola com túneis encadeados, avisado no texto, agrupada |
+| 8.6.1 | 122: Chave pública e assinatura | pronta e fiel; a aula usa RSA pequeno (p = 61, q = 53) de propósito, e a assinatura da prática é RSA de 2048 bits com PKCS#1 v1.5 e SHA-256 (RFC 8017), agrupada |
+| 8.6.2 | 122: Chave pública e assinatura | pronta e fiel; a aula usa RSA pequeno (p = 61, q = 53) de propósito, e a assinatura da prática é RSA de 2048 bits com PKCS#1 v1.5 e SHA-256 (RFC 8017), agrupada |
+| 8.7.1 | 122: Chave pública e assinatura | pronta e fiel; a aula usa RSA pequeno (p = 61, q = 53) de propósito, e a assinatura da prática é RSA de 2048 bits com PKCS#1 v1.5 e SHA-256 (RFC 8017), agrupada |
+| 8.7.2 | 122: Chave pública e assinatura | pronta e fiel; a aula usa RSA pequeno (p = 61, q = 53) de propósito, e a assinatura da prática é RSA de 2048 bits com PKCS#1 v1.5 e SHA-256 (RFC 8017), agrupada |
+| 8.7.3 | 122: Chave pública e assinatura | pronta e fiel; a aula usa RSA pequeno (p = 61, q = 53) de propósito, e a assinatura da prática é RSA de 2048 bits com PKCS#1 v1.5 e SHA-256 (RFC 8017), agrupada |
+| 8.7.4 | 122: Chave pública e assinatura | pronta e fiel; a aula usa RSA pequeno (p = 61, q = 53) de propósito, e a assinatura da prática é RSA de 2048 bits com PKCS#1 v1.5 e SHA-256 (RFC 8017), agrupada |
+| 8.8.1 | 123: Certificados e autenticação | pronta e fiel; certificados com RSA de 2048 bits, e = 65537, assinados com PKCS#1 v1.5 e SHA-256; o Kerberos sela com AES-128-GCM (o de verdade usa AES-CTS com HMAC, RFC 3962), agrupada |
+| 8.8.2 | 123: Certificados e autenticação | pronta e fiel; certificados com RSA de 2048 bits, e = 65537, assinados com PKCS#1 v1.5 e SHA-256; o Kerberos sela com AES-128-GCM (o de verdade usa AES-CTS com HMAC, RFC 3962), agrupada |
+| 8.8.3 | 123: Certificados e autenticação | pronta e fiel; certificados com RSA de 2048 bits, e = 65537, assinados com PKCS#1 v1.5 e SHA-256; o Kerberos sela com AES-128-GCM (o de verdade usa AES-CTS com HMAC, RFC 3962), agrupada |
+| 8.9.1 | 123: Certificados e autenticação | pronta e fiel; certificados com RSA de 2048 bits, e = 65537, assinados com PKCS#1 v1.5 e SHA-256; o Diffie-Hellman da aula é pequeno (p = 23) de propósito, agrupada |
+| 8.9.2 | 123: Certificados e autenticação | pronta e fiel; certificados com RSA de 2048 bits, e = 65537, assinados com PKCS#1 v1.5 e SHA-256; o Diffie-Hellman da aula é pequeno (p = 23) de propósito, agrupada |
+| 8.9.3 | 123: Certificados e autenticação | pronta e fiel; certificados com RSA de 2048 bits, e = 65537, assinados com PKCS#1 v1.5 e SHA-256; o Diffie-Hellman da aula é pequeno (p = 23) de propósito, agrupada |
+| 8.9.4 | 123: Certificados e autenticação | pronta e fiel; certificados com RSA de 2048 bits, e = 65537, assinados com PKCS#1 v1.5 e SHA-256; o Diffie-Hellman da aula é pequeno (p = 23) de propósito, agrupada |
+| 8.9.5 | 123: Certificados e autenticação | pronta e fiel; certificados com RSA de 2048 bits, e = 65537, assinados com PKCS#1 v1.5 e SHA-256; o Diffie-Hellman da aula é pequeno (p = 23) de propósito, agrupada |
+| 8.10.1 | 124: VPN e Wi-Fi seguro | pronta e fiel; ESP com AES-128-GCM (RFC 4106) e chave do IKEv2 por X25519 (RFC 8031); WPA2 com PBKDF2 de 4096 iterações, PTK pelo PRF do 802.11i e quadros em CCMP (AES-CCM, RFC 3610); o SAE do WPA3 é narrado, sem a conta da curva, agrupada |
+| 8.10.2 | 124: VPN e Wi-Fi seguro | pronta e fiel; ESP com AES-128-GCM (RFC 4106) e chave do IKEv2 por X25519 (RFC 8031); WPA2 com PBKDF2 de 4096 iterações, PTK pelo PRF do 802.11i e quadros em CCMP (AES-CCM, RFC 3610); o SAE do WPA3 é narrado, sem a conta da curva, agrupada |
+| 8.10.3 | 124: VPN e Wi-Fi seguro | pronta e fiel; ESP com AES-128-GCM (RFC 4106) e chave do IKEv2 por X25519 (RFC 8031); WPA2 com PBKDF2 de 4096 iterações, PTK pelo PRF do 802.11i e quadros em CCMP (AES-CCM, RFC 3610); o SAE do WPA3 é narrado, sem a conta da curva, agrupada |
+| 8.11.1 | 125: Correio e web seguros | pronta e fiel; PGP com RSA de 2048 bits e AES-128-GCM, em pacote simplificado (não o formato binário da RFC 9580), agrupada |
+| 8.11.2 | 125: Correio e web seguros | pronta e fiel; PGP com RSA de 2048 bits e AES-128-GCM, em pacote simplificado (não o formato binário da RFC 9580), agrupada |
+| 8.12.1 | 125: Correio e web seguros | pronta e fiel; TLS 1.3 com X25519, escala de chaves do HKDF, CertificateVerify em RSA-PSS e registros em AES-128-GCM (RFC 8446); DNSSEC com RSA/SHA-256 de 2048 bits, uma chave por zona, agrupada |
+| 8.12.2 | 125: Correio e web seguros | pronta e fiel; TLS 1.3 com X25519, escala de chaves do HKDF, CertificateVerify em RSA-PSS e registros em AES-128-GCM (RFC 8446); DNSSEC com RSA/SHA-256 de 2048 bits, uma chave por zona, agrupada |
+| 8.12.3 | 125: Correio e web seguros | pronta e fiel; TLS 1.3 com X25519, escala de chaves do HKDF, CertificateVerify em RSA-PSS e registros em AES-128-GCM (RFC 8446); DNSSEC com RSA/SHA-256 de 2048 bits, uma chave por zona, agrupada |
+| 8.12.4 | 125: Correio e web seguros | pronta e fiel; TLS 1.3 com X25519, escala de chaves do HKDF, CertificateVerify em RSA-PSS e registros em AES-128-GCM (RFC 8446); DNSSEC com RSA/SHA-256 de 2048 bits, uma chave por zona, agrupada |
+| 8.13.1 | 126: O ponto de troca | pronta e fiel; a prática monta um circuito em cebola de verdade (três nós, chave X25519 com cada um, três camadas de AES-GCM, cada nó só vê o anterior e o próximo), além da corrente de túneis, agrupada |
+| 8.13.2 | 126: O ponto de troca | pronta e fiel; a prática monta um circuito em cebola de verdade (três nós, chave X25519 com cada um, três camadas de AES-GCM, cada nó só vê o anterior e o próximo), além da corrente de túneis, agrupada |
+| 8.13.3 | 126: O ponto de troca | pronta e fiel; a prática monta um circuito em cebola de verdade (três nós, chave X25519 com cada um, três camadas de AES-GCM, cada nó só vê o anterior e o próximo), além da corrente de túneis, agrupada |
 | 8.14 | (nenhum) | resumo |

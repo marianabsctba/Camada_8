@@ -7,6 +7,7 @@ import { cacheDoResolvedor } from '../motor/cliAplicacao';
 import { refrescarVpns } from '../motor/roteamento';
 import { calcularBgp, type ConfigBgp } from '../motor/protocolos';
 import { lerCidr } from '../motor/util';
+import { SOBRA_ESP } from '../motor/filtro';
 import { item, registroPing, todasRespondidas } from './comum';
 import type { Dia, Passo, Pergunta } from './tipos';
 
@@ -169,7 +170,7 @@ const dia126: Dia = {
       'Correio comum é um cartão-postal: o SMTP leva o texto em claro, e cada servidor do caminho guarda uma cópia. Cifrar o enlace (STARTTLS) protege um trecho por vez, mas cada servidor ainda lê tudo. Segurança de verdade no correio é de ponta a ponta, e o PGP faz assim: calcula o resumo (hash) do texto e assina esse resumo com a chave privada de quem manda; junta texto e assinatura e comprime; sorteia uma chave de sessão aleatória e cifra tudo com ela, numa cifra simétrica rápida; cifra só a chave de sessão com a chave pública de quem recebe; e codifica o resultado em base64, porque o correio só leva texto. Quem recebe usa a chave privada para abrir a chave de sessão, decifra, e confere a assinatura com a chave pública de quem mandou.',
       'De onde vem a chave pública certa? No PGP, cada pessoa tem um anel de chaves privadas (as suas) e um anel de chaves públicas (as dos outros), e a confiança é uma teia: você confere a impressão digital da chave de alguém pessoalmente ou confia porque alguém em quem você confia assinou aquela chave. No S/MIME a ideia de assinar e cifrar é a mesma, mas a chave pública vem dentro de um certificado X.509 emitido por uma autoridade certificadora, como na web.',
       'Na web, as ameaças vão da desfiguração (trocar a página de alguém) ao roubo de dados (cartões, senhas, cadastros) e à negação de serviço. E começam antes da página: no nome. O DNS pergunta por UDP e aceita a primeira resposta cujo identificador de 16 bits (e porta) bata com a pergunta. Quem envenena o cache faz o resolvedor perguntar e despeja respostas forjadas antes da verdadeira; com a porta sempre a mesma, só há 65536 identificadores para adivinhar, e uma resposta certa fica no cache pelo TTL inteiro, mandando todo cliente para o endereço falso. Duas defesas: sortear a porta de origem de cada consulta (mais uns 16 bits para adivinhar) e o DNSSEC, em que a zona assina cada conjunto de registros (RRSIG) com a sua chave (DNSKEY), o resumo dessa chave fica na zona mãe (DS), e o resolvedor que valida joga fora o que não tem assinatura certa.',
-      'O TLS 1.3 é o que põe o S no HTTPS. No aperto de mão, o navegador manda o ClientHello com a sua metade de uma troca Diffie-Hellman e o nome do site no SNI, em claro; o servidor responde com a metade dele, e dali em diante tudo vai cifrado. O servidor mostra o certificado, o navegador sobe a cadeia até uma raiz confiável e confere que o servidor tem a chave privada daquele certificado; os dois derivam chaves de sessão do segredo combinado. Quem fareja vê os IPs, a porta 443, o SNI e o tamanho dos registros; não vê caminho, cookies nem conteúdo. Neste jogo o Diffie-Hellman usa números pequenos e a cifra é AES-128 em modo contador, no lugar do AES-GCM do TLS de verdade, para dar para acompanhar a conta.',
+      'O TLS 1.3 é o que põe o S no HTTPS. No aperto de mão, o navegador manda o ClientHello com a sua metade de uma troca Diffie-Hellman e o nome do site no SNI, em claro; o servidor responde com a metade dele, e dali em diante tudo vai cifrado. O servidor mostra o certificado, o navegador sobe a cadeia até uma raiz confiável e confere que o servidor tem a chave privada daquele certificado; os dois derivam chaves de sessão do segredo combinado. Quem fareja vê os IPs, a porta 443, o SNI e o tamanho dos registros; não vê caminho, cookies nem conteúdo. Neste jogo a troca é X25519, o certificado tem chave RSA de 2048 bits, o servidor prova a posse dela com uma assinatura RSA-PSS, e os registros vão em AES-128-GCM, com o cabeçalho de cada registro protegido junto: quem mexe num byte no caminho faz a etiqueta não conferir, e o navegador derruba a conexão.',
       'O último perigo vem de dentro do navegador: código que você não escreveu. Toda página traz scripts que rodam na sua máquina, e uma extensão instalada pode ler e mudar todas as páginas que você abre. A defesa é a caixa de areia (sandbox): o código roda isolado, sem tocar em arquivos, em outras páginas ou na rede além do que foi liberado. Assinatura de código diz de quem o programa veio, não se ele é bom; a sandbox limita o estrago mesmo quando a confiança falha.',
     ],
   },
@@ -221,7 +222,7 @@ const dia126: Dia = {
         if (p.para && p.para !== CONTATO) return `Foi para ${p.para}. As notas vão para contato@loja.exemplo, que publicou a chave pública.`;
         return 'A carta segura ainda não foi entregue.';
       },
-      feito: 'Resumo SHA-256 assinado, chave de sessão AES sorteada cifrando texto e assinatura, chave de sessão cifrada com a pública da loja, tudo em base64. No servidor da loja fica um bloco ilegível. (O RSA do jogo usa números pequenos; o de verdade usa milhares de bits.)',
+      feito: 'Resumo SHA-256 assinado, chave de sessão AES sorteada cifrando texto e assinatura, chave de sessão cifrada com a pública da loja, tudo em base64. No servidor da loja fica um bloco ilegível. As chaves RSA são de 2048 bits, a chave de sessão é AES-128, e o texto vai em AES-GCM: mexido no servidor, não abre.',
     }),
     passo({
       alvo: ['equip', 'espiao'],
@@ -537,6 +538,21 @@ function tunelAoMeio(m: Mundo, r: string, local: string, remota: string, segredo
   return tuneis(m, r).find((t) => t.par === IX_VIZINHA && t.local === local && t.remota === remota && t.segredo === segredo);
 }
 
+interface RegistroCebola {
+  de?: string;
+  ipDestino?: string;
+  nos?: string[];
+  ok?: boolean;
+  ninguemSabeOsDois?: boolean;
+  visoes?: { no: string; papel: string; anterior: string; proximo: string }[];
+}
+
+/** O circuito em cebola de três nós montado da redação até a fonte, com ninguém sabendo as duas pontas. */
+function cebolaOk(m: Mundo): RegistroCebola | undefined {
+  const c = m.flags.cebola as RegistroCebola | undefined;
+  return c && c.ok && c.de === 'redacao' && c.ipDestino === FONTE && c.nos?.length === 3 && c.ninguemSabeOsDois ? c : undefined;
+}
+
 function pingFonte(m: Mundo): boolean {
   const p = registroPing(m, 'redacao', FONTE);
   return !!p && p.recebidos > 0;
@@ -578,7 +594,7 @@ const dia127: Dia = {
     'CHAMADO #0127',
     'Aprovado: o switch que a prefeitura instalou no centro de operações vira o ponto de troca de tráfego da região. A cidade, o provedor Estrada Larga e a cidade vizinha já plugaram os roteadores e trocam rotas por BGP ali mesmo, sem dar a volta pela capital. Com isso, o tráfego dos outros passa a atravessar Fim de Linha.',
     'Duas exigências antes da inauguração: o jornal da cidade quer falar com a fonte dele na capital sem que nenhum ponto do caminho saiba as duas pontas, e as outras redes querem ver que a cidade não deixa sair endereço forjado e percebe quando alguém anuncia o que não é seu.',
-    'Objetivo: montar a primeira camada do caminho da redação (o túnel da borda até o nó do meio), provar que a fonte responde e ver o que o meio enxerga, ligar o filtro antifalsificação na borda, ensaiar um sequestro de prefixo a partir do roteador de laboratório, responder a pergunta e desfazer o ensaio.',
+    'Objetivo: montar a primeira camada do caminho da redação (o túnel da borda até o nó do meio), provar que a fonte responde e ver o que o meio enxerga, montar da redação um circuito em cebola de três nós até a fonte e ver o que cada nó enxerga, ligar o filtro antifalsificação na borda, ensaiar um sequestro de prefixo a partir do roteador de laboratório, responder a pergunta e desfazer o ensaio.',
   ],
   manual: {
     titulo: 'Rede e sociedade: privacidade, censura e direitos',
@@ -592,6 +608,7 @@ const dia127: Dia = {
   dicas: [
     'O túnel da borda vai para o nó do meio, a vizinha (10.250.0.3), com a rede da redação (10.8.0.0/24) daqui e a da fonte (10.9.0.0/24) de lá. A vizinha já tem a outra ponta configurada, com o segredo pré-preenchido.',
     'Depois do ping da redação até 10.9.0.10, "O que o meio do caminho vê do túnel" na borda mostra só o cabeçalho de fora.',
+    'O circuito em cebola sai da redação: "Circuito em cebola (três nós)", com a fonte de destino e borda, vizinha e estrada como entrada, meio e saída.',
     'O ensaio de sequestro é no lab-rt, anunciando 192.0.2.0/25. Responda pelo alerta e retire o prefixo no próprio lab-rt.',
   ],
   perguntas: d127,
@@ -605,13 +622,14 @@ const dia127: Dia = {
       item('túnel da borda até o nó do meio (vizinha) para a rede da fonte, com a outra ponta fechando', !!t, t ? `${t.local} para ${t.remota} via ${t.par}` : 'ainda não'),
       item('a redação alcança a fonte (10.9.0.10) pelo caminho em camadas', !!t && pingFonte(m) && t.cifrados > 0, t ? `${t.cifrados} pacote(s) cifrado(s) na borda` : 'sem túnel'),
       item('visto o que o meio do caminho enxerga: só ESP entre a borda e o nó do meio', cap?.protocolo === 50, cap?.externo ?? 'ainda não'),
+      item('circuito em cebola de três nós da redação até a fonte, cada nó vendo só o anterior e o próximo', !!cebolaOk(m), cebolaOk(m) ? `por ${cebolaOk(m)!.nos!.join(', ')}` : (m.flags.cebola as RegistroCebola | undefined) ? 'o último circuito não serviu' : 'ainda não'),
       item('filtro antifalsificação ligado na borda de Fim de Linha', antiOk(m), antiOk(m) ? 'ligado' : 'desligado'),
       ...todasRespondidas(m, d127),
       item('ensaio desfeito: ninguém no ponto de troca anuncia prefixo alheio', !alheio.length && !seq.length, alheio.length ? `lab-rt anuncia ${alheio.join(', ')}` : seq.length ? `${seq.length} alerta(s)` : 'limpo'),
     ];
   },
   posMorte: [
-    'O caminho da redação ficou em duas camadas de túnel: a borda cifra para a vizinha, a vizinha abre e cifra de novo para a estrada, que entrega à fonte. No switch do ponto de troca, quem olhasse veria ESP da borda para a vizinha e ESP da vizinha para a estrada, nunca um pacote da redação para a fonte. Com honestidade: isto é uma corrente de túneis, não uma cebola de verdade. Na corrente, o nó do meio abre o pacote inteiro e sabe as duas pontas; na cebola, as camadas vão uma dentro da outra, desde a origem, e cada nó só consegue tirar a sua. O jornal ganhou um começo; anonimato de verdade pede três nós, camadas aninhadas e um nó do meio que não conhece ninguém.',
+    'O caminho da redação começou em duas camadas de túnel: a borda cifra para a vizinha, a vizinha abre e cifra de novo para a estrada, que entrega à fonte. No switch do ponto de troca, quem olhasse veria ESP da borda para a vizinha e ESP da vizinha para a estrada, nunca um pacote da redação para a fonte. Mas, na corrente, o nó do meio abre o pacote inteiro e sabe as duas pontas. Por isso a redação passou a falar pelo circuito em cebola: combinou uma chave com a borda, outra com a vizinha (pedida por dentro da camada da borda) e outra com a estrada (por dentro das duas), e embrulhou cada mensagem em três camadas, desde a origem. A borda tirou a dela e só soube que veio da redação e ia para a vizinha; a vizinha, que antes via tudo, agora só via a borda e a estrada; a estrada viu a vizinha e a fonte. Nenhum nó juntou as duas pontas. O que sobra é o tempo: quem vigiasse a entrada e a saída ao mesmo tempo poderia tentar casar os horários.',
     'O ensaio de sequestro mostrou por que um ponto de troca precisa de vigia. Bastou o lab-rt anunciar 192.0.2.0/25 para todo roteador da troca, inclusive a própria borda, preferir o /25 ao /24 legítimo: o mais específico vence sempre. Com o filtro antifalsificação ligado, a borda passou a achar que a rota de volta para metade da cidade saía pelo ponto de troca, e passaria a descartar como forjado o tráfego da própria rede: o PC de testes, em 192.0.2.50, ficaria sem saída. Um anúncio errado derruba até quem está certo. Retirado o prefixo, tudo voltou, e o alerta do BGP é o primeiro sinal que a operação vai vigiar todas as noites.',
     'E assim Fim de Linha virou ponto de troca de tráfego. O caminho começou num galpão sem senha e num bit virando sinal no cobre, na fibra e no ar; passou por quadros, retransmissões, o meio dividido do bairro, endereços, rotas e BGP, conversas confiáveis e justas, nomes, correio, a teia e a final ao vivo no estádio, até as cifras e defesas desta última noite. A cidade que não tinha internet agora é por onde a internet da região passa. Quem chegou até aqui aprendeu a rede de baixo para cima, e também que ela é feita de pessoas: é a camada 8 que decide o que a rede vai ser.',
   ],
@@ -631,7 +649,7 @@ const dia127: Dia = {
         if (t && t.par !== IX_VIZINHA) return `Ninguém espera um túnel da borda em ${t.par}. O nó do meio é a vizinha, no ponto de troca.`;
         return 'O túnel ainda não fecha com o nó do meio.';
       },
-      feito: 'IKE fechado com a vizinha: as duas pontas combinaram cifra e Diffie-Hellman e provaram que conhecem o mesmo segredo. O que for da redação para a rede da fonte sai em ESP até 10.250.0.3, e o MTU efetivo cai para 1427 bytes.',
+      feito: `IKE fechado com a vizinha: as duas pontas combinaram AES-GCM e o X25519 e provaram que conhecem o mesmo segredo. O que for da redação para a rede da fonte sai em ESP até 10.250.0.3, e o MTU efetivo cai para ${1500 - SOBRA_ESP} bytes.`,
     }),
     passo({
       alvo: ['equip', 'redacao'],
@@ -648,7 +666,24 @@ const dia127: Dia = {
       instrucao: 'Na borda, veja o último pacote do túnel do jeito que o ponto de troca vê.',
       porque: 'É a pergunta de sempre em privacidade: quem pode ver o quê. Aqui, o switch da troca e quem estivesse espelhando uma porta dele.',
       conferir: (m) => (m.flags.vpn?.captura?.protocolo === 50 ? true : 'Nada passou pelo túnel ainda. Faça o ping da redação antes.'),
-      feito: 'Por fora: IP 10.250.0.1 para 10.250.0.3, protocolo 50 (ESP), carga cifrada. Nem a redação, nem a fonte, nem que era ping. Só as pontas do trecho sabem o que vai dentro. E o nó do meio, que abre o pacote, sabe as duas: por isso a cebola de verdade aninha as camadas.',
+      feito: 'Por fora: IP 10.250.0.1 para 10.250.0.3, protocolo 50 (ESP), carga cifrada. Nem a redação, nem a fonte, nem que era ping. Só as pontas do trecho sabem o que vai dentro. E o nó do meio, que abre o pacote, sabe as duas: por isso a cebola aninha as camadas.',
+    }),
+    passo({
+      alvo: ['equip', 'redacao'],
+      acao: 'sg-cebola',
+      valores: { destino: FONTE, msg: 'GET /pauta-de-amanha HTTP/1.1' },
+      pedir: ['n1', 'n2', 'n3'],
+      exemplo: { n1: 'borda', n2: 'vizinha', n3: 'estrada' },
+      instrucao: 'Agora a cebola de verdade: da redação, monte um circuito de três nós até a fonte. A entrada é a borda, o meio é a vizinha e a saída é a estrada.',
+      porque: 'Na corrente de túneis, o nó do meio abre o pacote e vê as duas pontas. Na cebola, quem manda combina uma chave com cada nó e embrulha a mensagem em três camadas, uma dentro da outra; cada nó só consegue tirar a sua.',
+      conferir: (m) => {
+        if (cebolaOk(m)) return true;
+        const c = m.flags.cebola as RegistroCebola | undefined;
+        if (c && !c.ok) return 'O circuito não fechou: os três nós precisam ser diferentes, e nem a redação nem a fonte podem ser nó.';
+        if (c && c.ipDestino !== FONTE) return 'O destino do circuito é a fonte, 10.9.0.10.';
+        return 'O circuito ainda não foi montado da redação.';
+      },
+      feito: 'Três chaves combinadas por X25519, uma com cada nó, e três camadas de AES-GCM. A borda viu a redação e a vizinha; a vizinha viu a borda e a estrada, e mais nada; a estrada viu a vizinha e a fonte, e o conteúdo, que sai em claro dela. Quem sabe as duas pontas: ninguém.',
     }),
     passo({
       alvo: ['equip', 'borda'],

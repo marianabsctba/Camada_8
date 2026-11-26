@@ -1,7 +1,11 @@
-// Criptografia didática do ato 7: funções puras, determinísticas e sem bibliotecas externas.
-// Os números são pequenos o bastante para caber numa aula, mas o SHA-256, o HMAC e o AES-128
-// são completos e conferidos com os vetores de teste oficiais. Cada função importante devolve
-// também `passos`, a conta explicada em português.
+// Criptografia do ato 7: funções puras, determinísticas e sem bibliotecas externas.
+// Há duas metades. A didática usa números pequenos (RSA com p = 61 e q = 53, Diffie-Hellman com p = 23) para a
+// conta caber numa aula, e cada função devolve `passos`, a conta explicada em português. A de verdade, que o mundo
+// do jogo usa no TLS, na VPN, no Wi-Fi, no PGP, no DNSSEC e nos certificados, segue os padrões com os tamanhos
+// reais: AES-128 (FIPS 197), AES-GCM (NIST SP 800-38D), AES-CCM (RFC 3610), SHA-256 (FIPS 180-4), SHA-1,
+// HMAC (RFC 2104), PBKDF2 (RFC 8018), HKDF (RFC 5869), X25519 (RFC 7748) e RSA de 2048 bits com PKCS#1 v1.5 e
+// PSS (RFC 8017). Tudo conferido com os vetores de teste oficiais em tests/cripto.test.ts. Nada aqui é de tempo
+// constante: serve para ensinar e simular, não para proteger segredo de verdade.
 
 // ---------------------------------------------------------------------------
 // Utilidades de bytes
@@ -595,7 +599,38 @@ export interface CifraDeBloco {
 
 export function cifraAes(chave: Bytes): CifraDeBloco {
   const k = chave.slice();
-  return { nome: 'AES-128', tamanho: 16, cifrar: (b) => aesCifrar(b, k).resultado, decifrar: (b) => aesDecifrar(b, k).resultado };
+  const rodadas = expandirChaveAes(k);
+  return { nome: 'AES-128', tamanho: 16, cifrar: (b) => aesBloco(rodadas, b), decifrar: (b) => aesDecifrar(b, k).resultado };
+}
+
+const MUL2 = Array.from({ length: 256 }, (_, x) => gmul(x, 2));
+const MUL3 = Array.from({ length: 256 }, (_, x) => gmul(x, 3));
+
+/**
+ * O mesmo AES-128 de aesCifrar, sem guardar as etapas: é o que os modos (CTR, GCM, CCM) chamam bloco a bloco.
+ * `rodadas` são as 11 chaves de rodada de expandirChaveAes.
+ */
+export function aesBloco(rodadas: Bytes[], bloco: Bytes): Bytes {
+  if (bloco.length !== 16) throw new Error('o AES cifra blocos de 16 bytes');
+  let s = bloco.map((x, i) => x ^ rodadas[0][i]);
+  for (let r = 1; r <= 10; r++) {
+    const t = new Array<number>(16);
+    // SubBytes e ShiftRows juntos: a linha l da coluna c vem da coluna c + l
+    for (let c = 0; c < 4; c++) for (let l = 0; l < 4; l++) t[l + 4 * c] = AES_SBOX[s[l + 4 * ((c + l) % 4)]];
+    if (r < 10) {
+      for (let c = 0; c < 4; c++) {
+        const a0 = t[4 * c], a1 = t[4 * c + 1], a2 = t[4 * c + 2], a3 = t[4 * c + 3];
+        t[4 * c] = MUL2[a0] ^ MUL3[a1] ^ a2 ^ a3;
+        t[4 * c + 1] = a0 ^ MUL2[a1] ^ MUL3[a2] ^ a3;
+        t[4 * c + 2] = a0 ^ a1 ^ MUL2[a2] ^ MUL3[a3];
+        t[4 * c + 3] = MUL3[a0] ^ a1 ^ a2 ^ MUL2[a3];
+      }
+    }
+    const k = rodadas[r];
+    for (let i = 0; i < 16; i++) t[i] ^= k[i];
+    s = t;
+  }
+  return s;
 }
 
 const deBloco32 = (b: Bytes) => ((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]) >>> 0;
@@ -779,7 +814,8 @@ export function inversoModular(a: bigint, m: bigint): ResultadoNumero {
 }
 
 export interface ChavePublicaRsa { n: bigint; e: bigint }
-export interface ChavePrivadaRsa { n: bigint; d: bigint }
+/** Chave privada; com p, q e os expoentes do CRT (RFC 8017, 3.2), a conta fica umas quatro vezes mais rápida. */
+export interface ChavePrivadaRsa { n: bigint; d: bigint; p?: bigint; q?: bigint; dp?: bigint; dq?: bigint; qinv?: bigint }
 
 export interface ChavesRsa {
   p: bigint; q: bigint; n: bigint; phi: bigint; e: bigint; d: bigint;
@@ -1078,15 +1114,43 @@ export function buscarColisao(bits = 16, prefixo = 'mensagem ', limite = 1 << 22
 }
 
 // ---------------------------------------------------------------------------
-// 5. Assinatura digital: resumir e assinar com RSA de brinquedo
+// 5. Assinatura digital: resumir e assinar com RSA
 // ---------------------------------------------------------------------------
 
-/** O SHA-256 da mensagem reduzido módulo n, para caber no RSA pequeno. */
+/** O SHA-256 da mensagem reduzido módulo n, para caber no RSA pequeno da aula. */
 export function resumoParaRsa(mensagem: string, n: bigint): bigint {
   return BigInt('0x' + sha256(mensagem)) % n;
 }
 
+/** Chave grande o bastante para o PKCS#1 v1.5 com SHA-256 (62 bytes de codificação mais 11 de enchimento). */
+export function rsaDeVerdade(n: bigint): boolean {
+  return bitsDe(n) >= 1024;
+}
+
+/** Hexadecimal curto de um número grande, para caber na tela: começo...fim. */
+export function hexCurto(x: bigint | Bytes, lado = 12): string {
+  const h = typeof x === 'bigint' ? x.toString(16) : paraHex(x);
+  return h.length <= 2 * lado + 3 ? h : `${h.slice(0, lado)}...${h.slice(-lado)}`;
+}
+
+/**
+ * Assina o texto. Com chave de verdade (1024 bits ou mais), RSASSA-PKCS1-v1_5 com SHA-256 (RFC 8017, 8.2), o
+ * esquema dos certificados e do DNSSEC (algoritmo 8, RFC 5702). Com a chave pequena da aula, eleva o resumo
+ * reduzido módulo n, para a conta caber.
+ */
 export function assinarMensagem(mensagem: string, chave: ChavePrivadaRsa): { assinatura: bigint; resumo: bigint; passos: string[] } {
+  if (rsaDeVerdade(chave.n)) {
+    const s = bytesParaInteiro(assinarPkcs1(mensagem, chave));
+    return {
+      assinatura: s, resumo: BigInt('0x' + sha256(mensagem)),
+      passos: [
+        `Resume a mensagem com SHA-256: ${sha256(mensagem).slice(0, 16)}...`,
+        `Monta o bloco do PKCS#1 v1.5 do tamanho de n (${bitsDe(chave.n)} bits): 00 01 FF...FF 00, o identificador do SHA-256 e o resumo.`,
+        `Eleva o bloco a d módulo n com a chave privada: assinatura ${hexCurto(s)} (${bytesDoModulo(chave.n)} bytes).`,
+        'Assinar o resumo, e não a mensagem, deixa a conta do tamanho da chave, qualquer que seja o texto.',
+      ],
+    };
+  }
   const resumo = resumoParaRsa(mensagem, chave.n);
   const s = assinarRsa(resumo, chave);
   return {
@@ -1101,6 +1165,18 @@ export function assinarMensagem(mensagem: string, chave: ChavePrivadaRsa): { ass
 }
 
 export function verificarAssinatura(mensagem: string, assinatura: bigint, chave: ChavePublicaRsa): { valida: boolean; passos: string[] } {
+  if (rsaDeVerdade(chave.n)) {
+    const k = bytesDoModulo(chave.n);
+    const valida = assinatura >= 0n && assinatura < chave.n && verificarPkcs1(mensagem, inteiroParaBytes(assinatura, k), chave);
+    return {
+      valida,
+      passos: [
+        `Resume a mensagem recebida: ${sha256(mensagem).slice(0, 16)}...`,
+        `Eleva a assinatura a e = ${chave.e} módulo n e compara com o bloco PKCS#1 v1.5 esperado, byte a byte.`,
+        valida ? 'Iguais: a mensagem é íntegra e veio de quem tem a chave privada.' : 'Diferentes: mensagem alterada ou assinatura de outra pessoa.',
+      ],
+    };
+  }
   const h = resumoParaRsa(mensagem, chave.n);
   const v = expModular(assinatura, chave.e, chave.n).resultado;
   const valida = v === h;
@@ -1267,16 +1343,24 @@ export function chaveDeSenha(senha: string): Bytes {
   return sha256Bytes('kerberos|' + senha).slice(0, 16);
 }
 
-const NONCE_KRB: Bytes = new Array(16).fill(0);
-
+/**
+ * Sela com AES-128-GCM: nonce de 12 bytes, cifrado e etiqueta de 16. O Kerberos de verdade usa AES-CTS com
+ * HMAC-SHA1-96 (RFC 3962), cifra e integridade separadas; o efeito é o mesmo: chave errada não passa na
+ * integridade. O nonce sai de um resumo da chave e do conteúdo, para a simulação ser reprodutível.
+ */
 function selar(chave: Bytes, conteudo: object): Bytes {
-  return ctr(cifraAes(chave), JSON.stringify({ ok: 'krb', ...conteudo }), NONCE_KRB).resultado;
+  const claro = textoParaBytes(JSON.stringify(conteudo));
+  const iv = sha256Bytes([...chave, ...claro]).slice(0, 12);
+  const r = aesGcmCifrar(chave, iv, claro);
+  return [...iv, ...r.cifrado, ...r.tag];
 }
 
 function abrir(chave: Bytes, selado: Bytes): Record<string, unknown> | null {
+  if (selado.length < 28) return null;
+  const r = aesGcmDecifrar(chave, selado.slice(0, 12), selado.slice(12, -16), selado.slice(-16));
+  if (!r.ok) return null;
   try {
-    const obj = JSON.parse(bytesParaTexto(ctr(cifraAes(chave), selado, NONCE_KRB).resultado));
-    return obj && obj.ok === 'krb' ? obj : null;
+    return JSON.parse(bytesParaTexto(r.claro!)) as Record<string, unknown>;
   } catch {
     return null;
   }
@@ -1310,7 +1394,7 @@ export interface ResultadoKerberos {
 /**
  * Kerberos em seis mensagens: o servidor de autenticação (AS) entrega o bilhete de concessão (TGT),
  * o servidor de concessão (TGS) troca o TGT por um bilhete de serviço, e o serviço aceita o usuário.
- * Tudo cifrado de verdade com AES-128 em modo CTR, só que com um nonce fixo para ficar reprodutível.
+ * Tudo cifrado e autenticado de verdade com AES-128-GCM: quem abre com a chave errada esbarra na etiqueta.
  */
 export function simularKerberos(c: CenarioKerberos): ResultadoKerberos {
   const semente = c.semente ?? 'camada8';
@@ -1367,4 +1451,679 @@ export function simularKerberos(c: CenarioKerberos): ResultadoKerberos {
   if (!confirmacao || Number(confirmacao.hora) !== c.agora + 1) return falhar('o serviço não provou a própria identidade.');
   passos.push(`Acesso liberado a "${c.servico}". A senha só foi usada na estação, e o TGT vale por ${validade} minutos para outros serviços.`);
   return { sucesso: true, etapas, passos };
+}
+
+// ===========================================================================
+// 8. A criptografia de verdade do mundo do jogo
+// ===========================================================================
+
+const zeros = (n: number): Bytes => new Array<number>(n).fill(0);
+
+/** Inteiro sem sinal em `n` bytes, do mais significativo para o menos (I2OSP da RFC 8017). */
+export function inteiroParaBytes(x: bigint, n: number): Bytes {
+  if (x < 0n) throw new Error('inteiro negativo');
+  const hex = x.toString(16);
+  if (hex.length > 2 * n) throw new Error('inteiro grande demais');
+  return deHex(hex.padStart(2 * n, '0'));
+}
+
+/** Bytes para inteiro sem sinal, do mais significativo para o menos (OS2IP da RFC 8017). */
+export function bytesParaInteiro(b: Bytes): bigint {
+  return b.length ? BigInt('0x' + paraHex(b)) : 0n;
+}
+
+/** Compara dois blocos sem parar no primeiro byte diferente. */
+export function iguaisTempoConstante(a: Bytes, b: Bytes): boolean {
+  let dif = a.length ^ b.length;
+  for (let i = 0; i < Math.max(a.length, b.length); i++) dif |= (a[i] ?? 0) ^ (b[i] ?? 0);
+  return dif === 0;
+}
+
+// ---------------------------------------------------------------------------
+// 8.1 AES-GCM (NIST SP 800-38D)
+// ---------------------------------------------------------------------------
+
+/** R = 11100001 || 0^120: o polinômio x^128 + x^7 + x^2 + x + 1 na ordem de bits do GCM. */
+const R_GCM = 0xe1n << 120n;
+
+/**
+ * Multiplicação em GF(2^128) do GCM (SP 800-38D, algoritmo 1). Os bits vão do mais à esquerda (x^0) para o mais
+ * à direita (x^127), por isso deslocar para a direita multiplica por x.
+ */
+export function multiplicarGf128(x: bigint, y: bigint): bigint {
+  let z = 0n;
+  let v = y;
+  for (let i = 127n; i >= 0n; i--) {
+    if ((x >> i) & 1n) z ^= v;
+    v = v & 1n ? (v >> 1n) ^ R_GCM : v >> 1n;
+  }
+  return z;
+}
+
+/** GHASH_H(X): para cada bloco de 16 bytes, Y = (Y XOR X_i) · H. `dados` já vem completado até múltiplo de 16. */
+export function ghash(h: Bytes, dados: Bytes): Bytes {
+  if (dados.length % 16) throw new Error('o GHASH recebe blocos inteiros de 16 bytes');
+  const H = bytesParaInteiro(h);
+  let y = 0n;
+  for (let i = 0; i < dados.length; i += 16) y = multiplicarGf128(y ^ bytesParaInteiro(dados.slice(i, i + 16)), H);
+  return inteiroParaBytes(y, 16);
+}
+
+/** inc32: soma 1 aos 32 bits da direita do bloco contador, dando a volta em 2^32. */
+function inc32(b: Bytes): Bytes {
+  const out = b.slice();
+  for (let i = 15; i >= 12; i--) {
+    out[i] = (out[i] + 1) & 0xff;
+    if (out[i]) break;
+  }
+  return out;
+}
+
+function gctr(rodadas: Bytes[], icb: Bytes, x: Bytes): Bytes {
+  const out: Bytes = [];
+  let cb = icb;
+  for (let i = 0; i < x.length; i += 16) {
+    const fluxo = aesBloco(rodadas, cb);
+    const n = Math.min(16, x.length - i);
+    for (let j = 0; j < n; j++) out.push(x[i + j] ^ fluxo[j]);
+    cb = inc32(cb);
+  }
+  return out;
+}
+
+const completar16 = (b: Bytes): Bytes => [...b, ...zeros((16 - (b.length % 16)) % 16)];
+const tamanho64 = (bytes: number): Bytes => inteiroParaBytes(BigInt(bytes) * 8n, 8);
+
+interface PreparoGcm { rodadas: Bytes[]; h: Bytes; j0: Bytes }
+
+function preparoGcm(chave: Bytes, iv: Bytes): PreparoGcm {
+  if (chave.length !== 16) throw new Error('aqui o GCM usa AES-128: chave de 16 bytes');
+  if (!iv.length) throw new Error('o GCM precisa de IV');
+  const rodadas = expandirChaveAes(chave);
+  const h = aesBloco(rodadas, zeros(16));
+  // IV de 96 bits (o recomendado): J0 = IV || 0^31 || 1. Outro tamanho passa pelo GHASH.
+  const j0 = iv.length === 12 ? [...iv, 0, 0, 0, 1] : ghash(h, [...completar16(iv), ...zeros(8), ...tamanho64(iv.length)]);
+  return { rodadas, h, j0 };
+}
+
+function etiquetaGcm(p: PreparoGcm, aad: Bytes, cifrado: Bytes, tamanhoTag: number): Bytes {
+  const s = ghash(p.h, [...completar16(aad), ...completar16(cifrado), ...tamanho64(aad.length), ...tamanho64(cifrado.length)]);
+  return gctr(p.rodadas, p.j0, s).slice(0, tamanhoTag);
+}
+
+export interface ResultadoGcm {
+  cifrado: Bytes;
+  tag: Bytes;
+  passos: string[];
+}
+
+/**
+ * AES-128-GCM, cifração autenticada (SP 800-38D, algoritmo 4): o modo contador cifra a partir de inc32(J0), e o
+ * GHASH dos dados adicionais (AAD, que vão em claro mas ficam protegidos) e do cifrado, cifrado com J0, vira a
+ * etiqueta de 128 bits.
+ */
+export function aesGcmCifrar(chave: Bytes, iv: Bytes, claro: string | Bytes, aad: Bytes = [], tamanhoTag = 16): ResultadoGcm {
+  const p = preparoGcm(chave, iv);
+  const m = bytesDe(claro);
+  const cifrado = gctr(p.rodadas, inc32(p.j0), m);
+  const tag = etiquetaGcm(p, aad, cifrado, tamanhoTag);
+  return {
+    cifrado, tag,
+    passos: [
+      `H = AES(chave, 0^128) = ${paraHex(p.h)}, a chave do GHASH.`,
+      `J0 = ${paraHex(p.j0)} (IV de ${iv.length * 8} bits${iv.length === 12 ? ' seguido de 0^31 e 1' : ', passado pelo GHASH'}).`,
+      `Modo contador a partir de inc32(J0): ${m.length} byte(s) viram ${paraHex(cifrado).slice(0, 48)}${cifrado.length > 24 ? '...' : ''}`,
+      `GHASH dos ${aad.length} byte(s) de AAD, do cifrado e dos dois tamanhos, cifrado com J0: etiqueta ${paraHex(tag)}.`,
+      'Quem recebe recalcula a etiqueta antes de decifrar. Um bit trocado no cifrado ou no AAD e ela não confere.',
+    ],
+  };
+}
+
+export interface AberturaAead {
+  ok: boolean;
+  claro?: Bytes;
+  passos: string[];
+}
+
+/** Decifração autenticada do GCM (algoritmo 5): confere a etiqueta primeiro; se não bater, não devolve nada. */
+export function aesGcmDecifrar(chave: Bytes, iv: Bytes, cifrado: Bytes, tag: Bytes, aad: Bytes = []): AberturaAead {
+  const p = preparoGcm(chave, iv);
+  const esperada = etiquetaGcm(p, aad, cifrado, tag.length);
+  if (!iguaisTempoConstante(esperada, tag)) {
+    return { ok: false, passos: [`Etiqueta recebida ${paraHex(tag)}, calculada ${paraHex(esperada)}: não confere. Nada é decifrado (FAIL).`] };
+  }
+  return { ok: true, claro: gctr(p.rodadas, inc32(p.j0), cifrado), passos: [`Etiqueta ${paraHex(tag)} confere: cifrado e AAD intactos.`] };
+}
+
+// ---------------------------------------------------------------------------
+// 8.2 AES-CCM (RFC 3610), o modo do CCMP do WPA2 e do WPA3
+// ---------------------------------------------------------------------------
+
+function blocosCcm(nonce: Bytes, L: number, M: number, aad: Bytes, m: Bytes): Bytes {
+  const flags = (aad.length ? 64 : 0) | (((M - 2) / 2) << 3) | (L - 1);
+  const b0 = [flags, ...nonce, ...inteiroParaBytes(BigInt(m.length), L)];
+  let a: Bytes = [];
+  if (aad.length) {
+    if (aad.length >= 0xff00) throw new Error('AAD grande demais para este CCM');
+    a = completar16([(aad.length >> 8) & 0xff, aad.length & 0xff, ...aad]);
+  }
+  return [...b0, ...a, ...completar16(m)];
+}
+
+function validarCcm(nonce: Bytes, M: number): number {
+  const L = 15 - nonce.length;
+  if (L < 2 || L > 8) throw new Error('o nonce do CCM tem de 7 a 13 bytes');
+  if (M < 4 || M > 16 || M % 2) throw new Error('a etiqueta do CCM tem 4, 6, 8, 10, 12, 14 ou 16 bytes');
+  return L;
+}
+
+function ctrCcm(rodadas: Bytes[], nonce: Bytes, L: number, m: Bytes, T: Bytes): { c: Bytes; u: Bytes } {
+  const A = (i: number) => [L - 1, ...nonce, ...inteiroParaBytes(BigInt(i), L)];
+  const s0 = aesBloco(rodadas, A(0));
+  const c: Bytes = [];
+  for (let i = 0; i < m.length; i += 16) {
+    const s = aesBloco(rodadas, A(i / 16 + 1));
+    for (let j = 0; j < Math.min(16, m.length - i); j++) c.push(m[i + j] ^ s[j]);
+  }
+  return { c, u: xorBytes(T, s0) };
+}
+
+function cbcMacCcm(rodadas: Bytes[], blocos: Bytes, M: number): Bytes {
+  let x = zeros(16);
+  for (let i = 0; i < blocos.length; i += 16) x = aesBloco(rodadas, xorBytes(x, blocos.slice(i, i + 16)));
+  return x.slice(0, M);
+}
+
+/**
+ * AES-CCM (RFC 3610): o CBC-MAC sobre B0, o AAD e a mensagem dá a etiqueta T de M bytes; o modo contador com
+ * A1, A2... cifra a mensagem, e A0 cifra a etiqueta. O CCMP usa M = 8 e L = 2, com nonce de 13 bytes.
+ */
+export function aesCcmCifrar(chave: Bytes, nonce: Bytes, claro: string | Bytes, aad: Bytes = [], M = 8): ResultadoGcm {
+  const L = validarCcm(nonce, M);
+  const rodadas = expandirChaveAes(chave);
+  const m = bytesDe(claro);
+  const T = cbcMacCcm(rodadas, blocosCcm(nonce, L, M, aad, m), M);
+  const { c, u } = ctrCcm(rodadas, nonce, L, m, T);
+  return {
+    cifrado: c, tag: u,
+    passos: [
+      `CBC-MAC de B0, dos ${aad.length} byte(s) de AAD e da mensagem: T = ${paraHex(T)}.`,
+      `Modo contador a partir de A1 cifra a mensagem; A0 cifra a etiqueta: U = ${paraHex(u)}.`,
+    ],
+  };
+}
+
+export function aesCcmDecifrar(chave: Bytes, nonce: Bytes, cifrado: Bytes, tag: Bytes, aad: Bytes = []): AberturaAead {
+  const M = tag.length;
+  const L = validarCcm(nonce, M);
+  const rodadas = expandirChaveAes(chave);
+  // decifrar no modo contador é a mesma conta; o T recuperado é U XOR S0
+  const { c: m, u: T } = ctrCcm(rodadas, nonce, L, cifrado, tag);
+  const esperado = cbcMacCcm(rodadas, blocosCcm(nonce, L, M, aad, m), M);
+  if (!iguaisTempoConstante(esperado, T)) return { ok: false, passos: ['O CBC-MAC recalculado não bate com a etiqueta: quadro descartado.'] };
+  return { ok: true, claro: m, passos: ['CBC-MAC confere: quadro íntegro.'] };
+}
+
+// ---------------------------------------------------------------------------
+// 8.3 SHA-1, HMAC-SHA1, PBKDF2 e o PRF do 802.11
+// ---------------------------------------------------------------------------
+
+const H0_SHA1 = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0];
+const rotl = (x: number, n: number) => ((x << n) | (x >>> (32 - n))) >>> 0;
+
+/** Função de compressão do SHA-1 (FIPS 180-4, 6.1.2) sobre um bloco de 16 palavras. Muda `h` no lugar. */
+function sha1Comprimir(h: Uint32Array, w: Uint32Array): void {
+  for (let t = 16; t < 80; t++) w[t] = rotl(w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16], 1);
+  let a = h[0], b = h[1], c = h[2], d = h[3], e = h[4];
+  for (let t = 0; t < 80; t++) {
+    let f: number, k: number;
+    if (t < 20) { f = (b & c) | (~b & d); k = 0x5a827999; }
+    else if (t < 40) { f = b ^ c ^ d; k = 0x6ed9eba1; }
+    else if (t < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8f1bbcdc; }
+    else { f = b ^ c ^ d; k = 0xca62c1d6; }
+    const tmp = (rotl(a, 5) + f + e + k + w[t]) >>> 0;
+    e = d; d = c; c = rotl(b, 30); b = a; a = tmp;
+  }
+  h[0] = (h[0] + a) >>> 0; h[1] = (h[1] + b) >>> 0; h[2] = (h[2] + c) >>> 0; h[3] = (h[3] + d) >>> 0; h[4] = (h[4] + e) >>> 0;
+}
+
+const palavrasParaBytes = (h: ArrayLike<number>): Bytes => Array.from(h).flatMap(paraBloco32);
+
+/** SHA-1 (FIPS 180-4). Quebrado para assinatura desde que acharam colisões, mas ainda é a base do PBKDF2 do WPA2. */
+export function sha1Bytes(entrada: string | Bytes): Bytes {
+  const m = bytesDe(entrada);
+  const bits = m.length * 8;
+  m.push(0x80);
+  while (m.length % 64 !== 56) m.push(0);
+  m.push(...paraBloco32(Math.floor(bits / 2 ** 32)), ...paraBloco32(bits >>> 0));
+  const h = Uint32Array.from(H0_SHA1);
+  const w = new Uint32Array(80);
+  for (let i = 0; i < m.length; i += 64) {
+    for (let t = 0; t < 16; t++) w[t] = deBloco32(m.slice(i + 4 * t, i + 4 * t + 4));
+    sha1Comprimir(h, w);
+  }
+  return palavrasParaBytes(h);
+}
+
+export function sha1(entrada: string | Bytes): string {
+  return paraHex(sha1Bytes(entrada));
+}
+
+function chaveHmac(chave: Bytes, resumir: (b: Bytes) => Bytes): Bytes {
+  const k = chave.length > 64 ? resumir(chave) : chave.slice();
+  while (k.length < 64) k.push(0);
+  return k;
+}
+
+/** HMAC-SHA1 (RFC 2104). */
+export function hmacSha1(chave: string | Bytes, mensagem: string | Bytes): Bytes {
+  const k = chaveHmac(bytesDe(chave), sha1Bytes);
+  const interno = sha1Bytes([...k.map((b) => b ^ 0x36), ...bytesDe(mensagem)]);
+  return sha1Bytes([...k.map((b) => b ^ 0x5c), ...interno]);
+}
+
+/**
+ * PBKDF2 com HMAC-SHA1 (RFC 8018, 5.2): T_i = U_1 XOR U_2 XOR ... XOR U_c, com U_1 = HMAC(P, S || INT(i)) e
+ * U_j = HMAC(P, U_{j-1}). Todas as `iteracoes` de verdade; o único atalho é de implementação: os estados do SHA-1
+ * depois de K XOR ipad e de K XOR opad são calculados uma vez só, como faz qualquer biblioteca séria.
+ */
+export function pbkdf2HmacSha1(senha: string | Bytes, sal: string | Bytes, iteracoes: number, tamanho: number): Bytes {
+  if (iteracoes < 1) throw new Error('o PBKDF2 precisa de pelo menos 1 iteração');
+  const k = chaveHmac(bytesDe(senha), sha1Bytes);
+  const w = new Uint32Array(80);
+  const comprimirBloco = (h: Uint32Array, bloco: Bytes) => {
+    for (let t = 0; t < 16; t++) w[t] = deBloco32(bloco.slice(4 * t, 4 * t + 4));
+    sha1Comprimir(h, w);
+  };
+  const ipad = Uint32Array.from(H0_SHA1);
+  comprimirBloco(ipad, k.map((b) => b ^ 0x36));
+  const opad = Uint32Array.from(H0_SHA1);
+  comprimirBloco(opad, k.map((b) => b ^ 0x5c));
+  // U tem 20 bytes: o bloco depois da chave é U || 0x80 || zeros || tamanho (64 + 20 bytes = 672 bits)
+  const passo = (h: Uint32Array, u: Uint32Array) => {
+    for (let t = 0; t < 5; t++) w[t] = u[t];
+    w[5] = 0x80000000;
+    for (let t = 6; t < 15; t++) w[t] = 0;
+    w[15] = 672;
+    sha1Comprimir(h, w);
+  };
+  const s = bytesDe(sal);
+  const out: Bytes = [];
+  for (let i = 1; out.length < tamanho; i++) {
+    const u1 = hmacSha1(k, [...s, ...paraBloco32(i)]);
+    const u = new Uint32Array(5);
+    for (let t = 0; t < 5; t++) u[t] = deBloco32(u1.slice(4 * t, 4 * t + 4));
+    const acumulado = u.slice();
+    for (let j = 1; j < iteracoes; j++) {
+      const hi = ipad.slice();
+      passo(hi, u);
+      const ho = opad.slice();
+      passo(ho, hi);
+      u.set(ho);
+      for (let t = 0; t < 5; t++) acumulado[t] ^= u[t];
+    }
+    out.push(...palavrasParaBytes(acumulado));
+  }
+  return out.slice(0, tamanho);
+}
+
+/**
+ * PRF do IEEE 802.11 (802.11i, 8.5.1.1): R = HMAC-SHA1(K, A || 0 || B || i) para i = 0, 1, 2..., até `bits`.
+ * É assim que a PMK vira a PTK no aperto de mão de 4 vias.
+ */
+export function prf80211(chave: Bytes, rotulo: string, dados: Bytes, bits: number): Bytes {
+  const a = textoParaBytes(rotulo);
+  const out: Bytes = [];
+  for (let i = 0; out.length * 8 < bits; i++) out.push(...hmacSha1(chave, [...a, 0, ...dados, i]));
+  return out.slice(0, bits / 8);
+}
+
+// ---------------------------------------------------------------------------
+// 8.4 HMAC-SHA256 em bytes, HKDF (RFC 5869) e o HKDF-Expand-Label do TLS 1.3 (RFC 8446, 7.1)
+// ---------------------------------------------------------------------------
+
+export function hmacSha256Bytes(chave: string | Bytes, mensagem: string | Bytes): Bytes {
+  const k = chaveHmac(bytesDe(chave), sha256Bytes);
+  const interno = sha256Bytes([...k.map((b) => b ^ 0x36), ...bytesDe(mensagem)]);
+  return sha256Bytes([...k.map((b) => b ^ 0x5c), ...interno]);
+}
+
+/** HKDF-Extract: PRK = HMAC-Hash(sal, IKM). Sem sal, um bloco de zeros do tamanho do resumo. */
+export function hkdfExtrair(sal: Bytes, ikm: Bytes): Bytes {
+  return hmacSha256Bytes(sal.length ? sal : zeros(32), ikm);
+}
+
+/** HKDF-Expand: T(i) = HMAC-Hash(PRK, T(i-1) || info || i), até `tamanho` bytes. */
+export function hkdfExpandir(prk: Bytes, info: Bytes, tamanho: number): Bytes {
+  if (tamanho > 255 * 32) throw new Error('o HKDF-SHA256 entrega até 8160 bytes');
+  const out: Bytes = [];
+  let t: Bytes = [];
+  for (let i = 1; out.length < tamanho; i++) {
+    t = hmacSha256Bytes(prk, [...t, ...info, i]);
+    out.push(...t);
+  }
+  return out.slice(0, tamanho);
+}
+
+/** HKDF-Expand-Label(segredo, rótulo, contexto, tamanho) do TLS 1.3: o rótulo ganha o prefixo "tls13 ". */
+export function expandirRotulo(segredo: Bytes, rotulo: string, contexto: Bytes, tamanho: number): Bytes {
+  const r = textoParaBytes('tls13 ' + rotulo);
+  return hkdfExpandir(segredo, [(tamanho >> 8) & 0xff, tamanho & 0xff, r.length, ...r, contexto.length, ...contexto], tamanho);
+}
+
+/** Derive-Secret(segredo, rótulo, mensagens) = HKDF-Expand-Label(segredo, rótulo, SHA-256(mensagens), 32). */
+export function derivarSegredo(segredo: Bytes, rotulo: string, transcrito: Bytes): Bytes {
+  return expandirRotulo(segredo, rotulo, sha256Bytes(transcrito), 32);
+}
+
+// ---------------------------------------------------------------------------
+// 8.5 X25519 (RFC 7748): Diffie-Hellman na curva de Montgomery
+// ---------------------------------------------------------------------------
+
+const P25519 = (1n << 255n) - 19n;
+const A24 = 121665n;
+const modP = (a: bigint) => { const r = a % P25519; return r < 0n ? r + P25519 : r; };
+
+const lerLE = (b: Bytes): bigint => bytesParaInteiro([...b].reverse());
+const escreverLE = (x: bigint): Bytes => inteiroParaBytes(x, 32).reverse();
+
+/** O ponto base da curva: u = 9. */
+export const X25519_BASE: Bytes = [9, ...zeros(31)];
+
+/**
+ * X25519(k, u) (RFC 7748, 5): o escalar é grampeado (bits 0, 1, 2 e 255 zerados, bit 254 ligado), e a escada de
+ * Montgomery anda bit a bit do 254 ao 0, trocando os dois pontos conforme o bit, só com a coordenada u.
+ */
+export function x25519(escalar: Bytes, u: Bytes): Bytes {
+  if (escalar.length !== 32 || u.length !== 32) throw new Error('o X25519 usa escalar e coordenada de 32 bytes');
+  const k = escalar.slice();
+  k[0] &= 248;
+  k[31] &= 127;
+  k[31] |= 64;
+  const kn = lerLE(k);
+  const uu = u.slice();
+  uu[31] &= 127;
+  const x1 = modP(lerLE(uu));
+  let x2 = 1n, z2 = 0n, x3 = x1, z3 = 1n, troca = 0n;
+  for (let t = 254n; t >= 0n; t--) {
+    const kt = (kn >> t) & 1n;
+    troca ^= kt;
+    if (troca) { [x2, x3] = [x3, x2]; [z2, z3] = [z3, z2]; }
+    troca = kt;
+    const A = modP(x2 + z2), AA = modP(A * A), B = modP(x2 - z2), BB = modP(B * B), E = modP(AA - BB);
+    const C = modP(x3 + z3), D = modP(x3 - z3), DA = modP(D * A), CB = modP(C * B);
+    x3 = modP((DA + CB) ** 2n);
+    z3 = modP(x1 * modP((DA - CB) ** 2n));
+    x2 = modP(AA * BB);
+    z2 = modP(E * (AA + A24 * E));
+  }
+  if (troca) { [x2, x3] = [x3, x2]; [z2, z3] = [z3, z2]; }
+  return escreverLE(modP(x2 * potenciaModular(z2, P25519 - 2n, P25519)));
+}
+
+export interface ParX25519 { privada: Bytes; publica: Bytes }
+
+export function parX25519(privada: Bytes): ParX25519 {
+  return { privada: privada.slice(), publica: x25519(privada, X25519_BASE) };
+}
+
+// ---------------------------------------------------------------------------
+// 8.6 Aritmética grande: potência rápida, Miller-Rabin e primos por semente
+// ---------------------------------------------------------------------------
+
+/** b^e mod m com janela fixa de 4 bits: a mesma conta de expModular, sem guardar os passos. */
+export function potenciaModular(base: bigint, expoente: bigint, modulo: bigint): bigint {
+  if (modulo === 1n) return 0n;
+  const b = mod(base, modulo);
+  const tabela: bigint[] = [1n];
+  for (let i = 1; i < 16; i++) tabela.push((tabela[i - 1] * b) % modulo);
+  let r = 1n;
+  for (const c of expoente.toString(16)) {
+    r = (r * r) % modulo; r = (r * r) % modulo; r = (r * r) % modulo; r = (r * r) % modulo;
+    const d = parseInt(c, 16);
+    if (d) r = (r * tabela[d]) % modulo;
+  }
+  return r;
+}
+
+/** Inverso modular sem os passos (Euclides estendido). */
+export function inverso(a: bigint, m: bigint): bigint {
+  let [r0, r1] = [mod(a, m), m];
+  let [s0, s1] = [1n, 0n];
+  while (r1 !== 0n) {
+    const q = r0 / r1;
+    [r0, r1] = [r1, r0 - q * r1];
+    [s0, s1] = [s1, s0 - q * s1];
+  }
+  if (r0 !== 1n) throw new Error('sem inverso');
+  return mod(s0, m);
+}
+
+/**
+ * Gerador determinístico de bytes a partir de uma semente: SHA-256(semente || contador) em sequência, no espírito
+ * do Hash_DRBG do NIST SP 800-90A (sem reposição de entropia). Mesma semente, mesmos bytes: os dias ficam
+ * reprodutíveis.
+ */
+export function geradorDeSemente(semente: string): (n: number) => Bytes {
+  let contador = 0;
+  let sobra: Bytes = [];
+  return (n: number) => {
+    while (sobra.length < n) sobra.push(...sha256Bytes(`${semente}|${contador++}`));
+    const out = sobra.slice(0, n);
+    sobra = sobra.slice(n);
+    return out;
+  };
+}
+
+const PRIMOS_PEQUENOS: number[] = primeiros(300);
+
+/** Miller-Rabin com as bases dadas: n - 1 = 2^s · d, e cada base a precisa dar a^d = 1 ou passar por -1. */
+export function millerRabin(n: bigint, bases: bigint[]): boolean {
+  if (n < 4n) return n === 2n || n === 3n;
+  if (n % 2n === 0n) return false;
+  let d = n - 1n;
+  let s = 0;
+  while (d % 2n === 0n) { d /= 2n; s++; }
+  for (const base of bases) {
+    const a = 2n + mod(base, n - 3n);
+    let x = potenciaModular(a, d, n);
+    if (x === 1n || x === n - 1n) continue;
+    let composto = true;
+    for (let i = 1; i < s; i++) {
+      x = (x * x) % n;
+      if (x === n - 1n) { composto = false; break; }
+    }
+    if (composto) return false;
+  }
+  return true;
+}
+
+/** Rodadas de Miller-Rabin por candidato: o erro de pior caso é 4^-20, e para candidatos sorteados é muito menor. */
+export const RODADAS_MILLER_RABIN = 20;
+
+/** Testa primalidade: divisão pelos primeiros 300 primos e Miller-Rabin com bases tiradas do gerador. */
+export function ehProvavelPrimo(n: bigint, sortear: (n: number) => Bytes, rodadas = RODADAS_MILLER_RABIN): boolean {
+  if (n < 2n) return false;
+  for (const p of PRIMOS_PEQUENOS) {
+    const bp = BigInt(p);
+    if (n === bp) return true;
+    if (n % bp === 0n) return false;
+  }
+  const tam = Math.ceil(n.toString(16).length / 2);
+  return millerRabin(n, Array.from({ length: rodadas }, () => bytesParaInteiro(sortear(tam))));
+}
+
+/**
+ * Primo de `bits` bits para RSA (no espírito do FIPS 186-5, apêndice A.1.3): sorteia um ímpar com os dois bits de
+ * cima ligados (para p·q ter exatamente o dobro de bits), anda de 2 em 2 com uma peneira de primos pequenos e para
+ * no primeiro que passa no Miller-Rabin e tem mdc(e, p - 1) = 1.
+ */
+export function gerarPrimo(bits: number, sortear: (n: number) => Bytes, e = 65537n): bigint {
+  if (bits < 16 || bits % 8) throw new Error('use um tamanho múltiplo de 8 bits, a partir de 16');
+  for (;;) {
+    const b = sortear(bits / 8);
+    b[0] |= 0xc0;
+    b[b.length - 1] |= 1;
+    const base = bytesParaInteiro(b);
+    const restos = PRIMOS_PEQUENOS.map((p) => Number(base % BigInt(p)));
+    for (let delta = 0; delta < 1 << 16; delta += 2) {
+      const c = base + BigInt(delta);
+      if (c >> BigInt(bits) !== 0n) break;
+      if (PRIMOS_PEQUENOS.some((p, i) => (restos[i] + delta) % p === 0 && c !== BigInt(p))) continue;
+      if (mdc(e, c - 1n) !== 1n) continue;
+      if (ehProvavelPrimo(c, sortear)) return c;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 8.7 RSA de verdade (RFC 8017): chaves de 2048 bits, CRT, PKCS#1 v1.5 e PSS com SHA-256
+// ---------------------------------------------------------------------------
+
+export function bitsDe(x: bigint): number {
+  return x === 0n ? 0 : x.toString(2).length;
+}
+
+/** Monta o par RSA a partir de dois primos grandes, com d = e^-1 mod λ(n), como pede a RFC 8017, e os números do CRT. */
+export function chavesRsaDePrimos(p: bigint, q: bigint, e = 65537n): ChavesRsa {
+  if (p === q) throw new Error('p e q precisam ser diferentes');
+  if (p < q) [p, q] = [q, p];
+  const n = p * q;
+  const phi = (p - 1n) * (q - 1n);
+  const lambda = phi / mdc(p - 1n, q - 1n);
+  const d = inverso(e, lambda);
+  const privada: ChavePrivadaRsa = { n, d, p, q, dp: d % (p - 1n), dq: d % (q - 1n), qinv: inverso(q, p) };
+  return {
+    p, q, n, phi, e, d,
+    publica: { n, e },
+    privada,
+    passos: [
+      `Dois primos de ${bitsDe(p)} bits; n = p × q tem ${bitsDe(n)} bits (${n.toString().length} dígitos decimais); e = ${e}.`,
+      `d = e^-1 mod λ(n), com λ(n) = mmc(p - 1, q - 1). Para assinar e decifrar, o teorema chinês do resto faz duas contas de ${bitsDe(p)} bits no lugar de uma de ${bitsDe(n)}.`,
+    ],
+  };
+}
+
+/** Gera um par RSA de `bits` bits a partir da semente (determinístico). Com 2048 bits leva segundos: o jogo guarda as chaves prontas. */
+export function gerarRsaPorSemente(semente: string, bits = 2048, e = 65537n): ChavesRsa {
+  const sortear = geradorDeSemente(semente);
+  for (;;) {
+    const p = gerarPrimo(bits / 2, sortear, e);
+    const q = gerarPrimo(bits / 2, sortear, e);
+    if (p !== q && bitsDe(p * q) === bits) return chavesRsaDePrimos(p, q, e);
+  }
+}
+
+const bytesDoModulo = (n: bigint) => Math.ceil(bitsDe(n) / 8);
+
+/** RSAEP/RSAVP1: c = m^e mod n. */
+function rsaPublica(x: bigint, k: ChavePublicaRsa): bigint {
+  if (x < 0n || x >= k.n) throw new Error('representante fora do intervalo');
+  return potenciaModular(x, k.e, k.n);
+}
+
+/** RSADP/RSASP1: m = c^d mod n, pelo CRT quando há p e q (RFC 8017, 5.1.2). */
+function rsaPrivada(x: bigint, k: ChavePrivadaRsa): bigint {
+  if (x < 0n || x >= k.n) throw new Error('representante fora do intervalo');
+  if (k.p === undefined || k.q === undefined || k.dp === undefined || k.dq === undefined || k.qinv === undefined) return potenciaModular(x, k.d, k.n);
+  const m1 = potenciaModular(x % k.p, k.dp, k.p);
+  const m2 = potenciaModular(x % k.q, k.dq, k.q);
+  return m2 + mod(k.qinv * (m1 - m2), k.p) * k.q;
+}
+
+/** O prefixo DigestInfo do SHA-256 (RFC 8017, 9.2, nota 1). */
+const DIGEST_INFO_SHA256 = deHex('3031300d060960864801650304020105000420');
+
+/** EMSA-PKCS1-v1_5: 00 01 FF...FF 00 || DigestInfo || H. */
+function emsaPkcs1(mensagem: Bytes, k: number): Bytes {
+  const t = [...DIGEST_INFO_SHA256, ...sha256Bytes(mensagem)];
+  if (k < t.length + 11) throw new Error('módulo pequeno demais para PKCS#1 v1.5 com SHA-256');
+  return [0x00, 0x01, ...new Array<number>(k - t.length - 3).fill(0xff), 0x00, ...t];
+}
+
+const memoAssinaturas = new Map<string, Bytes>();
+
+/** RSASSA-PKCS1-v1_5 com SHA-256 (RFC 8017, 8.2.1). Determinística: a mesma mensagem dá a mesma assinatura. */
+export function assinarPkcs1(mensagem: string | Bytes, chave: ChavePrivadaRsa): Bytes {
+  const m = bytesDe(mensagem);
+  const memo = `${chave.n.toString(36).slice(-24)}|${chave.d.toString(36).slice(-8)}|${paraHex(sha256Bytes(m))}`;
+  const pronta = memoAssinaturas.get(memo);
+  if (pronta) return pronta.slice();
+  const k = bytesDoModulo(chave.n);
+  const s = inteiroParaBytes(rsaPrivada(bytesParaInteiro(emsaPkcs1(m, k)), chave), k);
+  if (memoAssinaturas.size > 2000) memoAssinaturas.clear();
+  memoAssinaturas.set(memo, s);
+  return s.slice();
+}
+
+/** RSASSA-PKCS1-v1_5-VERIFY: eleva ao e e compara com a codificação esperada, byte a byte. */
+export function verificarPkcs1(mensagem: string | Bytes, assinatura: Bytes, chave: ChavePublicaRsa): boolean {
+  const k = bytesDoModulo(chave.n);
+  if (assinatura.length !== k) return false;
+  const s = bytesParaInteiro(assinatura);
+  if (s >= chave.n) return false;
+  return iguaisTempoConstante(inteiroParaBytes(rsaPublica(s, chave), k), emsaPkcs1(bytesDe(mensagem), k));
+}
+
+/** MGF1 com SHA-256 (RFC 8017, B.2.1). */
+export function mgf1(semente: Bytes, tamanho: number): Bytes {
+  const out: Bytes = [];
+  for (let c = 0; out.length < tamanho; c++) out.push(...sha256Bytes([...semente, ...paraBloco32(c)]));
+  return out.slice(0, tamanho);
+}
+
+/** RSASSA-PSS com SHA-256, MGF1-SHA256 e sal de 32 bytes (RFC 8017, 8.1 e 9.1): o que o TLS 1.3 pede no CertificateVerify. */
+export function assinarPss(mensagem: string | Bytes, chave: ChavePrivadaRsa, sal: Bytes): Bytes {
+  const emBits = bitsDe(chave.n) - 1;
+  const emLen = Math.ceil(emBits / 8);
+  const hLen = 32;
+  if (emLen < hLen + sal.length + 2) throw new Error('módulo pequeno demais para PSS');
+  const H = sha256Bytes([...zeros(8), ...sha256Bytes(bytesDe(mensagem)), ...sal]);
+  const db = [...zeros(emLen - sal.length - hLen - 2), 0x01, ...sal];
+  const mascarado = xorBytes(db, mgf1(H, emLen - hLen - 1));
+  mascarado[0] &= 0xff >> (8 * emLen - emBits);
+  return inteiroParaBytes(rsaPrivada(bytesParaInteiro([...mascarado, ...H, 0xbc]), chave), bytesDoModulo(chave.n));
+}
+
+export function verificarPss(mensagem: string | Bytes, assinatura: Bytes, chave: ChavePublicaRsa, tamanhoSal = 32): boolean {
+  const k = bytesDoModulo(chave.n);
+  if (assinatura.length !== k) return false;
+  const s = bytesParaInteiro(assinatura);
+  if (s >= chave.n) return false;
+  const emBits = bitsDe(chave.n) - 1;
+  const emLen = Math.ceil(emBits / 8);
+  const hLen = 32;
+  const v = rsaPublica(s, chave);
+  if (bitsDe(v) > emBits || emLen < hLen + tamanhoSal + 2) return false;
+  const em = inteiroParaBytes(v, emLen);
+  if (em[emLen - 1] !== 0xbc) return false;
+  const mascarado = em.slice(0, emLen - hLen - 1);
+  const H = em.slice(emLen - hLen - 1, emLen - 1);
+  const db = xorBytes(mascarado, mgf1(H, emLen - hLen - 1));
+  db[0] &= 0xff >> (8 * emLen - emBits);
+  const ps = emLen - hLen - tamanhoSal - 2;
+  if (db.slice(0, ps).some((b) => b !== 0) || db[ps] !== 0x01) return false;
+  const sal = db.slice(db.length - tamanhoSal);
+  return iguaisTempoConstante(H, sha256Bytes([...zeros(8), ...sha256Bytes(bytesDe(mensagem)), ...sal]));
+}
+
+/** RSAES-PKCS1-v1_5 (RFC 8017, 7.2): 00 02 PS 00 M, com PS de bytes aleatórios diferentes de zero. */
+export function cifrarRsaPkcs1(mensagem: Bytes, chave: ChavePublicaRsa, sortear: () => number): Bytes {
+  const k = bytesDoModulo(chave.n);
+  if (mensagem.length > k - 11) throw new Error('mensagem grande demais para a chave');
+  const ps: Bytes = [];
+  while (ps.length < k - mensagem.length - 3) { const b = Math.floor(sortear() * 256) & 0xff; if (b) ps.push(b); }
+  return inteiroParaBytes(rsaPublica(bytesParaInteiro([0x00, 0x02, ...ps, 0x00, ...mensagem]), chave), k);
+}
+
+export function decifrarRsaPkcs1(cifrado: Bytes, chave: ChavePrivadaRsa): Bytes | null {
+  const k = bytesDoModulo(chave.n);
+  if (cifrado.length !== k) return null;
+  const c = bytesParaInteiro(cifrado);
+  if (c >= chave.n) return null;
+  const em = inteiroParaBytes(rsaPrivada(c, chave), k);
+  if (em[0] !== 0 || em[1] !== 2) return null;
+  const sep = em.indexOf(0, 2);
+  if (sep < 10) return null;
+  return em.slice(sep + 1);
 }

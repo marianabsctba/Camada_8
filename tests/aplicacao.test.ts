@@ -13,6 +13,10 @@ import {
   compararDistribuicao,
   descreverMensagemDns,
   dhtResponsavel,
+  chordAtalhos,
+  chordBuscar,
+  chordSucessor,
+  idDht,
   dialogoSmtp,
   dnsCdn,
   enviarCorreio,
@@ -367,5 +371,34 @@ describe('Entrega de conteúdo', () => {
     // servidor sozinho mandando 4 pedaços por rodada levaria 30 × 20 / 4 = 150 rodadas
     expect(sim.rodadas).toBeLessThan(150);
     expect(dhtResponsavel('arquivo.iso', [3, 77, 140, 200]).responsavel).toBeTypeOf('number');
+  });
+
+  it('DHT em anel (tipo Chord): sucessor, atalhos n + 2^i e busca em O(log N) saltos; XOR como variante', () => {
+    const nos = [3, 17, 42, 77, 101, 150, 199, 230];
+    expect(chordSucessor(132, nos)).toBe(150);
+    expect(chordSucessor(230, nos)).toBe(230);
+    expect(chordSucessor(237, nos)).toBe(3); // dá a volta no anel
+    const tab = chordAtalhos(3, nos);
+    expect(tab.map((a) => a.inicio)).toEqual([4, 5, 7, 11, 19, 35, 67, 131]);
+    expect(tab.map((a) => a.no)).toEqual([17, 17, 17, 17, 42, 42, 77, 150]);
+    expect(chordAtalhos(150, nos).at(-1)).toEqual({ i: 7, inicio: 22, no: 42 });
+    // a busca sempre termina no sucessor da chave, de qualquer nó: cada salto corta pelo menos metade da distância
+    // no anel, então nunca passa de 8 (os bits do espaço), e em média fica perto de log₂ N
+    let total = 0;
+    for (let k = 0; k < 60; k++) {
+      const chave = `arquivo-${k}.mp4`;
+      for (const inicio of nos) {
+        const b = chordBuscar(chave, nos, inicio);
+        expect(b.responsavel).toBe(chordSucessor(idDht(chave), nos));
+        expect(b.saltos).toBeLessThanOrEqual(8);
+        total += b.saltos;
+      }
+    }
+    expect(total / (60 * nos.length)).toBeLessThanOrEqual(Math.log2(nos.length));
+    // a mesma chave pode cair em nós diferentes no anel e no XOR
+    expect(idDht('compacto-da-final.mp4')).toBe(237);
+    expect(chordBuscar('compacto-da-final.mp4', nos).responsavel).toBe(3);
+    expect(dhtResponsavel('compacto-da-final.mp4', nos).responsavel).toBe(230);
+    expect(chordBuscar('final-completa.mp4', nos)).toMatchObject({ id: 132, responsavel: 150, caminho: [3, 77, 101, 150], saltos: 3 });
   });
 });

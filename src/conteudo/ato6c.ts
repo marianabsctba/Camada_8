@@ -2,7 +2,7 @@
 // Os dois últimos dias da camada de aplicação, no estádio no dia da final: entrega de conteúdo
 // (7.5.1 a 7.5.3: tráfego, parques de servidores, proxies e CDN) e peer-to-peer (7.5.4 e 7.5.5).
 
-import { dhtResponsavel } from '../motor/aplicacao';
+import { chordBuscar, dhtResponsavel, NOS_DHT as NOS_DA_CIDADE } from '../motor/aplicacao';
 import { adicionar, ligar, novoMundo, pc, roteador, type Mundo } from '../motor/mundo';
 import { lerCidr } from '../motor/util';
 import { item, numerica, todasRespondidas } from './comum';
@@ -109,8 +109,17 @@ interface ComparacaoP2P {
   linhas: { N: number; clienteServidor: number; p2p: number }[];
 }
 
-function p2p(m: Mundo): { enxame?: Enxame; comparacao?: ComparacaoP2P; dht?: { chave: string; id: number; responsavel: number } } {
-  return (m.flags.p2p ?? {}) as { enxame?: Enxame; comparacao?: ComparacaoP2P; dht?: { chave: string; id: number; responsavel: number } };
+interface BuscaDht {
+  chave: string;
+  id: number;
+  responsavel: number;
+  modo: 'anel' | 'xor';
+  caminho: number[];
+  saltos: number;
+}
+
+function p2p(m: Mundo): { enxame?: Enxame; comparacao?: ComparacaoP2P; dht?: BuscaDht; dhtPor?: Partial<Record<'anel' | 'xor', BuscaDht>> } {
+  return (m.flags.p2p ?? {}) as { enxame?: Enxame; comparacao?: ComparacaoP2P; dht?: BuscaDht; dhtPor?: Partial<Record<'anel' | 'xor', BuscaDht>> };
 }
 
 /** A comparação feita com estes números de arquivo e de banda, se houver. */
@@ -134,9 +143,10 @@ function enxameRaro(m: Mundo, minimo: number): ItemObjetivo {
   );
 }
 
-function dhtFeita(m: Mundo, chave: string): ItemObjetivo {
-  const d = p2p(m).dht;
-  return item(`chave ${chave} procurada na tabela de dispersão distribuída`, !!d && d.chave === chave, d ? `última chave: ${d.chave}, nó ${d.responsavel}` : 'nenhuma busca feita');
+function dhtFeita(m: Mundo, chave: string, modo: 'anel' | 'xor' = 'anel'): ItemObjetivo {
+  const d = p2p(m).dhtPor?.[modo];
+  const forma = modo === 'anel' ? 'no anel da tabela de dispersão distribuída' : 'na variante XOR da tabela de dispersão';
+  return item(`chave ${chave} procurada ${forma}`, !!d && d.chave === chave, d ? `última chave: ${d.chave}, nó ${d.responsavel}${modo === 'anel' ? `, ${d.saltos} salto(s)` : ''}` : 'nenhuma busca feita');
 }
 
 /* ======================================================================
@@ -480,17 +490,21 @@ const dia118: Dia = {
 
 const CHAVE_119 = 'final-completa.mp4';
 const CHAVE_119D = 'compacto-da-final.mp4';
-const NOS_DHT = [3, 17, 42, 77, 101, 150, 199, 230];
+const NOS_DHT = [...NOS_DA_CIDADE];
 
 const d119: Pergunta[] = [
   numerica('1', 'Com 1000 pessoas baixando a final completa, quantos segundos leva, no mínimo, a distribuição P2P?', (m) => p2pMil(m, 800, 100, 10), 1),
-  numerica('2', `Na tabela de dispersão do motor, qual nó guarda a chave ${CHAVE_119}?`, () => dhtResponsavel(CHAVE_119, NOS_DHT).responsavel, 0),
+  numerica('2', `No anel da tabela de dispersão, qual nó guarda a chave ${CHAVE_119}?`, () => chordBuscar(CHAVE_119, NOS_DHT).responsavel, 0),
 ];
 
 const d119D: Pergunta[] = [
   numerica('1', 'Com 1000 pessoas baixando o compacto pelo servidor da escola, quantos segundos leva, no mínimo, a distribuição P2P?', (m) => p2pMil(m, 500, 50, 5), 1),
-  numerica('2', `Na tabela de dispersão do motor, qual nó guarda a chave ${CHAVE_119D}?`, () => dhtResponsavel(CHAVE_119D, NOS_DHT).responsavel, 0),
+  numerica('2', `No anel da tabela de dispersão, qual nó guarda a chave ${CHAVE_119D}?`, () => chordBuscar(CHAVE_119D, NOS_DHT).responsavel, 0),
+  numerica('3', `E na variante XOR, qual nó ficaria com a mesma chave ${CHAVE_119D}?`, () => dhtResponsavel(CHAVE_119D, NOS_DHT).responsavel, 0),
 ];
+
+const BUSCA_119 = chordBuscar(CHAVE_119, NOS_DHT);
+const XOR_119 = dhtResponsavel(CHAVE_119, NOS_DHT);
 
 function comparacaoItem(m: Mundo, mb: number, us: number, u: number): ItemObjetivo {
   const c = comparacaoCom(m, mb, us, u);
@@ -510,7 +524,7 @@ const dia119: Dia = {
     'CHAMADO #0119',
     'O apito final soou e Fim de Linha inteira quer o jogo completo para rever: 800 MB, e o acervo da prefeitura, que guarda o arquivo, sobe só 100 Mb/s. Se mil casas pedirem ao mesmo tempo, a fila vai até amanhã.',
     'A ideia da praça é cada casa que já baixou ajudar as outras, de par em par, sem servidor central dizendo quem tem o quê.',
-    'Objetivo: comparar cliente-servidor com P2P para o arquivo da final, simular um enxame com o pedaço mais raro primeiro, procurar a chave do arquivo na tabela de dispersão distribuída e responder às perguntas.',
+    'Objetivo: comparar cliente-servidor com P2P para o arquivo da final, simular um enxame com o pedaço mais raro primeiro, procurar a chave do arquivo no anel da tabela de dispersão distribuída e responder às perguntas.',
   ],
   manual: {
     titulo: 'Peer-to-peer: quem baixa também serve',
@@ -518,14 +532,15 @@ const dia119: Dia = {
       'No modelo cliente-servidor, um servidor sobe uma cópia para cada cliente. Se N pessoas querem um arquivo de F bits e o servidor sobe us bits por segundo, ele precisa mandar N vezes F: o tempo mínimo é N·F/us, e cresce em linha reta com N. Numa rede peer-to-peer (P2P), cada par é cliente e servidor ao mesmo tempo: quem já tem um pedaço sobe para os outros. A capacidade total de envio passa a ser us + N·u, onde u é a subida de cada par, e cresce junto com o público. O tempo mínimo é o maior entre F/us (a semente precisa mandar o arquivo uma vez), F/dmin (o par mais lento precisa baixar tudo) e N·F/(us + N·u). Quando N cresce, essa última conta para de crescer e encosta em F/u.',
       'O protocolo BitTorrent é o exemplo clássico. O arquivo é cortado em pedaços de tamanho fixo, cada um com um resumo para conferir que chegou inteiro. O conjunto de pares trocando o mesmo arquivo é o enxame; quem chega pergunta a um rastreador, que devolve uma amostra de pares. Cada par pede primeiro o pedaço mais raro entre os vizinhos: assim nenhum pedaço fica preso num par só, e se a semente sair, o enxame ainda tem tudo.',
       'Para não virar bagunça de quem só baixa, entra o toma-lá-dá-cá (olho por olho): cada par sobe para os poucos vizinhos que mais lhe mandaram nos últimos segundos, e corta os outros. Uma vaga fica para o desbloqueio otimista, um vizinho sorteado de vez em quando, para conhecer quem pode retribuir e para dar a quem acabou de chegar, sem nada, a chance do primeiro pedaço. Quem só baixa e nunca sobe acaba atendido só pelos desbloqueios e fica para trás.',
-      'E sem rastreador? Uma tabela de dispersão distribuída (DHT) espalha o índice entre os próprios pares. Os nós e as chaves ganham identificadores no mesmo espaço de números (o resumo do nome do arquivo vira um número). Na forma clássica de anel, cada nó cuida da faixa de chaves que vai do nó anterior até ele, e guarda atalhos para nós a meia volta, a um quarto, a um oitavo do anel: cada salto corta a distância pela metade, e a busca chega em uns log₂ N saltos. Mil nós, uns 10 saltos. O motor usa uma variante muito comum em que a proximidade é medida pela distância XOR entre os identificadores, com 8 nós num espaço de 8 bits.',
+      'E sem rastreador? Uma tabela de dispersão distribuída (DHT) espalha o índice entre os próprios pares. Os nós e as chaves ganham identificadores no mesmo espaço de números (o resumo do nome do arquivo vira um número); aqui são 8 nós num espaço de 8 bits, de 0 a 255, fechado em anel. Cada nó cuida das chaves que vão do nó anterior até ele: o responsável por uma chave é o sucessor dela, o primeiro nó igual ou depois dela, dando a volta no 255 se preciso. Cada nó conhece o próprio sucessor e uma tabela de atalhos: o atalho i aponta para o sucessor de n + 2^i, ou seja, para nós a 1, 2, 4, 8... até meia volta de distância. Na busca, o nó confere se a chave cai entre ele e o sucessor; se não, pula para o atalho que mais se aproxima da chave sem passar dela. Cada salto corta pelo menos metade da distância que falta, e a busca chega em uns log₂ N saltos. Mil nós, uns 10 saltos.',
+      'Uma variante muito usada troca o anel pela distância XOR: d(x, y) = x XOR y, e a chave fica no nó de menor distância. A conta vale igual nos dois sentidos, e cada bit de prefixo em comum corta o espaço pela metade, então a busca também leva uns log₂ N passos. Como as duas formas medem perto de jeitos diferentes, a mesma chave pode cair em nós diferentes. No computador da praça, a busca escolhe a forma: anel ou XOR.',
       'A internet mudou de forma por causa disso tudo. Nasceu como rede de pontas, computadores conversando de igual para igual; virou rede de conteúdo. Nos anos 2000 o P2P de arquivos ocupava uma fatia enorme do tráfego; nos anos 2010 o vídeo sob demanda servido por CDN tomou o lugar. Hoje grandes provedores de conteúdo e de nuvem têm rede própria, com data centers e bordas espalhados, e se ligam direto aos provedores de acesso nos pontos de troca de tráfego, sem passar pelas operadoras do meio. O caminho entre quem assiste e o conteúdo ficou curto.',
     ],
   },
   dicas: [
     'Tudo fica no computador praca: "Cliente-servidor contra P2P", "Enxame P2P" e "Tabela de dispersão distribuída".',
     'Para a comparação, use o arquivo de 800 MB, a subida de 100 Mb/s do acervo e 10 Mb/s de cada casa. A resposta é a coluna P2P da linha N = 1000.',
-    `Procure a chave ${CHAVE_119}. A resposta é o nó com a menor distância XOR, que o resultado mostra.`,
+    `Procure a chave ${CHAVE_119} no anel. A resposta é o sucessor da chave, o último nó do caminho que o resultado mostra.`,
   ],
   perguntas: d119,
   montar: () =>
@@ -540,7 +555,7 @@ const dia119: Dia = {
   objetivo: (m) => [comparacaoItem(m, 800, 100, 10), enxameRaro(m, 20), dhtFeita(m, CHAVE_119), ...todasRespondidas(m, d119)],
   posMorte: [
     'A fila de amanhã era a conta do cliente-servidor: 1000 casas vezes 800 MB, pelos 100 Mb/s do acervo, são 64000 segundos, quase 18 horas. Em P2P, cada casa que recebe um pedaço passa a subir seus 10 Mb/s para as outras, e a capacidade total cresce com o público: o mínimo cai para uns 634 segundos, uns 10 minutos e meio. Com 10 casas a diferença era só o dobro; com 1000, cem vezes. É isso que quer dizer escalar com o número de pares.',
-    'No enxame, o pedaço mais raro primeiro espalhou cada pedaço por vários pares logo cedo, e o toma-lá-dá-cá fez quem sobe receber de volta. O desbloqueio otimista deu o primeiro pedaço a quem acabou de chegar sem nada para oferecer. E a busca pelo arquivo não dependeu de ninguém no centro: o resumo do nome virou o identificador 132, e o nó 150, o mais perto dele, respondeu onde estão os pares.',
+    `No enxame, o pedaço mais raro primeiro espalhou cada pedaço por vários pares logo cedo, e o toma-lá-dá-cá fez quem sobe receber de volta. O desbloqueio otimista deu o primeiro pedaço a quem acabou de chegar sem nada para oferecer. E a busca pelo arquivo não dependeu de ninguém no centro: o resumo do nome virou o identificador ${BUSCA_119.id}, e no anel a pergunta saiu do nó ${BUSCA_119.caminho[0]}, pulou pelos atalhos para ${BUSCA_119.caminho[1]} e ${BUSCA_119.caminho[2]} e chegou ao ${BUSCA_119.responsavel}, o sucessor de ${BUSCA_119.id}, em ${BUSCA_119.saltos} saltos. Na variante XOR, a mesma chave também cai no ${XOR_119.responsavel}.`,
     'Fecha aqui a camada de aplicação, e com ela o dia da final. Nomes resolvidos, páginas e correio no ar, vídeo com buffer certo, imagem servida pela borda de Curitiba e o jogo completo correndo de casa em casa. Fim de Linha inteira assistiu ao jogo ao vivo: o telão do estádio, as casas da Rua das Acácias, o hospital, a escola. A cidade que não tinha internet virou plateia. E, como toda plateia grande, agora chama atenção.',
   ],
   passos: [
@@ -609,18 +624,27 @@ const dia119: Dia = {
     passo({
       alvo: ['equip', 'praca'],
       acao: 'ap-p2p-dht',
-      valores: { chave: CHAVE_119 },
-      instrucao: `Sem rastreador, procure a chave ${CHAVE_119} na tabela de dispersão distribuída.`,
-      porque: 'O resumo do nome vira um identificador no mesmo espaço dos nós. O nó mais perto dele guarda quem tem o arquivo.',
-      conferir: (m) => (p2p(m).dht?.chave === CHAVE_119 ? true : `A busca ainda não foi feita com a chave ${CHAVE_119}.`),
-      feito: 'O resumo do nome deu 132 (10000100). A menor distância XOR é até o nó 150 (distância 18). Num anel, com cada nó cuidando da faixa até ele, a mesma chave também cairia no 150, o primeiro nó depois de 132.',
+      valores: { chave: CHAVE_119, modo: 'anel' },
+      instrucao: `Sem rastreador, procure a chave ${CHAVE_119} no anel da tabela de dispersão distribuída.`,
+      porque: 'O resumo do nome vira um identificador no mesmo espaço dos nós. O sucessor dele guarda quem tem o arquivo, e os atalhos de cada nó levam a busca até lá.',
+      conferir: (m) => (p2p(m).dhtPor?.anel?.chave === CHAVE_119 ? true : `A busca no anel ainda não foi feita com a chave ${CHAVE_119}.`),
+      feito: `O resumo do nome deu ${BUSCA_119.id} (${BUSCA_119.id.toString(2).padStart(8, '0')}). A busca começou no nó ${BUSCA_119.caminho[0]}, cujo atalho mais longo sem passar de ${BUSCA_119.id} era ${BUSCA_119.caminho[1]}; de lá pulou para ${BUSCA_119.caminho[2]}, que tem ${BUSCA_119.responsavel} como sucessor: ${BUSCA_119.saltos} saltos, log₂ 8.`,
     }),
     passo({
       pergunta: '2',
-      exemplo: { resposta: '150' },
-      instrucao: `Qual nó guarda a chave ${CHAVE_119}?`,
-      porque: 'É a última linha da busca: o responsável é o nó com a menor distância XOR até o identificador da chave.',
-      feito: 'O nó 150. Com 8 nós, qualquer busca chega lá em uns 3 saltos (log₂ 8); com um milhão de nós, uns 20.',
+      exemplo: { resposta: String(BUSCA_119.responsavel) },
+      instrucao: `No anel, qual nó guarda a chave ${CHAVE_119}?`,
+      porque: `É o sucessor de ${BUSCA_119.id}: o primeiro nó igual ou depois dele no anel, o último do caminho da busca.`,
+      feito: `O nó ${BUSCA_119.responsavel}, que cuida das chaves de ${BUSCA_119.caminho[2]! + 1} a ${BUSCA_119.responsavel}. Com 8 nós, a busca leva uns 3 saltos; com um milhão, uns 20.`,
+    }),
+    passo({
+      alvo: ['equip', 'praca'],
+      acao: 'ap-p2p-dht',
+      valores: { chave: CHAVE_119, modo: 'xor' },
+      instrucao: 'Agora procure a mesma chave na variante XOR, a outra forma de medir perto.',
+      porque: 'Na variante XOR, perto é ter muitos bits iguais no começo do identificador, não vir logo depois no anel. Às vezes as duas formas concordam, às vezes não.',
+      conferir: (m) => (p2p(m).dhtPor?.xor?.chave === CHAVE_119 ? true : `A busca na variante XOR ainda não foi feita com a chave ${CHAVE_119}.`),
+      feito: `Distância XOR de ${BUSCA_119.id} até ${XOR_119.responsavel}: ${BUSCA_119.id ^ XOR_119.responsavel}, a menor de todas. Aqui as duas formas concordam no nó ${XOR_119.responsavel}; com outra chave, podem cair em nós diferentes.`,
     }),
   ],
   aula: {
@@ -662,15 +686,11 @@ const dia119: Dia = {
       },
       {
         titulo: 'DHT: o índice espalhado',
-        texto: ['Nós e chaves no mesmo espaço de números. No anel, cada nó cuida da faixa até ele, e os atalhos cortam a distância pela metade a cada salto: uns log₂ N saltos.'],
+        texto: [`Nós e chaves no mesmo espaço de números. No anel, cada nó cuida da faixa até ele, e o atalho i aponta para o sucessor de n + 2^i: cada salto corta a distância pela metade, uns log₂ N saltos. A busca por ${CHAVE_119} (identificador ${BUSCA_119.id}) passou por ${BUSCA_119.caminho.join(', ')}.`],
         visual: {
           tipo: 'tabela',
-          cabecalho: ['Nós na tabela', 'Saltos de uma busca (log₂ N)'],
-          linhas: [
-            ['8', '3'],
-            ['1000', 'uns 10'],
-            ['1 milhão', 'uns 20'],
-          ],
+          cabecalho: ['Atalho do nó 3', 'Aponta para sucessor de', 'Que é o nó'],
+          linhas: [0, 1, 2, 3, 4, 5, 6, 7].map((i) => [`${i}`, `3 + ${1 << i} = ${3 + (1 << i)}`, String(NOS_DHT.find((n) => n >= 3 + (1 << i)) ?? NOS_DHT[0])]),
         },
       },
       {
@@ -705,12 +725,12 @@ const dia119: Dia = {
     carta: [
       'A escola também quer distribuir o compacto da final, com os gols e a festa: 500 MB, a partir do servidor dela, que sobe só 50 Mb/s. As casas do bairro da escola sobem 5 Mb/s cada.',
       'A diretora pergunta quanto tempo leva para mil famílias, se cada uma que baixar ajudar as outras, e onde a chave do arquivo vai parar na tabela de dispersão da cidade.',
-      'Objetivo: comparar cliente-servidor com P2P com esses números, simular um enxame de pelo menos 30 casas com o pedaço mais raro primeiro, procurar a chave compacto-da-final.mp4 e responder às perguntas.',
+      'Objetivo: comparar cliente-servidor com P2P com esses números, simular um enxame de pelo menos 30 casas com o pedaço mais raro primeiro, procurar a chave compacto-da-final.mp4 no anel e na variante XOR e responder às perguntas.',
     ],
     dicas: [
       'Tudo no computador praca. Na comparação, use os números da carta: arquivo, subida do servidor e subida de cada casa.',
       'O tempo P2P de 1000 pessoas é a linha N = 1000, coluna P2P. Ele fica perto de F/u, o tempo de um par subir o arquivo inteiro.',
-      'Na DHT do motor, o responsável é o nó de menor distância XOR, que nem sempre é o primeiro nó depois da chave no anel.',
+      'No anel, o responsável é o sucessor da chave, e depois do 230 o anel volta ao começo. Na variante XOR, é o nó de menor distância XOR, que nem sempre é o mesmo.',
     ],
     perguntas: d119D,
     montar: () =>
@@ -722,13 +742,14 @@ const dia119: Dia = {
         modeloServidor: 'Servidor da escola, com o compacto da final (500 MB)',
         servicos: { streaming: { videos: { compacto: { taxa: 4000, duracao: 60 } } } },
       }),
-    objetivo: (m) => [comparacaoItem(m, 500, 50, 5), enxameRaro(m, 30), dhtFeita(m, CHAVE_119D), ...todasRespondidas(m, d119D)],
+    objetivo: (m) => [comparacaoItem(m, 500, 50, 5), enxameRaro(m, 30), dhtFeita(m, CHAVE_119D, 'anel'), dhtFeita(m, CHAVE_119D, 'xor'), ...todasRespondidas(m, d119D)],
     solucao: [
       ['equip', 'praca', 'ap-p2p-comparar', { mb: '500', us: '50', u: '5' }],
       ['equip', 'praca', 'ap-p2p', { pares: '30', pedacos: '40', pol: 'raro' }],
-      ['equip', 'praca', 'ap-p2p-dht', { chave: CHAVE_119D }],
+      ['equip', 'praca', 'ap-p2p-dht', { chave: CHAVE_119D, modo: 'anel' }],
+      ['equip', 'praca', 'ap-p2p-dht', { chave: CHAVE_119D, modo: 'xor' }],
     ],
-    respostas: { '1': '792', '2': '230' },
+    respostas: { '1': '792', '2': '3', '3': '230' },
   },
 };
 

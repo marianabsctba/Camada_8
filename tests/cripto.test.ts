@@ -10,7 +10,11 @@ import {
   sha256, shiftRows, simularKerberos, substituicao, textoParaBytes, transposicao, verificarAssinatura,
   verificarAtualidade, verificarCadeia, verificarHmac, verificarRedundancia, adicionarRedundancia,
   bytesParaTexto, assinarRsa, verificarRsa, type Certificado, type DadosCertificado, type OpcoesCadeia,
+  aesGcmCifrar, aesGcmDecifrar, aesCcmCifrar, aesCcmDecifrar, sha1, hmacSha1, pbkdf2HmacSha1, prf80211, hkdfExtrair,
+  hkdfExpandir, x25519, parX25519, geradorDeSemente, ehProvavelPrimo, gerarPrimo, millerRabin, bitsDe, gerarRsaPorSemente,
+  assinarPkcs1, verificarPkcs1, assinarPss, verificarPss, cifrarRsaPkcs1, decifrarRsaPkcs1, inteiroParaBytes, mdc,
 } from '../src/motor/cripto';
+import { chavesFixas, NOMES_CHAVES_FIXAS, sementeDaChave } from '../src/motor/chavesRsa';
 
 const TEXTO_LONGO =
   'A criptografia protege a informação mesmo quando o atacante consegue ler tudo o que passa pela rede. ' +
@@ -335,5 +339,165 @@ describe('textos', () => {
     // os dois travessões (U+2013 e U+2014) montados pelo código, para não aparecerem no arquivo
     const travessoes = new RegExp('[' + String.fromCharCode(0x2013, 0x2014) + ']');
     for (const p of todos) expect(p).not.toMatch(travessoes);
+  });
+});
+
+describe('criptografia de verdade: vetores oficiais', () => {
+  const h = deHex;
+  // A WebCrypto do próprio Node serve de segunda opinião, independente do motor.
+  const sutil = globalThis.crypto.subtle;
+  const u8 = (b: number[]) => new Uint8Array(b);
+  const b64url = (b: number[]) => btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const int64 = (x: bigint) => b64url(inteiroParaBytes(x, Math.ceil(bitsDe(x) / 8)));
+
+  it('AES-GCM: casos de teste 1 a 4 do documento do GCM (AES-128)', () => {
+    const k0 = h('00000000000000000000000000000000');
+    const iv0 = h('000000000000000000000000');
+    const t1 = aesGcmCifrar(k0, iv0, []);
+    expect(paraHex(t1.tag)).toBe('58e2fccefa7e3061367f1d57a4e7455a');
+    const t2 = aesGcmCifrar(k0, iv0, h('00000000000000000000000000000000'));
+    expect(paraHex(t2.cifrado)).toBe('0388dace60b6a392f328c2b971b2fe78');
+    expect(paraHex(t2.tag)).toBe('ab6e47d42cec13bdf53a67b21257bddf');
+    const k = h('feffe9928665731c6d6a8f9467308308');
+    const iv = h('cafebabefacedbaddecaf888');
+    const p3 = h('d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b391aafd255');
+    const t3 = aesGcmCifrar(k, iv, p3);
+    expect(paraHex(t3.cifrado)).toBe('42831ec2217774244b7221b784d0d49ce3aa212f2c02a4e035c17e2329aca12e21d514b25466931c7d8f6a5aac84aa051ba30b396a0aac973d58e091473f5985');
+    expect(paraHex(t3.tag)).toBe('4d5c2af327cd64a62cf35abd2ba6fab4');
+    const aad = h('feedfacedeadbeeffeedfacedeadbeefabaddad2');
+    const t4 = aesGcmCifrar(k, iv, p3.slice(0, 60), aad);
+    expect(paraHex(t4.cifrado)).toBe('42831ec2217774244b7221b784d0d49ce3aa212f2c02a4e035c17e2329aca12e21d514b25466931c7d8f6a5aac84aa051ba30b396a0aac973d58e091');
+    expect(paraHex(t4.tag)).toBe('5bc94fbc3221a5db94fae95ae7121a47');
+    // decifra de volta; um byte trocado no cifrado ou no AAD derruba a etiqueta
+    expect(aesGcmDecifrar(k, iv, t4.cifrado, t4.tag, aad)).toMatchObject({ ok: true, claro: p3.slice(0, 60) });
+    const adulterado = t4.cifrado.slice();
+    adulterado[7] ^= 1;
+    expect(aesGcmDecifrar(k, iv, adulterado, t4.tag, aad).ok).toBe(false);
+    expect(aesGcmDecifrar(k, iv, t4.cifrado, t4.tag, [...aad.slice(0, -1), 0]).ok).toBe(false);
+  });
+
+  it('AES-GCM confere com a WebCrypto', async () => {
+    const k = Array.from({ length: 16 }, (_, i) => (i * 37 + 5) & 0xff);
+    const iv = Array.from({ length: 12 }, (_, i) => (i * 11 + 1) & 0xff);
+    const aad = textoParaBytes('cabeçalho');
+    const claro = textoParaBytes('GET /conta?senha=123 HTTP/1.1, com mais de um bloco de texto');
+    const chave = await sutil.importKey('raw', u8(k), 'AES-GCM', false, ['encrypt']);
+    const ref = Array.from(new Uint8Array(await sutil.encrypt({ name: 'AES-GCM', iv: u8(iv), additionalData: u8(aad) }, chave, u8(claro))));
+    const r = aesGcmCifrar(k, iv, claro, aad);
+    expect(paraHex([...r.cifrado, ...r.tag])).toBe(paraHex(ref));
+  });
+
+  it('AES-CCM: pacote 1 da RFC 3610 (M = 8, L = 2, nonce de 13 bytes, como o CCMP)', () => {
+    const k = h('c0c1c2c3c4c5c6c7c8c9cacbcccdcecf');
+    const nonce = h('00000003020100a0a1a2a3a4a5');
+    const aad = h('0001020304050607');
+    const m = h('08090a0b0c0d0e0f101112131415161718191a1b1c1d1e');
+    const r = aesCcmCifrar(k, nonce, m, aad, 8);
+    expect(paraHex(r.cifrado)).toBe('588c979a61c663d2f066d0c2c0f989806d5f6b61dac384');
+    expect(paraHex(r.tag)).toBe('17e8d12cfdf926e0');
+    expect(aesCcmDecifrar(k, nonce, r.cifrado, r.tag, aad)).toMatchObject({ ok: true, claro: m });
+    const x = r.cifrado.slice();
+    x[0] ^= 0x80;
+    expect(aesCcmDecifrar(k, nonce, x, r.tag, aad).ok).toBe(false);
+  });
+
+  it('SHA-1, HMAC-SHA1 e PBKDF2 (RFC 6070 e o vetor do IEEE 802.11i)', () => {
+    expect(sha1('abc')).toBe('a9993e364706816aba3e25717850c26c9cd0d89d');
+    expect(sha1('')).toBe('da39a3ee5e6b4b0d3255bfef95601890afd80709');
+    expect(paraHex(hmacSha1(h('0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b'), 'Hi There'))).toBe('b617318655057264e28bc0b6fb378c8ef146be00');
+    expect(paraHex(pbkdf2HmacSha1('password', 'salt', 1, 20))).toBe('0c60c80f961f0e71f3a9b524af6012062fe037a6');
+    expect(paraHex(pbkdf2HmacSha1('password', 'salt', 2, 20))).toBe('ea6c014dc72d6f8ccd1ed92ace1d41f0d8de8957');
+    expect(paraHex(pbkdf2HmacSha1('password', 'salt', 4096, 20))).toBe('4b007901b765489abead49d926f721d065a429c1');
+    // PSK do WPA2: PBKDF2(senha, SSID, 4096, 256 bits)
+    expect(paraHex(pbkdf2HmacSha1('password', 'IEEE', 4096, 32))).toBe('f42c6fc52df0ebef9ebb4b90b38a5f902e83fe1b135a70e23aed762e9710a12e');
+    expect(paraHex(pbkdf2HmacSha1('ThisIsAPassword', 'ThisIsASSID', 4096, 32))).toBe('0dc0d6eb90555ed6419756b9a15ec3e3209b63df707dd508d14581f8982721af');
+  });
+
+  it('PBKDF2 confere com a WebCrypto', async () => {
+    const base = await sutil.importKey('raw', u8(textoParaBytes('senha da escola')), 'PBKDF2', false, ['deriveBits']);
+    const ref = new Uint8Array(await sutil.deriveBits({ name: 'PBKDF2', hash: 'SHA-1', salt: u8(textoParaBytes('Rede da Praça')), iterations: 4096 }, base, 256));
+    expect(paraHex(pbkdf2HmacSha1('senha da escola', 'Rede da Praça', 4096, 32))).toBe(paraHex(Array.from(ref)));
+  });
+
+  it('PRF do 802.11: vetor de teste do 802.11i', () => {
+    expect(paraHex(prf80211(h('0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b'), 'prefix', textoParaBytes('Hi There'), 192))).toBe('bcd4c650b30b9684951829e0d75f9d54b862175ed9f00606');
+  });
+
+  it('HKDF-SHA256: caso de teste 1 da RFC 5869', () => {
+    const prk = hkdfExtrair(h('000102030405060708090a0b0c'), h('0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b'));
+    expect(paraHex(prk)).toBe('077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5');
+    expect(paraHex(hkdfExpandir(prk, h('f0f1f2f3f4f5f6f7f8f9'), 42))).toBe('3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865');
+  });
+
+  it('X25519: vetores da RFC 7748 (5.2 e 6.1)', () => {
+    expect(paraHex(x25519(h('a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4'), h('e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c')))).toBe('c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552');
+    const alice = parX25519(h('77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a'));
+    const bob = parX25519(h('5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb'));
+    expect(paraHex(alice.publica)).toBe('8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a');
+    expect(paraHex(bob.publica)).toBe('de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f');
+    const segredo = '4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742';
+    expect(paraHex(x25519(alice.privada, bob.publica))).toBe(segredo);
+    expect(paraHex(x25519(bob.privada, alice.publica))).toBe(segredo);
+  });
+
+  it('Miller-Rabin acha primos e pega os de Carmichael; o gerador por semente é reprodutível', () => {
+    const sortear = geradorDeSemente('teste');
+    expect(ehProvavelPrimo(2n ** 127n - 1n, sortear)).toBe(true);
+    expect(ehProvavelPrimo(561n, sortear)).toBe(false);
+    expect(ehProvavelPrimo(3215031751n, sortear)).toBe(false);
+    expect(ehProvavelPrimo((2n ** 61n - 1n) * (2n ** 89n - 1n), sortear)).toBe(false);
+    const p = gerarPrimo(256, geradorDeSemente('camada8'));
+    expect(p).toBe(gerarPrimo(256, geradorDeSemente('camada8')));
+    expect(bitsDe(p)).toBe(256);
+    expect(millerRabin(p, [2n, 3n, 5n, 7n, 11n, 13n])).toBe(true);
+  });
+
+  it('RSA de 768 bits gerado por semente: PKCS#1 v1.5, PSS e cifra de chave de sessão', () => {
+    const k = gerarRsaPorSemente('aula', 768);
+    expect(bitsDe(k.n)).toBe(768);
+    expect(k.e).toBe(65537n);
+    expect(gerarRsaPorSemente('aula', 768).n).toBe(k.n);
+    const s = assinarPkcs1('ordem 42', k.privada);
+    expect(verificarPkcs1('ordem 42', s, k.publica)).toBe(true);
+    expect(verificarPkcs1('ordem 43', s, k.publica)).toBe(false);
+    const pss = assinarPss('ordem 42', k.privada, new Array(32).fill(7));
+    expect(verificarPss('ordem 42', pss, k.publica)).toBe(true);
+    expect(verificarPss('ordem 43', pss, k.publica)).toBe(false);
+    let x = 0.1;
+    const c = cifrarRsaPkcs1([1, 2, 3, 4], k.publica, () => (x = (x * 9301 + 0.49297) % 1));
+    expect(decifrarRsaPkcs1(c, k.privada)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('RSA de 2048 bits do jogo: as assinaturas conferem com a WebCrypto (PKCS#1 v1.5 e PSS)', async () => {
+    const k = chavesFixas('raiz');
+    expect(bitsDe(k.n)).toBe(2048);
+    expect(k.e).toBe(65537n);
+    const jwk = { kty: 'RSA', n: int64(k.n), e: int64(k.e), ext: true };
+    const msg = textoParaBytes('certificado de www.loja.exemplo');
+    const pk1 = await sutil.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+    expect(await sutil.verify('RSASSA-PKCS1-v1_5', pk1, u8(assinarPkcs1(msg, k.privada)), u8(msg))).toBe(true);
+    const pss = await sutil.importKey('jwk', jwk, { name: 'RSA-PSS', hash: 'SHA-256' }, false, ['verify']);
+    expect(await sutil.verify({ name: 'RSA-PSS', saltLength: 32 }, pss, u8(assinarPss(msg, k.privada, new Array(32).fill(3))), u8(msg))).toBe(true);
+    // e a assinatura feita pela WebCrypto é a mesma do motor (o PKCS#1 v1.5 é determinístico)
+    const jwkPriv = { ...jwk, d: int64(k.d), p: int64(k.p), q: int64(k.q), dp: int64(k.privada.dp!), dq: int64(k.privada.dq!), qi: int64(k.privada.qinv!) };
+    const priv = await sutil.importKey('jwk', jwkPriv, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
+    const sw = Array.from(new Uint8Array(await sutil.sign('RSASSA-PKCS1-v1_5', priv, u8(msg))));
+    expect(paraHex(sw)).toBe(paraHex(assinarPkcs1(msg, k.privada)));
+  });
+
+  it('as chaves fixas de 2048 bits saem da semente documentada', () => {
+    expect(gerarRsaPorSemente(sementeDaChave('servidor'), 2048).n).toBe(chavesFixas('servidor').n);
+    for (const nome of NOMES_CHAVES_FIXAS) {
+      const k = chavesFixas(nome);
+      const sortear = geradorDeSemente('conferir|' + nome);
+      expect(ehProvavelPrimo(k.p, sortear, 4) && ehProvavelPrimo(k.q, sortear, 4), nome).toBe(true);
+      expect(bitsDe(k.n), nome).toBe(2048);
+      expect((k.e * k.d) % ((k.p - 1n) * (k.q - 1n) / mdc(k.p - 1n, k.q - 1n)), nome).toBe(1n);
+    }
+  });
+
+  it('Kerberos: a etiqueta do GCM é que denuncia a senha errada', () => {
+    const r = simularKerberos({ usuario: 'alice', senhaDigitada: 'x', senhaCadastrada: 'y', servico: 's', agora: 1 });
+    expect(r.falha).toMatch(/senha errada/);
   });
 });

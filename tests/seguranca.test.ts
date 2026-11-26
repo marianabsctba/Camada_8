@@ -8,7 +8,9 @@ import { acoesEquip, executarAcao, padroes } from '../src/motor/acoes';
 import { temSeguranca } from '../src/motor/cliSeguranca';
 import { anotarFlag, avaliarFirewall, historicoDe, LIMITE_HISTORICO, lerRegra, novoFirewall, novoIds, inspecionarPacote, ultimoQue } from '../src/motor/filtro';
 import { configurarNat, nat, novoPacote, viajar } from '../src/motor/roteamento';
-import { quebrarAperto, cadeiaDoServidor, conferirCadeia, apertoTls, decifrarRegistro, cifrarRegistro, protegerMensagem, abrirMensagem } from '../src/motor/seguranca';
+import { quebrarAperto, cadeiaDoServidor, conferirCadeia, apertoTls, decifrarRegistro, cifrarRegistro, abrirRegistro, protegerMensagem, abrirMensagem, pmk, espDe, abrirEsp, montarCebola, ITERACOES_PSK } from '../src/motor/seguranca';
+import { bitsDe, deHex, paraHex } from '../src/motor/cripto';
+import { base64Codificar, base64Decodificar, bytesParaTexto } from '../src/motor/aplicacao';
 import { lerCidr, lerIp } from '../src/motor/util';
 import type { Dia } from '../src/conteudo/tipos';
 import { mundoAplicacao, rodar } from './mundoAplicacao';
@@ -53,6 +55,53 @@ describe('peças puras', () => {
     const hex = cifrarRegistro(t.chave, 'GET /conta?senha=123 HTTP/1.1');
     expect(hex).not.toMatch(/senha/);
     expect(decifrarRegistro(t.chave, hex)).toBe('GET /conta?senha=123 HTTP/1.1');
+    // registro TLS 1.3: cabeçalho 17 03 03 e tamanho (texto + tipo + 16 de etiqueta), AES-GCM com o cabeçalho como AAD
+    expect(hex.slice(0, 6)).toBe('170303');
+    expect(parseInt(hex.slice(6, 10), 16)).toBe('GET /conta?senha=123 HTTP/1.1'.length + 1 + 16);
+    for (const pos of [2, 10, hex.length / 2 - 1]) {
+      const b = deHex(hex);
+      b[pos]! ^= 1;
+      expect(abrirRegistro(t.chave, paraHex(b)).ok, `byte ${pos}`).toBe(false);
+    }
+    expect(abrirRegistro(t.chave, hex, 1).ok).toBe(false);
+    expect(t.linhas.join('\n')).toMatch(/X25519/);
+    expect(t.linhas.join('\n')).toMatch(/RSA-PSS/);
+    expect(t.linhas.join('\n')).toMatch(/bad_record_mac/);
+    expect(t.dh.A).toMatch(/^[0-9a-f]{64}$/);
+    expect(bitsDe(cadeiaDoServidor('www.loja.exemplo', 'valido', 200)[0]!.chavePublica.n)).toBe(2048);
+    expect(apertoTls(novoMundo(3), 'www.loja.exemplo', 'autoassinado').ok).toBe(false);
+  });
+
+  it('PMK do WPA2 com as 4096 iterações (vetor do IEEE 802.11i)', () => {
+    expect(ITERACOES_PSK).toBe(4096);
+    expect(pmk('password', 'IEEE')).toBe('f42c6fc52df0ebef9ebb4b90b38a5f902e83fe1b135a70e23aed762e9710a12e');
+  });
+
+  it('ESP com AES-GCM: volta com a chave do IKE; um byte trocado e o ICV não confere', () => {
+    const t = { nome: 'x', par: '198.51.100.10', local: '192.168.1.0/24', remota: '192.168.2.0/24', segredo: 'S', spi: 0x1101, contadores: { cifrados: 0, decifrados: 0 } };
+    const espelho = { ...t, local: t.remota, remota: t.local };
+    const hex = espDe(t, 'IP 192.168.1.10 > 192.168.2.10', 7);
+    expect(hex.slice(0, 16)).toBe('0000110100000007');
+    expect(abrirEsp(espelho, hex)).toEqual({ ok: true, texto: 'IP 192.168.1.10 > 192.168.2.10' });
+    const b = deHex(hex);
+    b[b.length - 1]! ^= 0x80;
+    expect(abrirEsp(espelho, paraHex(b)).ok).toBe(false);
+  });
+
+  it('cebola: três camadas, cada nó tira só a sua e só vê o anterior e o próximo', () => {
+    const p = (nome: string, ip: string) => ({ nome, ip });
+    const c = montarCebola(novoMundo(9), p('redacao', '10.8.0.10'), [p('borda', '10.250.0.1'), p('vizinha', '10.250.0.3'), p('estrada', '10.250.0.2')], p('fonte', '10.9.0.10'), 'GET /pauta');
+    expect(c.ok).toBe(true);
+    expect(c.visoes.map((v) => [v.no, v.anterior, v.proximo])).toEqual([
+      ['borda', '10.8.0.10', '10.250.0.3'],
+      ['vizinha', '10.250.0.1', '10.250.0.2'],
+      ['estrada', '10.250.0.3', '10.9.0.10'],
+    ]);
+    expect(c.visoes.map((v) => v.sabeOrigem && v.sabeDestino)).toEqual([false, false, false]);
+    expect(c.visoes.every((v) => !v.abreOutraCamada)).toBe(true);
+    expect(c.visoes[0]!.recebeu).toBeGreaterThan(c.visoes[1]!.recebeu);
+    expect(c.linhas.join('\n')).not.toMatch(TRAVESSAO);
+    expect(montarCebola(novoMundo(9), p('a', '1'), [p('b', '2'), p('b', '2'), p('c', '3')], p('d', '4'), 'x').ok).toBe(false);
   });
 
   it('PGP: só o destinatário abre, e a assinatura confere', () => {
@@ -61,6 +110,15 @@ describe('peças puras', () => {
     expect(p.blindado).not.toMatch(/Pagamento/);
     expect(abrirMensagem(p.blindado, 'contato@loja.exemplo')).toMatchObject({ ok: true, texto: 'Pagamento amanhã', assinaturaValida: true });
     expect(abrirMensagem(p.blindado, 'outra@loja.exemplo').ok).toBe(false);
+    // um bit trocado no texto cifrado: a etiqueta do AES-GCM não deixa abrir
+    const b64 = p.blindado.split(/\r?\n/).filter((l) => l && !l.startsWith('-----')).join('');
+    const pacote = JSON.parse(bytesParaTexto(base64Decodificar(b64))) as { c: string };
+    const c = deHex(pacote.c);
+    c[3]! ^= 1;
+    const alterado = ['-----BEGIN PGP MESSAGE-----', base64Codificar(JSON.stringify({ ...pacote, c: paraHex(c) }), 64), '-----END PGP MESSAGE-----'].join('\r\n');
+    const r = abrirMensagem(alterado, 'contato@loja.exemplo');
+    expect(r.ok).toBe(false);
+    expect(r.linhas.join(' ')).toMatch(/etiqueta do AES-GCM não confere/);
   });
 
   it('Wi-Fi: senha de dicionário cai a partir do aperto de mão; WPA3 não deixa testar fora do ar', () => {
@@ -305,23 +363,42 @@ describe('VPN entre dois roteadores', () => {
     rodar(t, 'r1', ['vpn filial 198.51.100.10 192.168.1.0/24 192.168.2.0/24 Segredo-da-filial-2026']);
     expect(m.flags.vpn).toMatchObject({ ativo: false });
     rodar(t, 'r3', ['vpn matriz 198.51.100.1 192.168.2.0/24 192.168.1.0/24 Segredo-da-filial-2026']);
-    expect(m.flags.vpn).toMatchObject({ ativo: true, mtuEfetivo: 1427 });
+    expect(m.flags.vpn).toMatchObject({ ativo: true, mtuEfetivo: 1443 });
     const p = rodar(t, 'a', ['ping 192.168.2.10 2']);
     expect(p).toMatch(/ttl=/);
     rodar(t, 'r1', ['vpn']);
     expect(m.flags.vpn.cifrados).toBeGreaterThan(0);
     const cap = rodar(t, 'r1', ['vpn captura']);
     expect(cap).toMatch(/protocolo 50 \(ESP\)/);
-    expect(m.flags.vpn.captura).toMatchObject({ protocolo: 50, legivel: false });
-    // O pacote grande com DF não cabe mais: 1472 + 28 + 73 passa de 1500.
-    expect(rodar(t, 'a', ['ping 192.168.2.10 1 1472 df'])).toMatch(/MTU do próximo salto 1427/);
-    expect(rodar(t, 'a', ['ping 192.168.2.10 1 1399 df'])).toMatch(/ttl=/);
+    // ESP com AES-GCM (RFC 4106): um byte trocado no caminho e o ICV não confere
+    expect(m.flags.vpn.captura).toMatchObject({ protocolo: 50, legivel: false, adulteradoPassa: false });
+    expect(cap).toMatch(/ICV não confere/);
+    // O pacote grande com DF não cabe mais: 1472 + 28 + 57 passa de 1500.
+    expect(rodar(t, 'a', ['ping 192.168.2.10 1 1472 df'])).toMatch(/MTU do próximo salto 1443/);
+    expect(rodar(t, 'a', ['ping 192.168.2.10 1 1415 df'])).toMatch(/ttl=/);
     // Quem está no meio, num hub do provedor, só vê ESP.
     rodar(t, 'a', ['resolvedor 192.168.1.1', 'navegar http://192.168.2.10/']);
     expect(m.flags.http).toMatchObject({ ok: true, servidor: 'b' });
     const f = rodar(t, 'olheiro', ['farejar']);
     expect(f).toMatch(/ESP/);
     expect(f).not.toMatch(/Relatório interno/);
+  });
+
+  it('circuito em cebola pelo console: r1, r0 e r3, e o farejador do hub só vê células cifradas', () => {
+    const m = mundoVpn();
+    m.flags.seguranca = true;
+    const t = new Terminal(m, {} as Dia);
+    const s = rodar(t, 'a', ['cebola b r1 r0 r3 Relatório interno da filial']);
+    expect(s).toMatch(/O QUE CADA NÓ ENXERGA/);
+    expect(s).toMatch(/Quem sabe os dois: ninguém/);
+    expect(TRAVESSAO.test(s)).toBe(false);
+    expect(m.flags.cebola).toMatchObject({ de: 'a', destino: 'b', nos: ['r1', 'r0', 'r3'], ok: true, ninguemSabeOsDois: true });
+    expect(m.flags.cebola.visoes[1]).toMatchObject({ no: 'r0', anterior: '198.51.100.1', proximo: '198.51.100.10', sabeOrigem: false, sabeDestino: false });
+    expect(rodar(t, 'a', ['cebola b r1 r1 r3'])).toMatch(/diferentes/);
+    const acao = acoesEquip(m, m.equipamentos.get('a')!).find((x) => x.id === 'sg-cebola')!;
+    expect(acao).toBeDefined();
+    executarAcao(t, acao, { ...padroes(acao), destino: '192.168.2.10', n1: 'r1', n2: 'r0', n3: 'r3' });
+    expect(m.flags.cebola.ok).toBe(true);
   });
 
   it('segredo diferente: o IKE não fecha e nada passa', () => {
@@ -385,7 +462,9 @@ describe('calculadora, sandbox, console e menu', () => {
     rodar(t, 'ana', ['dh 6 15 13']);
     expect(m.flags.cripto.op).toBe('dh-homem-no-meio');
     rodar(t, 'ana', ['sha256 abc', 'assinar pago 100']);
-    expect(m.flags.cripto).toMatchObject({ op: 'assinar', confere: true });
+    expect(m.flags.cripto).toMatchObject({ op: 'assinar', confere: true, alteradaConfere: false, bits: 2048 });
+    expect(rodar(t, 'ana', ['gcm Pague 100 ao portador'])).toMatch(/etiqueta não confere/);
+    expect(m.flags.cripto).toMatchObject({ op: 'gcm', confere: true, adulteradaConfere: false, aadTrocadoConfere: false });
     rodar(t, 'ana', ['executar jogo-gratis sandbox']);
     expect(m.flags.sandbox.bloqueadas.length).toBeGreaterThan(2);
     rodar(t, 'ana', ['executar jogo-gratis direto']);
