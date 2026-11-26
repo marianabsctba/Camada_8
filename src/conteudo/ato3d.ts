@@ -1,9 +1,9 @@
 // Dias do ato 3 (O Bairro), com prática guiada, aula e desafio no próprio dia.
-// O protocolo da subcamada MAC do 802.11 (4.4.3), o quadro e os serviços do 802.11 (4.4.4 e 4.4.5) e o Bluetooth (4.5).
+// O protocolo da subcamada MAC do 802.11 (4.4.3), o quadro e os serviços do 802.11 (4.4.4 e 4.4.5) e o Bluetooth (4.5.1 a 4.5.4).
 
 import { snrWifi } from '../motor/aparelhos';
 import { avaliar, radioDados } from '../motor/fisico';
-import { canal, MINI_QUADRO, simularCanal, type EstadoMac, type ResultadoMac } from '../motor/mac';
+import { BT_CANAIS_CLASSICO, BT_CLASSES_POTENCIA, BT_SALTOS_POR_S, BT_SLOT_US, canal, frequenciaBtClassico, MINI_QUADRO, simularCanal, taxaBtMbps, type EstadoMac, type ResultadoMac } from '../motor/mac';
 import { adicionar, aparelho, ligar, novoMundo, pc, type Equipamento, type Mundo } from '../motor/mundo';
 import { lerCidr, rngSemente } from '../motor/util';
 import { item, numerica, pingOk, registroPing, todasRespondidas } from './comum';
@@ -634,12 +634,14 @@ const dia70: Dia = {
 };
 
 /* ======================================================================
- * ref 71: Bluetooth (4.5)
+ * ref 71: Bluetooth (4.5.1 a 4.5.4): arquitetura, perfis, pilha e rádio
+ * O enlace, o pacote e o baixo consumo (4.5.5 a 4.5.7) ficam no ref 130, em ato3g.ts.
  * ====================================================================== */
 
 const AP71 = 'ap-academia';
-const SALTOS = 1600;
-const INTERVALO_US = 1_000_000 / SALTOS; // 625 µs
+const SALTOS = BT_SALTOS_POR_S;
+const INTERVALO_US = BT_SLOT_US; // 625 µs
+const [CLASSE1, CLASSE2, CLASSE3] = BT_CLASSES_POTENCIA;
 
 /** O analisador mostra o Bluetooth como uma média fraca espalhada pela faixa: aproximação, porque ele salta. */
 const bluetooth = (canais: number[]) => canais.map((c) => ({ nome: 'Bluetooth: fones, relógios e esteiras saltando (média aproximada)', canal: c, dbm: -88 }));
@@ -651,7 +653,7 @@ const p71: Pergunta[] = [
 
 const d71: Pergunta[] = [
   numerica('1', 'A sala de bike tem 20 sensores de bicicleta ativos ao mesmo tempo. Se cada mestre aguenta 7 escravos ativos, quantas piconets são necessárias, no mínimo?', Math.ceil(20 / 7), 0),
-  numerica('2', `Um quadro de Bluetooth que ocupa 5 intervalos de ${INTERVALO_US} µs dura quanto, em µs?`, 5 * INTERVALO_US, 1),
+  numerica('2', 'O EDR de 3 Mb/s usa 8DPSK, com 8 fases possíveis, a 1 milhão de símbolos por segundo. Quantos bits leva cada símbolo?', taxaBtMbps('8dpsk'), 0),
 ];
 
 const snrDe = (m: Mundo, nome: string) => snrWifi(m.equipamentos.get(nome)!.s as any).snr;
@@ -670,10 +672,10 @@ const dia71: Dia = {
     titulo: 'Bluetooth: rede pessoal no mesmo ar do Wi-Fi',
     texto: [
       'O Bluetooth nasceu para tirar o fio entre aparelhos próximos: fone e celular, teclado e computador, relógio e telefone. A unidade básica é a piconet: um mestre e até 7 escravos ativos, a poucos metros. Até 255 outros podem ficar estacionados, quietos, esperando o mestre chamar. Várias piconets podem se encostar numa scatternet, com um aparelho fazendo parte de duas e servindo de ponte. O mestre manda em tudo: escravo só fala quando o mestre pergunta.',
-      'Cada aplicação tem seu perfil (áudio de fone, viva-voz, teclado e mouse, troca de arquivos, sensores de saúde), que define quais protocolos da pilha ela usa. Por baixo, a pilha tem o rádio, a camada de enlace que organiza os intervalos de tempo, um gerente de enlace que abre e configura as conexões, e o L2CAP, que corta e remonta as mensagens dos perfis.',
-      'O rádio usa a mesma faixa de 2,4 GHz do Wi-Fi, dividida em 79 canais de 1 MHz, de 2402 a 2480 MHz. Ele salta de canal 1600 vezes por segundo, numa sequência pseudoaleatória que mestre e escravos conhecem. Assim, uma interferência num canal estraga só um pedacinho da conversa. No salto adaptativo, a piconet ainda evita os canais em que percebe um Wi-Fi forte.',
-      'Cada salto define um intervalo de 625 µs. O mestre transmite nos intervalos pares e os escravos nos ímpares; um quadro pode ocupar 1, 3 ou 5 intervalos. Há dois tipos de enlace: síncrono, com intervalos reservados em ritmo fixo, para voz, que não pode atrasar; e assíncrono, sem reserva, para dados, com confirmação e retransmissão. O quadro tem um código de acesso que identifica a piconet, um cabeçalho com o endereço do escravo ativo (3 bits, daí os 7), o tipo e a confirmação, e os dados.',
-      'O Bluetooth 5 trouxe mais alcance e o dobro da taxa no modo de baixo consumo (BLE), pensado para sensor que manda pouco e vive de bateria de relógio. Atenção: o analisador do galpão não segue o salto. Ele mostra o Bluetooth como uma média fraca espalhada pela faixa, o que é uma aproximação. Ferramentas: "Analisador de espectro", "Ver SNR no cliente" e "Trocar o canal", no ponto de acesso.',
+      'Cada aplicação tem o seu perfil, um acordo de quais protocolos da pilha usar e com que parâmetros, para que fone e celular de fabricantes diferentes se entendam: áudio de alta qualidade para o fone (A2DP), viva-voz no carro (HFP), teclado e mouse (HID), troca de arquivos, porta serial emulada, sensores de saúde. Antes de conectar, um aparelho pergunta ao outro, pelo protocolo de descoberta de serviços (SDP), quais perfis ele tem. A especificação traz dezenas de perfis: é o jeito de um padrão só servir para coisas tão diferentes.',
+      'A pilha tem dois andares. No controlador, em geral um chip só: o rádio; a banda base, ou controlador de enlace, que transforma bits em pacotes e organiza o tempo e os saltos; e o gerenciador de enlace, que abre e configura as conexões, negocia o modo de energia e cuida do pareamento. No hospedeiro, o sistema do celular ou do computador: o L2CAP, que multiplexa os protocolos de cima e corta mensagens de até 64 KB nos pacotes pequenos de baixo, remontando na chegada; os protocolos de cima, como o SDP e a porta serial; e os perfis. Entre os dois andares fica a HCI, a interface de controle do hospedeiro: comandos e eventos padronizados por USB ou serial, para que qualquer sistema fale com qualquer chip.',
+      `O rádio usa a faixa ISM de 2,4 GHz, livre de licença e a mesma do Wi-Fi e do micro-ondas, dividida em ${BT_CANAIS_CLASSICO} canais de 1 MHz: o canal k fica em 2402 + k MHz, de ${frequenciaBtClassico(0)} a ${frequenciaBtClassico(BT_CANAIS_CLASSICO - 1)} MHz. Ele salta de canal ${SALTOS} vezes por segundo, ${INTERVALO_US} µs em cada um, numa sequência pseudoaleatória tirada do endereço e do relógio do mestre. Uma interferência num canal estraga só um pedacinho da conversa, que é retransmitido. No salto adaptativo (AFH), a piconet marca os canais ruins, como os debaixo de um Wi-Fi forte, e salta só nos bons (no mínimo 20).`,
+      `A modulação básica é GFSK, a 1 milhão de símbolos por segundo e 1 bit por símbolo: 1 Mb/s. A taxa melhorada (EDR) mantém o cabeçalho em GFSK e troca a carga para modulação de fase: π/4-DQPSK, com 2 bits por símbolo (2 Mb/s), ou 8DPSK, com 3 (3 Mb/s). A potência define a classe: classe 1 até ${CLASSE1.mw} mW (${CLASSE1.dbm} dBm), uns ${CLASSE1.alcanceM} m; classe 2 até ${br(CLASSE2.mw)} mW (${CLASSE2.dbm} dBm), uns ${CLASSE2.alcanceM} m, a dos fones e celulares; classe 3 até ${CLASSE3.mw} mW (${CLASSE3.dbm} dBm), uns ${CLASSE3.alcanceM} m. Atenção: o analisador do galpão não segue o salto. Ele mostra o Bluetooth como uma média fraca espalhada pela faixa, o que é uma aproximação. Ferramentas: "Analisador de espectro", "Ver SNR no cliente" e "Trocar o canal", no ponto de acesso.`,
     ],
   },
   dicas: [
@@ -702,7 +704,7 @@ const dia71: Dia = {
   posMorte: [
     'O Wi-Fi da academia estava no canal 1, o mesmo da academia vizinha, que chegava mais forte que ele: SNR negativa. No canal 6, longe da vizinha e da TV da sala de bike, a SNR passou de 25 dB.',
     'O Bluetooth era inocente, ou quase. Cada fone fica 625 µs num canal de 1 MHz e pula para outro: para o Wi-Fi, que ocupa 22 MHz, ele aparece como uma garoa fraca e espalhada, não como uma tempestade num canal só. O analisador mostra isso como uma média, que é uma aproximação: na vida real, cada salto é um pulso curto num ponto da faixa.',
-    'A caixa de som da aula, mesmo no volume onze, continua no enlace síncrono: intervalos reservados, em ritmo fixo, para o áudio não engasgar. E a pulseira de frequência cardíaca, no baixo consumo do Bluetooth 5, manda um número de vez em quando e dorme o resto do tempo.',
+    `A caixa de som da aula, mesmo no volume onze, é classe 2: no máximo ${br(CLASSE2.mw)} mW no ar, 40 vezes menos que os 100 mW de um ponto de acesso típico. O volume é do alto-falante, não do rádio. E os fones da turma, cada um no seu perfil de áudio, com o salto adaptativo ligado, ainda marcam os canais debaixo do Wi-Fi como ruins e passam a saltar só nos bons: cada lado sai do caminho do outro.`,
   ],
   passos: [
     passo({ alvo: ['equip', AP71], acao: 'espectro', instrucao: 'Abra o analisador de espectro da academia.', porque: 'Wi-Fi e Bluetooth dividem a mesma faixa de 2,4 GHz. Antes de culpar alguém, veja quem está onde e com que força.', feito: 'Uma academia vizinha forte no canal 1, a TV da sala de bike no 11 e o Bluetooth fraco, espalhado em vários pontos. O analisador mostra a média do salto: é uma aproximação.' }),
@@ -720,47 +722,47 @@ const dia71: Dia = {
       },
       feito: 'SNR acima de 25 dB. O Bluetooth continua lá, dando seus saltos, e o Wi-Fi convive com ele.',
     }),
-    passo({ pergunta: '1', exemplo: { resposta: String(INTERVALO_US) }, instrucao: `Com ${SALTOS} saltos por segundo, quanto tempo o Bluetooth fica em cada frequência, em µs?`, porque: 'Um segundo tem 1.000.000 µs. Divida pelo número de saltos.', feito: `${INTERVALO_US} µs: é o intervalo do Bluetooth. O mestre fala nos pares, os escravos nos ímpares.` }),
-    passo({ pergunta: '2', exemplo: { resposta: '8' }, instrucao: 'Quantos aparelhos cabem ativos numa piconet, contando o mestre?', porque: 'O cabeçalho do quadro tem 3 bits para o endereço do escravo ativo. Com 3 bits dá para contar 8 valores, e um deles fica reservado para falar com todos de uma vez.', feito: 'Oito: o mestre e 7 escravos ativos. Os outros, até 255, ficam estacionados, esperando a vez.' }),
+    passo({ pergunta: '1', exemplo: { resposta: String(INTERVALO_US) }, instrucao: `Com ${SALTOS} saltos por segundo, quanto tempo o Bluetooth fica em cada frequência, em µs?`, porque: 'Um segundo tem 1.000.000 µs. Divida pelo número de saltos.', feito: `${INTERVALO_US} µs em cada frequência. Se um canal estiver ruim, só esse pedacinho se perde, e o próximo salto já está em outro lugar da faixa.` }),
+    passo({ pergunta: '2', exemplo: { resposta: '8' }, instrucao: 'Quantos aparelhos cabem ativos numa piconet, contando o mestre?', porque: 'Cada escravo ativo ganha um endereço de membro ativo de 3 bits. Com 3 bits dá para contar 8 valores, e o zero fica reservado para o mestre falar com todos de uma vez.', feito: 'Oito: o mestre e 7 escravos ativos. Os outros, até 255, ficam estacionados, esperando a vez.' }),
     passo({
       escolha: {
         opcoes: [
-          'Síncrono, com intervalos reservados em ritmo fixo',
-          'Assíncrono, sem reserva, retransmitindo o que se perder',
-          'Tanto faz: os dois têm o mesmo atraso',
-          'Nenhum: áudio usa Wi-Fi',
+          'O perfil de áudio na caixa: a pilha liga, mas ninguém combinou o que fazer com a música',
+          'Mais potência no rádio da caixa, passando para a classe 1',
+          'Outra modulação: trocar GFSK por 8DPSK',
+          'Uma scatternet entre o celular e a caixa',
         ],
         certa: 0,
         errada: {
-          1: 'Assíncrono é bom para arquivo: chega certo, mas quando der. Voz atrasada é pior que voz com um chiado.',
-          2: 'Não têm. O síncrono garante o ritmo; o assíncrono garante a entrega, não a hora.',
-          3: 'A caixa de som da aula fala Bluetooth, e é justamente para isso que existe o enlace síncrono.',
+          1: 'Eles já se acham e conectam: o rádio está fazendo a parte dele. Falta o acordo de cima, o perfil.',
+          2: 'A taxa não é o problema. Viva-voz e música são perfis diferentes, e a caixa só tem um deles.',
+          3: 'Scatternet junta piconets. Aqui são só dois aparelhos, na mesma piconet, sem o perfil certo.',
         },
       },
       exemplo: { resposta: '0' },
-      instrucao: 'A caixa de som da aula recebe a voz do microfone sem fio. Que enlace do Bluetooth faz mais sentido?',
-      porque: 'Voz não pode esperar retransmissão: precisa chegar no ritmo, mesmo que um pedacinho se perca.',
-      feito: 'Síncrono: intervalos reservados, em ritmo fixo. Para os dados das esteiras, o assíncrono, com confirmação.',
+      instrucao: 'O celular da professora acha a caixa de som e conecta, mas a música não sai: a caixa anuncia só o perfil de viva-voz. O que falta?',
+      porque: 'O perfil é o acordo de quais protocolos usar e como. A descoberta de serviços (SDP) conta quais perfis cada aparelho tem.',
+      feito: 'O perfil de áudio (A2DP). Viva-voz (HFP) leva voz de telefone nos dois sentidos; música estéreo é outro perfil, sobre o L2CAP.',
     }),
     passo({
       escolha: {
         opcoes: [
-          'O baixo consumo do Bluetooth 5: manda pouco, de vez em quando, e dorme o resto do tempo',
-          'O Bluetooth clássico com enlace síncrono, transmitindo sem parar',
-          'Wi-Fi de 5 GHz, que tem mais canais',
-          'Uma scatternet com todas as pulseiras como mestres',
+          'A HCI: comandos e eventos padronizados entre o hospedeiro e o controlador',
+          'O L2CAP, que corta e remonta as mensagens',
+          'O salto de frequência, que é igual em todos os chips',
+          'A classe de potência do adaptador',
         ],
         certa: 0,
         errada: {
-          1: 'Transmitir sem parar acaba com a bateria de relógio em horas. Frequência cardíaca é um número por segundo, não uma música.',
-          2: 'O Wi-Fi gasta muito mais energia para entrar na rede e manter a associação. Para um sensor, é canhão para matar mosquito.',
-          3: 'Scatternet resolve juntar piconets, não economizar energia. E o mestre é o aparelho que mais trabalha.',
+          1: 'O L2CAP roda no sistema do notebook, acima da HCI. Ele nem fica sabendo que o chip mudou.',
+          2: 'O salto é do rádio, dentro do chip. Ele explica por que os dois chips falam no ar, não por que o sistema fala com o chip novo.',
+          3: 'Potência muda o alcance, não a conversa entre o sistema e o chip.',
         },
       },
       exemplo: { resposta: '0' },
-      instrucao: 'As pulseiras de frequência cardíaca da turma funcionam com bateria de relógio. O que elas devem usar?',
-      porque: 'Sensor manda pouquíssimo dado. O que interessa é durar meses com uma bateria do tamanho de uma moeda.',
-      feito: 'Baixo consumo (BLE). O Bluetooth 5 ainda deu mais alcance e o dobro da taxa nesse modo.',
+      instrucao: 'A recepção trocou o adaptador USB de Bluetooth do notebook por um de outro fabricante, e tudo funcionou sem driver especial. Que parte da pilha permite isso?',
+      porque: 'A pilha tem dois andares: o controlador, no chip (rádio, banda base, gerenciador de enlace), e o hospedeiro, no sistema (L2CAP, protocolos, perfis).',
+      feito: 'A HCI: o sistema manda os mesmos comandos padronizados para qualquer chip, por USB ou serial.',
     }),
   ],
   aula: {
@@ -797,8 +799,8 @@ const dia71: Dia = {
             ['canais', '79 de 1 MHz', '2402 a 2480 MHz'],
             ['saltos por segundo', '1600', 'sequência que mestre e escravos conhecem'],
             ['intervalo', '625 µs', '1.000.000 µs ÷ 1600'],
-            ['quadro de 3 intervalos', '1875 µs', '3 × 625'],
-            ['quadro de 5 intervalos', '3125 µs', '5 × 625'],
+            ['canal k', `${frequenciaBtClassico(0)} + k MHz`, 'k de 0 a 78'],
+            ['salto adaptativo (AFH)', 'pelo menos 20 canais', 'só os que a piconet marcou como bons'],
           ],
         },
       },
@@ -818,17 +820,40 @@ const dia71: Dia = {
         },
       },
       {
-        titulo: 'A pilha e os enlaces',
-        texto: ['Cada perfil (áudio, viva-voz, teclado, arquivos, sensores) escolhe o que usa da pilha. Na camada de enlace, o mestre fala nos intervalos pares e os escravos nos ímpares.'],
-        visual: { tipo: 'camadas', camadas: ['Perfis (aplicações)', 'L2CAP: corta e remonta mensagens', 'Gerente de enlace: abre e configura conexões', 'Enlace: intervalos, síncrono e assíncrono', 'Rádio: 2,4 GHz com salto de frequência'], rotulo: 'Pilha do Bluetooth' },
+        titulo: 'A pilha em dois andares',
+        texto: [
+          'Em cima, no sistema do aparelho (o hospedeiro): perfis, protocolos como o SDP e o L2CAP. Embaixo, no chip (o controlador): gerenciador de enlace, banda base e rádio. A HCI é a fronteira padronizada entre os dois.',
+          'Cada perfil (áudio, viva-voz, teclado, arquivos, sensores) escolhe o que usa da pilha.',
+        ],
+        visual: {
+          tipo: 'camadas',
+          camadas: [
+            'Perfis: áudio (A2DP), viva-voz (HFP), teclado e mouse (HID)...',
+            'Protocolos de cima: descoberta de serviços (SDP), porta serial',
+            'L2CAP: multiplexa e corta mensagens de até 64 KB',
+            'HCI: comandos e eventos entre hospedeiro e controlador',
+            'Gerenciador de enlace: conexões, energia e pareamento',
+            'Banda base (controlador de enlace): pacotes, tempo e saltos',
+            'Rádio: 2,4 GHz, 79 canais, GFSK e EDR',
+          ],
+          rotulo: 'Pilha do Bluetooth clássico',
+        },
       },
       {
-        titulo: 'O quadro e o Bluetooth 5',
-        texto: [
-          'O quadro tem o código de acesso (qual piconet), o cabeçalho (endereço do escravo ativo em 3 bits, tipo, confirmação) e os dados. Síncrono para voz, assíncrono para dados.',
-          'O Bluetooth 5 deu mais alcance e o dobro da taxa ao modo de baixo consumo, o dos sensores que vivem de bateria de relógio.',
-        ],
-        visual: { tipo: 'bits', antes: 'código de acesso | cabeçalho | dados', depois: 'qual piconet | escravo (3 bits), tipo, ACK | a carga', legenda: 'Quadro do Bluetooth clássico' },
+        titulo: 'Modulação e potência',
+        texto: ['Todas a 1 milhão de símbolos por segundo: a taxa bruta é quantos bits cabem em cada símbolo. A classe diz quanto o rádio pode gritar.'],
+        visual: {
+          tipo: 'tabela',
+          cabecalho: ['Rádio', 'Valor', 'Uso'],
+          linhas: [
+            ['GFSK, 1 bit por símbolo', `${taxaBtMbps('gfsk')} Mb/s`, 'taxa básica e todo cabeçalho'],
+            ['π/4-DQPSK, 2 bits por símbolo', `${taxaBtMbps('pi4-dqpsk')} Mb/s`, 'EDR'],
+            ['8DPSK, 3 bits por símbolo', `${taxaBtMbps('8dpsk')} Mb/s`, 'EDR'],
+            [`classe ${CLASSE1.classe}`, `${CLASSE1.mw} mW (${CLASSE1.dbm} dBm)`, `uns ${CLASSE1.alcanceM} m: adaptadores de longo alcance`],
+            [`classe ${CLASSE2.classe}`, `${br(CLASSE2.mw)} mW (${CLASSE2.dbm} dBm)`, `uns ${CLASSE2.alcanceM} m: fones, caixas e celulares`],
+            [`classe ${CLASSE3.classe}`, `${CLASSE3.mw} mW (${CLASSE3.dbm} dBm)`, `uns ${CLASSE3.alcanceM} m`],
+          ],
+        },
       },
     ],
     checagem: {
@@ -840,7 +865,7 @@ const dia71: Dia = {
         'O mestre aumenta os saltos para 3200 por segundo',
       ],
       certa: 0,
-      explicacao: 'O endereço do escravo ativo tem 3 bits: cabem 7 escravos e o mestre. Quem sobra espera estacionado (até 255) ou vai para outra piconet, e um aparelho nas duas costura a scatternet.',
+      explicacao: 'O endereço de membro ativo tem 3 bits, e o zero é de todos: cabem 7 escravos e o mestre. Quem sobra espera estacionado (até 255) ou vai para outra piconet, e um aparelho nas duas costura a scatternet.',
     },
   },
   desafio: {
@@ -852,10 +877,10 @@ const dia71: Dia = {
     dicas: [
       'O analisador mostra onde estão os Wi-Fi fortes. O Bluetooth, fraco e espalhado, quase não muda a conta.',
       'Os vizinhos de Wi-Fi estão no 11, no 9 e no 6. Só um canal bem longe deles passa de 25 dB.',
-      'Cada piconet tem 1 mestre e até 7 escravos ativos; cada intervalo dura 625 µs.',
+      'Cada piconet tem 1 mestre e até 7 escravos ativos. Com 8 fases, cada símbolo distingue 8 valores: 2 elevado a quanto dá 8?',
     ],
     perguntas: d71,
-    respostas: { '1': String(Math.ceil(20 / 7)), '2': String(5 * INTERVALO_US) },
+    respostas: { '1': String(Math.ceil(20 / 7)), '2': String(taxaBtMbps('8dpsk')) },
     montar: () => {
       const m = novoMundo(3071);
       adicionar(

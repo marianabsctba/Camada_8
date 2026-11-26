@@ -542,3 +542,113 @@ export function canaisSemSobreposicao(larguraMhz = 22, ultimo = 11): number[] {
   for (let c = 1; c <= ultimo; c += passo) out.push(c);
   return out;
 }
+
+/* ---------- Bluetooth (especificação núcleo; base do IEEE 802.15.1) ---------- */
+
+/** Bluetooth clássico (BR/EDR): 1600 saltos por segundo, um salto por intervalo (slot). */
+export const BT_SALTOS_POR_S = 1600;
+/** Duração de um intervalo: 1.000.000 µs ÷ 1600 = 625 µs. */
+export const BT_SLOT_US = 1_000_000 / BT_SALTOS_POR_S;
+/** 79 canais de 1 MHz, de 2402 a 2480 MHz (banda de guarda de 2 MHz embaixo e 3,5 MHz em cima). */
+export const BT_CANAIS_CLASSICO = 79;
+
+/** Frequência central do canal k do Bluetooth clássico, k de 0 a 78: f = 2402 + k MHz. */
+export function frequenciaBtClassico(k: number): number {
+  return 2402 + k;
+}
+
+/** Modulações do clássico, todas a 1 Msímbolo/s: a taxa bruta é o número de bits por símbolo, em Mb/s. */
+export const BT_MODULACOES = {
+  gfsk: { nome: 'GFSK (taxa básica, BR)', bitsPorSimbolo: 1 },
+  'pi4-dqpsk': { nome: 'π/4-DQPSK (EDR 2 Mb/s)', bitsPorSimbolo: 2 },
+  '8dpsk': { nome: '8DPSK (EDR 3 Mb/s)', bitsPorSimbolo: 3 },
+} as const;
+export type ModulacaoBt = keyof typeof BT_MODULACOES;
+
+/** Taxa bruta no ar, em Mb/s: 1 Msímbolo/s vezes os bits por símbolo. */
+export function taxaBtMbps(mod: ModulacaoBt): number {
+  return BT_MODULACOES[mod].bitsPorSimbolo;
+}
+
+/** Classes de potência do clássico (potência máxima); o alcance é o típico em ambiente aberto, aproximado. */
+export const BT_CLASSES_POTENCIA = [
+  { classe: 1, dbm: 20, mw: 100, alcanceM: 100 },
+  { classe: 2, dbm: 4, mw: 2.5, alcanceM: 10 },
+  { classe: 3, dbm: 0, mw: 1, alcanceM: 1 },
+] as const;
+
+/** Um pacote ocupa 1, 3 ou 5 intervalos; a frequência não muda no meio do pacote. */
+export function duracaoPacoteBtUs(slots: 1 | 3 | 5): number {
+  return slots * BT_SLOT_US;
+}
+
+/**
+ * Campos do pacote do clássico, em bits: código de acesso (preâmbulo 4, palavra de sincronismo 64, cauda 4),
+ * cabeçalho (18 bits de informação repetidos 3 vezes: FEC de taxa 1/3) e carga útil de 0 a 2745 bits.
+ */
+export const BT_QUADRO = { codigoAcesso: 72, cabecalhoInfo: 18, cabecalho: 54, cargaMax: 2745 } as const;
+
+/** Campos dos 18 bits de informação do cabeçalho: LT_ADDR 3, TYPE 4, FLOW 1, ARQN 1, SEQN 1 e HEC 8. */
+export const BT_CABECALHO = [
+  ['LT_ADDR', 3],
+  ['TYPE', 4],
+  ['FLOW', 1],
+  ['ARQN', 1],
+  ['SEQN', 1],
+  ['HEC', 8],
+] as const;
+
+/** FEC de taxa 1/3 do cabeçalho: cada bit é repetido três vezes. */
+export function fecRepeticao3(bits: number[]): number[] {
+  return bits.flatMap((b) => [b, b, b]);
+}
+
+/** Decodifica a repetição por maioria de cada trinca: corrige um bit errado por trinca. */
+export function decodificarRepeticao3(bits: number[]): number[] {
+  const out: number[] = [];
+  for (let i = 0; i + 2 < bits.length; i += 3) out.push(bits[i] + bits[i + 1] + bits[i + 2] >= 2 ? 1 : 0);
+  return out;
+}
+
+/* ---------- Bluetooth Low Energy ---------- */
+
+/** Canais de anúncio do BLE: 37, 38 e 39, em 2402, 2426 e 2480 MHz. */
+export const BLE_ANUNCIO = [37, 38, 39] as const;
+
+/**
+ * Frequência central do canal BLE pelo índice (0 a 39), em MHz. São 40 canais de 2 MHz, de 2402 a 2480:
+ * dados 0 a 10 em 2404 a 2424, anúncio 38 em 2426, dados 11 a 36 em 2428 a 2478, anúncio 37 em 2402 e 39 em 2480.
+ */
+export function frequenciaBle(indice: number): number {
+  if (indice === 37) return 2402;
+  if (indice === 38) return 2426;
+  if (indice === 39) return 2480;
+  if (indice >= 0 && indice <= 10) return 2404 + 2 * indice;
+  if (indice >= 11 && indice <= 36) return 2428 + 2 * (indice - 11);
+  return NaN;
+}
+
+/**
+ * Canais BLE cuja frequência central cai dentro do canal de Wi-Fi de 2,4 GHz dado.
+ * Aproximação: o Wi-Fi OFDM ocupa 20 MHz (±10 MHz do centro); quem cai exatamente na borda conta como livre,
+ * porque a máscara espectral ali já está bem abaixo do centro. Por isso 37, 38 e 39 escapam dos canais 1, 6 e 11.
+ */
+export function canaisBleCobertos(canalWifi: number, larguraMhz = 20): number[] {
+  const centro = frequenciaCanal24(canalWifi);
+  const out: number[] = [];
+  for (let i = 0; i < 40; i++) if (Math.abs(frequenciaBle(i) - centro) < larguraMhz / 2) out.push(i);
+  return out;
+}
+
+/** Canais de anúncio que o canal de Wi-Fi cobre. */
+export function anunciosCobertos(canalWifi: number, larguraMhz = 20): number[] {
+  return canaisBleCobertos(canalWifi, larguraMhz).filter((c) => (BLE_ANUNCIO as readonly number[]).includes(c));
+}
+
+/** Camadas físicas do BLE, taxa em kb/s: 1M, 2M (Bluetooth 5) e a codificada com S = 2 ou S = 8 símbolos por bit. */
+export const BLE_PHY = {
+  '1M': { nome: 'LE 1M', kbps: 1000 },
+  '2M': { nome: 'LE 2M', kbps: 2000 },
+  'coded-s2': { nome: 'LE Coded S=2', kbps: 500 },
+  'coded-s8': { nome: 'LE Coded S=8', kbps: 125 },
+} as const;
