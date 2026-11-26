@@ -126,7 +126,8 @@ export interface Cabo {
   conectores?: number;
   emendas?: { metros: number; perdaDb: number }[];
   ruptura?: number;
-  radio?: { distanciaKm: number; freqGHz: number; obstaculoM: number; ptxDbm: number };
+  /** Rádio. Com "celular", é o trecho de acesso de uma rede móvel (atraso do plano de usuário em fisico.ts). */
+  radio?: { distanciaKm: number; freqGHz: number; obstaculoM: number; ptxDbm: number; celular?: '3g' | '4g' | '5g' | '5g-urllc' };
   sat?: { orbita: 'geo' | 'meo' | 'leo' };
   coax?: { tapDbmv: number; elementos: ElementoCoax[] };
   nota?: string;

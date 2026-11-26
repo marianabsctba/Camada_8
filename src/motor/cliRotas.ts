@@ -20,6 +20,7 @@ import {
   ospfDe,
   recalcularProtocolos,
   ripDe,
+  RIP_ATUALIZACAO_S,
   rodarRip,
   roteadoresComMembros,
   roteadoresDoIp,
@@ -53,6 +54,14 @@ function porta(e: Equipamento, nome: string | undefined): string | null {
 
 const listaPortas = (e: Equipamento) => e.portas.map((p) => p.nome).join(', ');
 const infTxt = (n: number) => (n === Infinity ? '∞' : String(n));
+
+/** Segundos em texto curto: "90 s" vira "1 min 30 s". */
+function tempoRip(s: number): string {
+  if (s < 60) return `${s} s`;
+  const min = Math.floor(s / 60);
+  const resto = s % 60;
+  return resto ? `${min} min ${resto} s` : `${min} min`;
+}
 
 /** Endereço de grupo multicast: 224.0.0.0 a 239.255.255.255. */
 export function ehMulticast(ip: number): boolean {
@@ -208,9 +217,12 @@ function cmdRodar(m: Mundo, args: string[]): Saida {
   const temRip = [...m.equipamentos.values()].some((e) => ripDe(e)?.ligado);
   if (temRip) {
     const r = rodarRip(m, n);
-    l.push(`RIP: ${r.rodadas} rodada(s)${r.convergiu ? ', convergiu' : ', ainda mudando'}.`, ...r.linhas);
-    const f = m.flags.rip;
-    if (f?.contouAoInfinito) l.push('Repare: a métrica subiu de rodada em rodada até 16. Um acreditava no outro, que acreditava no primeiro: contagem ao infinito. O horizonte dividido evita isso no caso em linha.');
+    // Uma rodada é uma atualização periódica do RIP (30 s na RFC 2453).
+    const relogio = r.rodadas ? ` (uns ${tempoRip(r.rodadas * RIP_ATUALIZACAO_S)} no relógio do RIP, uma atualização a cada ${RIP_ATUALIZACAO_S} s)` : '';
+    l.push(`RIP: ${r.rodadas} rodada(s)${relogio}${r.convergiu ? ', convergiu' : ', ainda mudando'}.`, ...r.linhas);
+    // O aviso fala só destas rodadas: depois que a rede se acerta, ele não volta.
+    if (r.contou) l.push('Repare: a métrica subiu de rodada em rodada até 16. Um acreditava no outro, que acreditava no primeiro: contagem ao infinito. O horizonte dividido evita isso no caso em linha.');
+    else if (r.contando) l.push('Atenção: há métrica subindo de rodada em rodada. É uma contagem ao infinito em andamento; rode mais, ou ligue o horizonte dividido em quem conta de volta.');
   }
   recalcularProtocolos(m);
   if (m.flags.ospf) l.push(`OSPF: ${m.flags.ospf.roteadores.length} roteador(es), LSPs inundados com ${m.flags.ospf.copias} cópia(s) nos enlaces (${m.flags.ospf.descartadas} repetidas descartadas), Dijkstra em cada um.`);

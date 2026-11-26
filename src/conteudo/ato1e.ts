@@ -87,7 +87,7 @@ const dia54: Dia = {
       'O 4G jogou fora o circuito: tudo é pacote, até a voz, e o núcleo da rede é todo IP. No rádio, trocou o código pelo OFDM, que corta a faixa em centenas de subportadoras estreitas e ortogonais (não se atrapalham, mesmo encostadas). A estação reparte essa grade de frequência e de tempo entre os aparelhos, um pedaço para cada um, a cada fração de segundo.',
       'O 5G mantém o OFDM e o núcleo IP e mexe em três frentes. Usa também ondas milimétricas, faixas acima de 24 GHz em que sobra muita banda, mas o sinal perde muito mais no caminho e morre em parede, folha e chuva. Por isso vêm as células pequenas: estações do tamanho de uma caixa de sapato em postes e fachadas, cada uma cobrindo poucas centenas de metros.',
       'Para compensar a perda, a estação 5G tem dezenas de antenas (MIMO massivo) e faz formação de feixe: em vez de espalhar o sinal em leque, concentra a energia num feixe estreito apontado para cada aparelho. Apontado errado, o feixe ilumina o muro. Neste jogo, apontar o feixe é girar a antena; numa célula de verdade, isso é feito eletronicamente, sem nada se mexer.',
-      'O 5G também mira atraso bem menor que o do 4G e o fatiamento da rede: a mesma rede física vira várias redes lógicas, cada uma com as suas garantias. Uma fatia para a ambulância, com atraso mínimo; outra para milhares de sensores que mandam pouco dado; outra para a torcida assistindo ao jogo. E a regra de ouro continua: frequência baixa vai longe e carrega pouco; frequência alta carrega muito e vai perto.',
+      'O 5G também corta o atraso: em uso real, um ping pelo 5G leva de 10 a 20 ms de ida e volta, contra 30 a 50 ms no 4G e uns 100 ms no 3G, e a meta do padrão para aplicações críticas (a URLLC) é 1 ms no rádio, num sentido. E traz o fatiamento da rede: a mesma rede física vira várias redes lógicas, cada uma com as suas garantias. Uma fatia para a ambulância, com atraso mínimo; outra para milhares de sensores que mandam pouco dado; outra para a torcida assistindo ao jogo. E a regra de ouro continua: frequência baixa vai longe e carrega pouco; frequência alta carrega muito e vai perto.',
     ],
   },
   dicas: [
@@ -106,9 +106,9 @@ const dia54: Dia = {
     adicionar(m, comutador('nucleo', { modelo: 'Núcleo da rede móvel no rack do galpão, todo IP' }));
     adicionar(m, pc('servidor', { modelo: 'Servidor de teste na saída para a internet, com Pinguix', ttl: 64, ip: ip('192.0.2.1/24') }));
     ligar(m, { equip: 'notebook-praca', porta: 'eth0' }, { equip: 'celular-praca', porta: 'lan' }, 'cat6', 1, { id: 'c1' });
-    ligar(m, { equip: 'celular-praca', porta: 'ar' }, { equip: 'celula-26', porta: 'ar' }, 'radio', 200, { id: 'c2', radio: { distanciaKm: 0.2, freqGHz: 26, obstaculoM: 0, ptxDbm: 20 } });
+    ligar(m, { equip: 'celular-praca', porta: 'ar' }, { equip: 'celula-26', porta: 'ar' }, 'radio', 200, { id: 'c2', radio: { distanciaKm: 0.2, freqGHz: 26, obstaculoM: 0, ptxDbm: 20, celular: '5g' } });
     ligar(m, { equip: 'celula-26', porta: 'lan' }, { equip: 'nucleo', porta: 'p1' }, 'cat6', 60, { id: 'c3' });
-    ligar(m, { equip: 'celular-escola', porta: 'ar' }, { equip: 'erb-700', porta: 'ar' }, 'radio', 2000, { id: 'c4', radio: { distanciaKm: 2, freqGHz: 0.7, obstaculoM: 0, ptxDbm: 20 } });
+    ligar(m, { equip: 'celular-escola', porta: 'ar' }, { equip: 'erb-700', porta: 'ar' }, 'radio', 2000, { id: 'c4', radio: { distanciaKm: 2, freqGHz: 0.7, obstaculoM: 0, ptxDbm: 20, celular: '4g' } });
     ligar(m, { equip: 'erb-700', porta: 'lan' }, { equip: 'nucleo', porta: 'p2' }, 'cat6', 80, { id: 'c5' });
     ligar(m, { equip: 'nucleo', porta: 'p8' }, { equip: 'servidor', porta: 'eth0' }, 'cat6', 3, { id: 'c6' });
     m.proxCabo = 7;
@@ -146,7 +146,7 @@ const dia54: Dia = {
       },
       feito: `RSSI de ${br(-59.76)} dBm. O feixe estreito ganhou de volta o que a frequência alta perde no caminho.`,
     }),
-    passo({ alvo: ['equip', 'notebook-praca'], acao: 'ping', valores: { destino: '192.0.2.1', n: '10' }, instrucao: 'Do notebook da praça, mande 10 pings ao servidor, passando pela célula pequena.', porque: 'O pacote cruza 200 m de ar, desce pelo cabo até o núcleo todo IP e chega ao servidor. No 4G e no 5G, até a voz faz esse caminho como pacote.', conferir: pingou('notebook-praca', '192.0.2.1'), feito: 'Dez respostas. O ícone do 5G finalmente diz a verdade.' }),
+    passo({ alvo: ['equip', 'notebook-praca'], acao: 'ping', valores: { destino: '192.0.2.1', n: '10' }, instrucao: 'Do notebook da praça, mande 10 pings ao servidor, passando pela célula pequena.', porque: 'O pacote cruza 200 m de ar, desce pelo cabo até o núcleo todo IP e chega ao servidor. No 4G e no 5G, até a voz faz esse caminho como pacote.', conferir: pingou('notebook-praca', '192.0.2.1'), feito: 'Dez respostas, uns 12 ms de ida e volta. Pela torre 4G de 700 MHz seriam uns 40 ms. O ícone do 5G finalmente diz a verdade.' }),
     passo({
       escolha: {
         opcoes: [
@@ -272,7 +272,7 @@ const dia54: Dia = {
       adicionar(m, radio('celular-cabine', 'Celular de teste na cabine de imprensa do estádio, a 12 m do chão (2 dBi)', { ganho: 2, azimute: 120, azimuteCerto: 120, altura: 12, feixe: 360 }, 120, 12));
       adicionar(m, radio('setor-35', 'Setor 5G de 3,5 GHz na torre, MIMO massivo com feixe de 20° e 20 dBi', { ganho: 20, azimute: 120, azimuteCerto: 300, altura: 35, feixe: 20 }, 300, 40));
       adicionar(m, comutador('nucleo', { modelo: 'Núcleo da rede móvel no rack do galpão, todo IP' }));
-      ligar(m, { equip: 'celular-cabine', porta: 'ar' }, { equip: 'setor-35', porta: 'ar' }, 'radio', 500, { id: 'c1', radio: { distanciaKm: 0.5, freqGHz: 3.5, obstaculoM: 0, ptxDbm: 20 } });
+      ligar(m, { equip: 'celular-cabine', porta: 'ar' }, { equip: 'setor-35', porta: 'ar' }, 'radio', 500, { id: 'c1', radio: { distanciaKm: 0.5, freqGHz: 3.5, obstaculoM: 0, ptxDbm: 20, celular: '5g' } });
       ligar(m, { equip: 'setor-35', porta: 'lan' }, { equip: 'nucleo', porta: 'p1' }, 'cat6', 50, { id: 'c2' });
       m.proxCabo = 3;
       return m;

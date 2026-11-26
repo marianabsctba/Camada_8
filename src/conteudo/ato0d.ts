@@ -91,7 +91,7 @@ const dia35: Dia = {
     adicionar(m, pc('servidor', { modelo: 'Servidor de teste na saída para a internet, com Pinguix', ttl: 64, ip: ip('192.0.2.1/24') }));
     adicionar(m, pc('pc-galpao', { modelo: 'PC do galpão, no cabo, com JanelOS', ttl: 128, ip: ip('192.0.2.10/24') }));
     ligar(m, { equip: 'notebook', porta: 'eth0' }, { equip: 'celular', porta: 'lan' }, 'cat6', 1, { id: 'c1' });
-    ligar(m, { equip: 'celular', porta: 'ar' }, { equip: ERB, porta: 'ar' }, 'radio', 2000, { id: 'c2', radio: { distanciaKm: 2, freqGHz: 0.7, obstaculoM: 0, ptxDbm: 20 } });
+    ligar(m, { equip: 'celular', porta: 'ar' }, { equip: ERB, porta: 'ar' }, 'radio', 2000, { id: 'c2', radio: { distanciaKm: 2, freqGHz: 0.7, obstaculoM: 0, ptxDbm: 20, celular: '4g' } });
     ligar(m, { equip: ERB, porta: 'lan' }, { equip: 'nucleo', porta: 'p1' }, 'cat6', 80, { id: 'c3' });
     ligar(m, { equip: 'nucleo', porta: 'p8' }, { equip: 'servidor', porta: 'eth0' }, 'cat6', 3, { id: 'c4' });
     ligar(m, { equip: 'pc-galpao', porta: 'eth0' }, { equip: 'nucleo', porta: 'p2' }, 'cat6', 5, { id: 'c5' });
@@ -110,7 +110,7 @@ const dia35: Dia = {
   },
   posMorte: [
     'O setor da estação tem um feixe de 65° e estava apontado para 300°, exatamente o lado oposto da escola. Com a antena de volta a 120°, o RSSI no celular subiu para perto de -56 dBm, e o rádio associou a 300 Mb/s.',
-    'O ping pelo celular demorou bem mais que o do cabo, mesmo com a luz levando só uns 7 µs para cruzar os 2 km. O que pesa é o rádio: cada aparelho sem fio no caminho gasta tempo para organizar quem fala quando no ar. Numa rede móvel de verdade, com núcleo longe e muita gente na célula, isso vira dezenas de milissegundos.',
+    'O ping pelo celular deu uns 40 ms, contra centésimos de milissegundo pelo cabo, mesmo com a luz levando só uns 7 µs para cruzar os 2 km. O que pesa é o acesso do 4G: o aparelho pede vez, a estação concede um pedaço da grade, o rádio retransmite o que chegou com erro, e o pacote ainda atravessa o núcleo. São uns 20 ms em cada sentido, o que se vê na prática numa rede 4G (de 30 a 50 ms de ida e volta). No 3G eram uns 100 ms; no 5G em uso real, de 10 a 20 ms.',
     'O trecho sem fio é o mais curto e o mais frágil: tudo depois da antena é cabo. Amanhã alguém vai perguntar por que a internet do celular cai na curva da represa. A resposta tem nome: falta uma célula ali para o handover acontecer.',
   ],
   passos: [
@@ -130,9 +130,9 @@ const dia35: Dia = {
       },
       feito: 'RSSI perto de -56 dBm: o celular associou. A célula agora cobre a escola, e o pasto vai ter que se virar sem 4G.',
     }),
-    passo({ alvo: ['equip', 'notebook'], acao: 'ping', valores: { destino: '192.0.2.1', n: '10' }, instrucao: 'Do notebook, mande 10 pings ao servidor do galpão, passando pelo celular.', porque: 'O pacote sai do notebook, entra no celular, cruza 2 km de ar até a estação, desce pelo cabo até o núcleo e chega ao servidor da saída para a internet.', conferir: pingou('notebook', '192.0.2.1'), feito: 'Dez respostas. Repare no tempo: passa de 1 ms.' }),
+    passo({ alvo: ['equip', 'notebook'], acao: 'ping', valores: { destino: '192.0.2.1', n: '10' }, instrucao: 'Do notebook, mande 10 pings ao servidor do galpão, passando pelo celular.', porque: 'O pacote sai do notebook, entra no celular, cruza 2 km de ar até a estação, desce pelo cabo até o núcleo e chega ao servidor da saída para a internet.', conferir: pingou('notebook', '192.0.2.1'), feito: 'Dez respostas. Repare no tempo: uns 40 ms.' }),
     passo({ alvo: ['equip', 'pc-galpao'], acao: 'ping', valores: { destino: '192.0.2.1', n: '10' }, instrucao: 'Agora, do PC do galpão, mande 10 pings ao mesmo servidor, só por cabo.', porque: 'Mesmo destino, sem rádio no caminho. É a régua para comparar.', conferir: pingou('pc-galpao', '192.0.2.1'), feito: 'Centésimos de milissegundo. O cabo nem esquentou.' }),
-    passo({ pergunta: '1', exemplo: { resposta: '1.7' }, instrucao: 'Qual foi a média do ping pelo celular, em ms?', porque: 'A média aparece na última linha do ping do notebook.', feito: 'Algumas dezenas de vezes mais que pelo cabo. Quase nada disso é distância: é o tempo que cada rádio gasta para pôr o quadro no ar.' }),
+    passo({ pergunta: '1', exemplo: { resposta: '40.1' }, instrucao: 'Qual foi a média do ping pelo celular, em ms?', porque: 'A média aparece na última linha do ping do notebook.', feito: 'Uns 40 ms, centenas de vezes o do cabo. Quase nada disso é distância: é o acesso do 4G, uns 20 ms em cada sentido para o aparelho pedir vez, a estação conceder e o pacote cruzar o núcleo.' }),
     passo({
       escolha: {
         opcoes: [
@@ -209,7 +209,7 @@ const dia35: Dia = {
             ['2G', 'voz digital e mensagens de texto'],
             ['3G', 'dados móveis de verdade'],
             ['4G', 'tudo vira pacote IP, até a voz'],
-            ['5G', 'mais banda, menos atraso e muito mais aparelhos por célula'],
+            ['5G', 'mais banda, menos atraso (de 10 a 20 ms de ida e volta, contra 30 a 50 ms no 4G) e muito mais aparelhos por célula'],
           ],
         },
       },

@@ -102,3 +102,40 @@ describe('ARQ', () => {
     expect(ok.concluiu).toBe(true);
   });
 });
+
+describe('camada física: acesso celular', () => {
+  it('o ping pelo celular tem o atraso de cada geração, não só a propagação', async () => {
+    const { adicionar, aparelho, comutador, ligar, novoMundo, pc } = await import('../src/motor/mundo');
+    const { ping } = await import('../src/motor/rede');
+    const { lerCidr, lerIp } = await import('../src/motor/util');
+    const rtt = (celular?: '3g' | '4g' | '5g' | '5g-urllc') => {
+      const m = novoMundo(1);
+      const radio = (nome: string, ganho: number) => {
+        const e = aparelho(nome, 'radio', nome, [{ nome: 'ar', fisica: 'antena' }, { nome: 'lan' }], { rumo: 0, alturaMax: 30 });
+        e.antena = { ganho, azimute: 0, azimuteCerto: 0, altura: 30, feixe: 360 };
+        return e;
+      };
+      adicionar(m, pc('a', { ip: lerCidr('192.0.2.10/24')! }));
+      adicionar(m, radio('cel', 2));
+      adicionar(m, radio('erb', 17));
+      adicionar(m, comutador('nucleo'));
+      adicionar(m, pc('b', { ip: lerCidr('192.0.2.1/24')! }));
+      ligar(m, { equip: 'a', porta: 'eth0' }, { equip: 'cel', porta: 'lan' }, 'cat6', 1);
+      ligar(m, { equip: 'cel', porta: 'ar' }, { equip: 'erb', porta: 'ar' }, 'radio', 2000, { radio: { distanciaKm: 2, freqGHz: 0.7, obstaculoM: 0, ptxDbm: 20, celular } });
+      ligar(m, { equip: 'erb', porta: 'lan' }, { equip: 'nucleo', porta: 'p1' }, 'cat6', 80);
+      ligar(m, { equip: 'nucleo', porta: 'p2' }, { equip: 'b', porta: 'eth0' }, 'cat6', 3);
+      const r = ping(m, 'a', lerIp('192.0.2.1')!, 4);
+      expect(r.recebidos).toBe(4);
+      return r.rtts.reduce((s, x) => s + x, 0) / r.rtts.length;
+    };
+    expect(rtt()).toBeLessThan(3);
+    expect(rtt('3g')).toBeGreaterThan(90);
+    expect(rtt('3g')).toBeLessThan(110);
+    expect(rtt('4g')).toBeGreaterThan(30);
+    expect(rtt('4g')).toBeLessThan(50);
+    expect(rtt('5g')).toBeGreaterThan(10);
+    expect(rtt('5g')).toBeLessThan(20);
+    // URLLC: 1 ms por sentido no rádio (ITU-R M.2410), uns 2 ms de ida e volta com o cabo.
+    expect(rtt('5g-urllc')).toBeLessThan(3);
+  });
+});

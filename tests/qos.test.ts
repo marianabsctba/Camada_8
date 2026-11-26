@@ -351,3 +351,15 @@ function t2Ajuda(m: Mundo) {
   t.executar('console r1');
   expect(t.executar('?').join('\n')).toMatch(/congestionamento, QoS e SDN/);
 }
+
+describe('revisão: classes DSCP e casamento SDN', () => {
+  it('CS1 fica abaixo do melhor esforço na prioridade estrita (menos que melhor esforço)', async () => {
+    const { prioridadeDaClasse } = await import('../src/motor/qos');
+    expect(prioridadeDaClasse(8)).toBeLessThan(prioridadeDaClasse(0));
+    expect(prioridadeDaClasse(46)).toBeGreaterThan(prioridadeDaClasse(34));
+    expect(prioridadeDaClasse(48)).toBeGreaterThan(prioridadeDaClasse(46));
+  });
+  it('campo do casamento aceita maiúsculas sem trocar destino por origem', () => {
+    expect(lerCasamento('DESTINO=192.0.2.0/24')).toEqual({ destino: '192.0.2.0/24' });
+  });
+});

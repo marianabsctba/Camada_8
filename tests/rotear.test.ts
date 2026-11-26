@@ -352,6 +352,51 @@ describe('RIP nos roteadores do mundo', () => {
     expect(m.flags.rip.contouAoInfinito).toBe(false);
     expect(m.flags.rip.subidas).toBe(0);
     expect(r).toMatch(/Convergiu/);
+    expect(r).not.toMatch(/contagem ao infinito/);
+  });
+  it('o aviso de contagem ao infinito some quando a rede se acerta (enlace de volta, depois horizonte dividido)', () => {
+    const m = linha();
+    const t = new Terminal(m, {} as Dia);
+    for (const r of ['r1', 'r2', 'r3']) rodar(t, r, ['rip on']);
+    rodar(t, 'r1', ['rodar-protocolos']);
+    rodar(t, 'r3', ['derrubar p3']);
+    const contou = rodar(t, 'r1', ['rodar-protocolos']);
+    expect(contou).toMatch(/Repare: a métrica subiu/);
+    expect(m.flags.rip.contagens).toBe(1);
+    // Rodar de novo sem mudança nenhuma: o aviso não se repete.
+    expect(rodar(t, 'r1', ['rodar-protocolos'])).not.toMatch(/contagem ao infinito/);
+    // O enlace volta: a boa notícia corre, e o estado deixa de dizer que contou.
+    rodar(t, 'r3', ['levantar p3']);
+    const volta = rodar(t, 'r1', ['rodar-protocolos']);
+    expect(volta).toMatch(/Convergiu/);
+    expect(volta).not.toMatch(/contagem ao infinito/);
+    expect(m.flags.rip.contouAoInfinito).toBe(false);
+    expect(m.flags.rip.contando).toBe(false);
+    expect(m.flags.rip.metricas.r1['203.0.113.0/24']).toBe(2);
+    // Com horizonte dividido, a próxima queda se espalha sem aviso; o histórico guarda só a primeira contagem.
+    for (const r of ['r1', 'r2', 'r3']) rodar(t, r, ['rip horizonte on']);
+    rodar(t, 'r3', ['derrubar p3']);
+    const queda = rodar(t, 'r1', ['rodar-protocolos']);
+    expect(queda).not.toMatch(/contagem ao infinito/);
+    expect(m.flags.rip.contouAoInfinito).toBe(false);
+    expect(m.flags.rip.subidas).toBe(0);
+    expect(m.flags.rip.contagens).toBe(1);
+  });
+  it('contagem interrompida no meio: avisa que está contando e para de avisar depois do horizonte dividido', () => {
+    const m = linha();
+    const t = new Terminal(m, {} as Dia);
+    for (const r of ['r1', 'r2', 'r3']) rodar(t, r, ['rip on']);
+    rodar(t, 'r1', ['rodar-protocolos']);
+    rodar(t, 'r3', ['derrubar p3']);
+    expect(rodar(t, 'r1', ['rodar-protocolos 4'])).toMatch(/contagem ao infinito em andamento/);
+    expect(m.flags.rip.contando).toBe(true);
+    for (const r of ['r1', 'r2']) rodar(t, r, ['rip horizonte on']);
+    const fim = rodar(t, 'r1', ['rodar-protocolos']);
+    expect(fim).toMatch(/Convergiu/);
+    expect(fim).not.toMatch(/contagem ao infinito/);
+    expect(m.flags.rip.contando).toBe(false);
+    expect(m.flags.rip.contouAoInfinito).toBe(false);
+    expect(m.flags.rip.metricas.r1['203.0.113.0/24'] ?? 16).toBe(16);
   });
 });
 

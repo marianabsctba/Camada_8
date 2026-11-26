@@ -682,13 +682,14 @@ export interface RotaBgp {
 /** Preferência local pela política comercial: rota de cliente dá dinheiro, de par é de graça, de provedor custa. */
 export const PREF_LOCAL: Record<Relacao | 'propria', number> = { propria: 1000, cliente: 200, par: 100, provedor: 50 };
 
-/** Decisão do BGP, simplificada: maior preferência local, depois caminho de AS mais curto, depois o menor AS vizinho. */
+/**
+ * Decisão do BGP (RFC 4271, seção 9.1.2.2), simplificada: maior preferência local, depois caminho de AS mais curto,
+ * depois o menor identificador do vizinho (aqui, o nome do roteador). ORIGIN, MED, eBGP contra iBGP e custo interno
+ * ficam de fora: no laboratório é um roteador por AS, só com eBGP.
+ */
 export function melhorRotaBgp(a: RotaBgp, b: RotaBgp): RotaBgp {
   if (a.prefLocal !== b.prefLocal) return a.prefLocal > b.prefLocal ? a : b;
   if (a.caminho.length !== b.caminho.length) return a.caminho.length < b.caminho.length ? a : b;
-  const pa = a.caminho[0] ?? 0;
-  const pb = b.caminho[0] ?? 0;
-  if (pa !== pb) return pa < pb ? a : b;
   return (a.de ?? '') <= (b.de ?? '') ? a : b;
 }
 

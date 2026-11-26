@@ -684,10 +684,10 @@ const dia81: Dia = {
   ],
   montar: () => linha(481, 81, LINHA81, { rip: ['r-leste', 'r-represa'] }),
   objetivo: (m) => {
-    const f = m.flags.rip as { convergiu?: boolean; contouAoInfinito?: boolean } | undefined;
+    const f = m.flags.rip as { convergiu?: boolean; contagens?: number } | undefined;
     return [
       item('RIP ligado no r-dc', ripLigado(m, 'r-dc')),
-      item('contagem ao infinito vista: o r-dc acabou com 16 até a LAN da represa', !!f?.contouAoInfinito && derrubou(m, 'r-leste:represa', 'r-represa:leste') && metricaRip(m, 'r-dc', LAN_REPRESA) >= 16, `r-dc até ${LAN_REPRESA}: ${metricaRip(m, 'r-dc', LAN_REPRESA)}`),
+      item('contagem ao infinito vista: o r-dc acabou com 16 até a LAN da represa', (f?.contagens ?? 0) > 0 && derrubou(m, 'r-leste:represa', 'r-represa:leste') && metricaRip(m, 'r-dc', LAN_REPRESA) >= 16, `r-dc até ${LAN_REPRESA}: ${metricaRip(m, 'r-dc', LAN_REPRESA)}`),
       item('horizonte dividido (ou envenenamento reverso) no r-dc', comHorizonte(m, 'r-dc'), horizonteDe(m, 'r-dc')),
       item('LAN da escola derrubada e a queda espalhada até o r-dc, já convergido', derrubou(m, 'r-leste:lan') && !!f?.convergiu && metricaRip(m, 'r-dc', LAN_ESCOLA) >= 16, `r-dc até ${LAN_ESCOLA}: ${metricaRip(m, 'r-dc', LAN_ESCOLA)}`),
     ];
@@ -760,7 +760,7 @@ const dia81: Dia = {
       instrucao: 'Rode só 5 rodadas. Sem o horizonte, isso não daria nem para começar a contagem.',
       porque: 'Com o horizonte dividido no r-dc, o r-leste não ouve mais nada sobre a escola e marca 16 na hora.',
       conferir: (m) => (m.flags.rip?.convergiu && metricaRip(m, 'r-dc', LAN_ESCOLA) >= 16 ? true : 'Não convergiu em 5 rodadas. Confira se o horizonte do r-dc está ligado.'),
-      feito: 'Três rodadas: o r-leste foi direto para 16, o r-dc o seguiu, e acabou. O aviso de que a contagem já aconteceu continua aparecendo porque é da queda anterior.',
+      feito: 'Três rodadas: o r-leste foi direto para 16, o r-dc o seguiu, e acabou. Desta vez, nenhum aviso de contagem: nenhuma métrica subiu.',
     }),
   ],
   aula: {

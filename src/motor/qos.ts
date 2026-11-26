@@ -312,10 +312,15 @@ export function lerByteServico(tos: number): { dscp: number; ecn: number } {
 
 export const NOMES_ECN = ['00: não usa ECN', '01: entende ECN (ECT 1)', '10: entende ECN (ECT 0)', '11: congestionamento visto (CE)'];
 
-/** Prioridade estrita de cada classe nos roteadores: EF passa na frente, depois AF4 a AF1, depois o resto. */
+/**
+ * Prioridade estrita de cada classe nos roteadores: controle da rede (CS6, CS7), EF, depois AF4 a AF1, depois o
+ * melhor esforço. A CS1 fica abaixo do melhor esforço: é a classe de "menos que melhor esforço" (RFC 3662; hoje a
+ * RFC 8622 recomenda o DSCP 1, LE, para isso), para cópia de segurança e tráfego que pode esperar.
+ */
 export function prioridadeDaClasse(dscp: number): number {
   if (dscp === 46) return 6;
   if (dscp >= 48) return 7;
+  if (dscp === 8 || dscp === 1) return -1;
   const af = dscp >> 3;
   if (dscp % 2 === 0 && dscp % 8 !== 0 && af >= 1 && af <= 4) return af + 1;
   if (dscp % 8 === 0 && dscp > 0) return Math.min(5, dscp >> 3);

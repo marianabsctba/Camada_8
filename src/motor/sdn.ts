@@ -97,7 +97,7 @@ export function lerCasamento(txt: string): Casamento | string {
         const ok = lerCidr(v.includes('/') ? v : `${v}/32`);
         if (!ok) return `"${v}" não é endereço nem prefixo.`;
         const t = v.includes('/') ? v : `${v}/32`;
-        if (k === 'destino' || k === 'dst') c.destino = t;
+        if (k.toLowerCase() === 'destino' || k.toLowerCase() === 'dst') c.destino = t;
         else c.origem = t;
         break;
       }

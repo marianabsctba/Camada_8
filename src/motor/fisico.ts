@@ -84,7 +84,7 @@ export interface EstadoEnlace {
   velocidade: number; // Mb/s
   ber: number;
   margemDb: number;
-  atrasoS: number; // propagação, um sentido
+  atrasoS: number; // propagação (mais o acesso, no celular), um sentido
   motivos: string[];
   info: string[];
   dados: Record<string, number>;
@@ -288,18 +288,53 @@ export function radioDados(m: Mundo, c: Cabo) {
   return { perdaLivre, r1, folga, precisa, perdaFresnel, desA, desB, rssi };
 }
 
+/**
+ * Atraso do plano de usuário de uma rede celular, um sentido, do aparelho até a saída do núcleo: agendamento do
+ * rádio (o aparelho pede vez e a estação concede), retransmissões rápidas (HARQ), rede de transporte e núcleo.
+ * Valores de referência, de uso real com a célula em carga normal, não de laboratório vazio:
+ * - 3G (HSPA): ida e volta em torno de 100 ms.
+ * - 4G (LTE): ida e volta típica de 30 a 50 ms na prática (a meta do 3GPP para o rádio sozinho era 5 ms).
+ * - 5G NR em uso real (eMBB, núcleo comum): ida e volta em torno de 10 a 20 ms.
+ * - 5G URLLC: a meta da ITU para o IMT-2020 (ITU-R M.2410) é 1 ms de plano de usuário, um sentido, no rádio;
+ *   eMBB fica com 4 ms. Só com núcleo na borda e fatia dedicada.
+ */
+export const CELULAR = {
+  '3g': { umSentidoMs: 50, nome: '3G (HSPA)' },
+  '4g': { umSentidoMs: 20, nome: '4G (LTE)' },
+  '5g': { umSentidoMs: 6, nome: '5G NR' },
+  '5g-urllc': { umSentidoMs: 1, nome: '5G NR com URLLC' },
+} as const;
+
+export type GeracaoCelular = keyof typeof CELULAR;
+
+/**
+ * Os dois rádios do enlace já somam o atraso de encaminhamento deles (ENCAMINHAR.radio, 0,4 ms cada, em rede.ts) a
+ * cada sentido. O que falta para chegar no valor de referência entra no enlace.
+ */
+const PROCESSAMENTO_DOS_RADIOS_S = 2 * 4e-4;
+
+/** Quanto o acesso celular soma ao enlace de rádio, por sentido, em segundos (0 se não for celular). */
+export function atrasoCelularS(c: Cabo): number {
+  const g = c.radio?.celular;
+  if (!g) return 0;
+  return Math.max(0, CELULAR[g].umSentidoMs / 1000 - PROCESSAMENTO_DOS_RADIOS_S);
+}
+
 function avaliarRadio(m: Mundo, c: Cabo): EstadoEnlace {
   const d = radioDados(m, c);
   const prop = (c.radio!.distanciaKm * 1000) / LUZ;
+  const g = c.radio!.celular;
+  const atraso = prop + atrasoCelularS(c);
   const info = [
     `perda no espaço livre: ${d.perdaLivre.toFixed(1)} dB`,
     `1ª zona de Fresnel no meio do caminho: ${d.r1.toFixed(1)} m de raio, folga sobre o obstáculo ${d.folga.toFixed(1)} m (precisa de ${d.precisa.toFixed(1)} m)`,
     `perda por obstrução: ${d.perdaFresnel.toFixed(1)} dB; desalinhamento: ${d.desA.toFixed(1)} dB + ${d.desB.toFixed(1)} dB`,
     `RSSI: ${d.rssi.toFixed(1)} dBm`,
+    ...(g ? [`acesso celular ${CELULAR[g].nome}: uns ${CELULAR[g].umSentidoMs} ms por sentido no plano de usuário (agendamento do rádio, retransmissões e núcleo), contra ${(prop * 1e6).toFixed(1)} µs de propagação`] : []),
   ];
-  if (d.rssi < -80) return fora(`RSSI de ${d.rssi.toFixed(1)} dBm: abaixo de -80 dBm o rádio nem associa`, prop, info, { rssi: d.rssi });
+  if (d.rssi < -80) return fora(`RSSI de ${d.rssi.toFixed(1)} dBm: abaixo de -80 dBm o rádio nem associa`, atraso, info, { rssi: d.rssi });
   const v = d.rssi >= -65 ? 300 : d.rssi >= -72 ? 130 : 50;
-  return { up: true, velocidade: v, ber: berDaMargem(d.rssi + 74), margemDb: d.rssi + 74, atrasoS: prop, motivos: [], info, dados: { rssi: d.rssi } };
+  return { up: true, velocidade: v, ber: berDaMargem(d.rssi + 74), margemDb: d.rssi + 74, atrasoS: atraso, motivos: [], info, dados: { rssi: d.rssi, celularMs: g ? CELULAR[g].umSentidoMs : 0 } };
 }
 
 /* ---------- Coaxial (DOCSIS) ---------- */

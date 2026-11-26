@@ -19,6 +19,7 @@ import {
   propagarBgp,
   rodadaVD,
   rotasEstadoEnlace,
+  vetorPara,
   type Aresta,
   type EntradaLfib,
   type EntradaVD,
@@ -107,7 +108,7 @@ export function configOspf(e: Equipamento): ConfigOspf {
   return (e.s.ospf ??= { ligado: false, custos: {}, areas: {} }) as ConfigOspf;
 }
 
-/** Referência de largura de banda do OSPF: 100 Mb/s. Custo = 10^8 / bps, no mínimo 1. Acima de 100 Mb/s, tudo dá 1. */
+/** Referência de largura de banda do OSPF: 100 Mb/s. Custo = 10^8 / bps, com a divisão inteira truncada como nos roteadores de verdade (a RFC 2328 deixa a conta para cada fabricante), no mínimo 1. Acima de 100 Mb/s, tudo dá 1. */
 export const REFERENCIA_OSPF = 1e8;
 
 export function custoOspf(m: Mundo, e: Equipamento, porta: string): number {
@@ -115,7 +116,7 @@ export function custoOspf(m: Mundo, e: Equipamento, porta: string): number {
   if (c) return c;
   const v = velocidade(m, e, porta);
   if (!v) return 65535;
-  return Math.max(1, Math.round(REFERENCIA_OSPF / (v * 1e6)));
+  return Math.max(1, Math.min(65535, Math.floor(REFERENCIA_OSPF / (v * 1e6))));
 }
 
 export function areaDa(e: Equipamento, porta: string): number {
@@ -306,6 +307,48 @@ export function configRip(e: Equipamento): ConfigRip {
 
 export const INFINITO_RIP = 16;
 
+/**
+ * Temporizadores do RIP (RFC 2453, seção 3.8): atualização periódica a cada 30 s, rota expira depois de 180 s sem
+ * notícia e, já em 16, fica mais 120 s sendo anunciada como inalcançável antes de sair da tabela (coleta de lixo).
+ * Aproximação declarada do laboratório: uma rodada é uma atualização periódica (30 s). Porta derrubada invalida na
+ * hora as rotas que saíam por ela (a RFC permite isso quando a interface cai), sem esperar os 180 s; a coleta de lixo
+ * não apaga a linha, para o 16 continuar visível. As atualizações disparadas (seção 3.10.1) não mudam o desenho da
+ * contagem ao infinito: só fazem cada passo dela levar segundos em vez de 30 s.
+ */
+export const RIP_ATUALIZACAO_S = 30;
+export const RIP_EXPIRA_S = 180;
+export const RIP_COLETA_S = 120;
+
+/** O que o laboratório guarda sobre o RIP em m.flags.rip. */
+export interface EstadoRip {
+  /** Rodadas com alguma mudança, desde o começo. */
+  rodadas: number;
+  /** Métricas finitas que subiram no episódio atual (desde a última convergência). */
+  subidas: number;
+  /** Rotas que viraram 16 no episódio atual. */
+  infinitos: number;
+  /** No episódio atual, alguma rota foi empurrada de 15 para 16 por um vizinho que ainda anunciava 15: contou até o fim. */
+  contouAoInfinito: boolean;
+  /** Agora: na última rodada alguma métrica finita subiu (a contagem está andando). */
+  contando: boolean;
+  /** Histórico: quantos episódios terminaram em contagem ao infinito (não volta a zero). */
+  contagens: number;
+  /** A última rodada passou sem ninguém mudar nada. */
+  convergiu?: boolean;
+  metricas?: Record<string, Record<string, number>>;
+}
+
+export function estadoRip(m: Mundo): EstadoRip {
+  const f = (m.flags.rip ??= {}) as Partial<EstadoRip>;
+  f.rodadas ??= 0;
+  f.subidas ??= 0;
+  f.infinitos ??= 0;
+  f.contouAoInfinito ??= false;
+  f.contando ??= false;
+  f.contagens ??= 0;
+  return f as EstadoRip;
+}
+
 function instalarRip(m: Mundo, e: Equipamento): void {
   const t = ripDe(e)?.ligado ? (ripDe(e)!.tabela ?? {}) : {};
   const novas: RotaDinamica[] = [];
@@ -320,6 +363,8 @@ function instalarRip(m: Mundo, e: Equipamento): void {
 export interface RodadaRip {
   mudou: boolean;
   linhas: string[];
+  /** Nesta rodada alguma rota chegou a 16 contando (o vizinho ainda dizia 15). */
+  contou: boolean;
 }
 
 const metricaTxt = (n: number | undefined) => (n === undefined ? 'nada' : n >= INFINITO_RIP ? '16 (infinito)' : String(n));
@@ -327,12 +372,16 @@ const metricaTxt = (n: number | undefined) => (n === undefined ? 'nada' : n >= I
 /**
  * Uma rodada do RIP: todo roteador com RIP manda o vetor (destino e saltos) a cada vizinho ao mesmo tempo,
  * e cada um refaz a tabela. Rede que o próprio roteador tem fica com 0; um vizinho a mais, 1; 16 é infinito.
+ *
+ * O estado da contagem ao infinito reflete a rede atual: a primeira rodada com mudança depois de uma convergência
+ * abre um episódio novo e zera subidas, infinitos e contouAoInfinito. Assim, depois de ligar o horizonte dividido
+ * ou de o enlace voltar, o aviso some quando a rede convergir de novo. O histórico fica em "contagens".
  */
 export function rodadaRip(m: Mundo): RodadaRip {
   const todos = [...m.equipamentos.values()];
   for (const e of todos) if (!ripDe(e)?.ligado && e.s.rotasDinamicas) instalar(e, 'rip', []);
   const ligados = todos.filter((e) => ripDe(e)?.ligado && roteadorLigado(e));
-  if (!ligados.length) return { mudou: false, linhas: ['Nenhum roteador com RIP ligado.'] };
+  if (!ligados.length) return { mudou: false, linhas: ['Nenhum roteador com RIP ligado.'], contou: false };
   const g: Grafo = {
     nos: ligados.map((e) => e.nome).sort(),
     arestas: adjacencias(m, (e) => !!ripDe(e)?.ligado).map((a) => ({ de: a.de, para: a.para, custo: 1, porta: a.porta, portaPara: a.portaPara, ipPara: a.ipPara })),
@@ -340,9 +389,18 @@ export function rodadaRip(m: Mundo): RodadaRip {
   const origina: Record<string, string[]> = Object.fromEntries(ligados.map((e) => [e.nome, redesAtivas(m, e).map((r) => r.prefixo)]));
   const t: TabelasVD = Object.fromEntries(ligados.map((e) => [e.nome, ripDe(e)!.tabela ?? Object.fromEntries(origina[e.nome]!.map((p) => [p, { custo: 0 }]))]));
   const horizonte = Object.fromEntries(ligados.map((e) => [e.nome, ripDe(e)!.horizonte ?? 'nenhum'])) as Record<string, Horizonte>;
-  const r = rodadaVD(g, t, { metrica: 'saltos', infinito: INFINITO_RIP, horizonte }, origina);
-  const f = (m.flags.rip ??= { rodadas: 0, subidas: 0, infinitos: 0, contouAoInfinito: false });
+  const opcoes = { metrica: 'saltos' as const, infinito: INFINITO_RIP, horizonte };
+  const r = rodadaVD(g, t, opcoes, origina);
+  const f = estadoRip(m);
+  // Rede estava parada (ou é a primeira vez) e agora mudou: episódio novo, o aviso velho não vale mais.
+  if (r.mudou && f.convergiu !== false) {
+    f.subidas = 0;
+    f.infinitos = 0;
+    f.contouAoInfinito = false;
+  }
   const linhas: string[] = [];
+  let subiuAgora = false;
+  let contou = false;
   for (const e of ligados) {
     const antes = t[e.nome] ?? {};
     const depois = r.tabelas[e.nome] ?? {};
@@ -351,28 +409,40 @@ export function rodadaRip(m: Mundo): RodadaRip {
       const b = depois[d];
       if (a?.custo === b?.custo && a?.via === b?.via) continue;
       linhas.push(`  ${e.nome}: ${d} ${metricaTxt(a?.custo)} → ${metricaTxt(b?.custo)}${b?.via && b.custo < INFINITO_RIP ? ` via ${b.via}` : ''}`);
-      if (a && b && a.custo < b.custo && b.custo < INFINITO_RIP && a.custo > 0) f.subidas++;
+      if (a && b && a.custo < b.custo && b.custo < INFINITO_RIP && a.custo > 0) {
+        f.subidas++;
+        subiuAgora = true;
+      }
       if (a && a.custo < INFINITO_RIP && b && b.custo >= INFINITO_RIP) {
         f.infinitos++;
-        if (f.subidas > 0) f.contouAoInfinito = true;
+        // Contou até o fim: algum vizinho ainda anunciava 15 (15 + 1 = 16). Quem foi para 16 porque o vizinho
+        // calou (horizonte dividido) ou anunciou 16 (envenenamento, queda) não contou nada.
+        const ouviu15 = g.arestas.some((x) => x.de === e.nome && vetorPara(t, x.para, e.nome, opcoes)[d] === INFINITO_RIP - 1);
+        if (ouviu15 && a.custo > 0) contou = true;
       }
     }
     ripDe(e)!.tabela = depois;
     instalarRip(m, e);
   }
+  if (contou && !f.contouAoInfinito) f.contagens++;
+  if (contou) f.contouAoInfinito = true;
+  f.contando = r.mudou && subiuAgora;
+  f.convergiu = !r.mudou;
   if (r.mudou) f.rodadas++;
   f.metricas = Object.fromEntries(ligados.map((e) => [e.nome, Object.fromEntries(Object.entries(r.tabelas[e.nome] ?? {}).map(([d, x]) => [d, x.custo]))]));
-  return { mudou: r.mudou, linhas };
+  return { mudou: r.mudou, linhas, contou };
 }
 
-/** Roda n rodadas, ou até ninguém mudar (no máximo 40). Devolve o passo a passo. */
-export function rodarRip(m: Mundo, n?: number): { rodadas: number; convergiu: boolean; linhas: string[] } {
+/** Roda n rodadas, ou até ninguém mudar (no máximo 40). Devolve o passo a passo e o que aconteceu nestas rodadas. */
+export function rodarRip(m: Mundo, n?: number): { rodadas: number; convergiu: boolean; linhas: string[]; contou: boolean; contando: boolean } {
   const max = n ?? 40;
   const linhas: string[] = [];
   let feitas = 0;
   let convergiu = false;
+  let contou = false;
   for (let i = 1; i <= max; i++) {
     const r = rodadaRip(m);
+    contou ||= r.contou;
     if (!r.mudou) {
       convergiu = true;
       linhas.push(feitas ? `rodada ${i}: ninguém mudou nada. Convergiu.` : 'Nada mudou: as tabelas já estavam convergidas.');
@@ -381,9 +451,10 @@ export function rodarRip(m: Mundo, n?: number): { rodadas: number; convergiu: bo
     feitas++;
     linhas.push(`rodada ${i}:`, ...r.linhas.slice(0, 16), ...(r.linhas.length > 16 ? [`  ... e mais ${r.linhas.length - 16} mudança(s)`] : []));
   }
-  const f = (m.flags.rip ??= { rodadas: 0, subidas: 0, infinitos: 0, contouAoInfinito: false });
+  const f = estadoRip(m);
   f.convergiu = convergiu;
-  return { rodadas: feitas, convergiu, linhas };
+  if (convergiu) f.contando = false;
+  return { rodadas: feitas, convergiu, linhas, contou, contando: f.contando };
 }
 
 /* ---------- BGP ---------- */
