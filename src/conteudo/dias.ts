@@ -28,12 +28,22 @@ import { ATO4F } from './ato4f';
 import { ATO4G } from './ato4g';
 import { ATO4H } from './ato4h';
 import { ATO4I } from './ato4i';
+import { ATO5A } from './ato5a';
+import { ATO5B } from './ato5b';
+import { ATO5C } from './ato5c';
+import { ATO5D } from './ato5d';
+import { ATO6A } from './ato6a';
+import { ATO6B } from './ato6b';
+import { ATO6C } from './ato6c';
+import { ATO7A } from './ato7a';
+import { ATO7B } from './ato7b';
+import { ATO7C } from './ato7c';
 import { CURRICULO } from './curriculo';
 import { EXTRAS } from './extras';
 import { PASSOS } from './passos';
 import type { Dia } from './tipos';
 
-const ORIGINAIS = new Map([...ATO0, ...ATO1, ...ATO2, ...ATO0A, ...ATO0B, ...ATO0C, ...ATO0D, ...ATO1A, ...ATO1B, ...ATO1C, ...ATO1D, ...ATO1E, ...ATO2B, ...ATO3A, ...ATO3B, ...ATO3C, ...ATO3D, ...ATO3E, ...ATO3F, ...ATO4A, ...ATO4B, ...ATO4C, ...ATO4D, ...ATO4E, ...ATO4F, ...ATO4G, ...ATO4H, ...ATO4I].map((d) => [d.numero, d]));
+const ORIGINAIS = new Map([...ATO0, ...ATO1, ...ATO2, ...ATO0A, ...ATO0B, ...ATO0C, ...ATO0D, ...ATO1A, ...ATO1B, ...ATO1C, ...ATO1D, ...ATO1E, ...ATO2B, ...ATO3A, ...ATO3B, ...ATO3C, ...ATO3D, ...ATO3E, ...ATO3F, ...ATO4A, ...ATO4B, ...ATO4C, ...ATO4D, ...ATO4E, ...ATO4F, ...ATO4G, ...ATO4H, ...ATO4I, ...ATO5A, ...ATO5B, ...ATO5C, ...ATO5D, ...ATO6A, ...ATO6B, ...ATO6C, ...ATO7A, ...ATO7B, ...ATO7C].map((d) => [d.numero, d]));
 
 export const DIAS: Dia[] = CURRICULO.filter((e) => e.ref !== undefined && ORIGINAIS.has(e.ref)).map((e) => {
   const d = ORIGINAIS.get(e.ref!)!;

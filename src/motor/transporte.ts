@@ -176,11 +176,21 @@ export interface CaminhoMundo {
   perda: number;
   nat: string[];
   roteadores: string[];
+  /** Equipamentos por onde a ida e a volta passaram (quem pode ter ouvido), os que só viram ESP e os que interceptaram por ARP falso. */
+  nos?: string[];
+  nosTunel?: string[];
+  interceptadoPor?: string[];
+  /** Quem descartou no firewall ou no IPS (quando falhou) e os alertas de IDS pelo caminho. */
+  bloqueadoPor?: string;
+  alertas?: string[];
+  /** Eventos de túnel (VPN) e de ARP falso, para mostrar. */
+  eventosSeguranca?: string[];
 }
 
-function viagemTransporte(m: Mundo, de: Equipamento, origem: number, destino: number, proto: Protocolo, porta: number, dados: number): Viagem {
+function viagemTransporte(m: Mundo, de: Equipamento, origem: number, destino: number, proto: Protocolo, porta: number, dados: number, l4?: { origem: number; destino: number; flags?: string }): Viagem {
   const p = novoPacote(m, { origem, destino, ttl: de.ttl, dados, icmp: { tipo: 0, codigo: 0, id: porta, seq: 0 } });
   p.protocolo = proto === 'tcp' ? 6 : 17;
+  if (l4) p.l4 = { ...l4, flags: proto === 'tcp' ? l4.flags : undefined };
   // O "id" carrega a porta que o NAT olha: a de origem na ida, a de destino na volta.
   p.tamanho = 20 + (proto === 'tcp' ? 20 : 8) + dados;
   p.fragmentos = [{ identificacao: p.identificacao, deslocamento: 0, dados: p.tamanho - 20, mf: false }];
@@ -205,19 +215,23 @@ export function caminhoTransporte(m: Mundo, origemNome: string, ipDestinoN: numb
   const origem = interfacesL3(de)[0]!.cidr.endereco;
   let ida: Viagem | null = null;
   for (let k = 0; k < 5; k++) {
-    ida = viagemTransporte(m, de, origem, ipDestinoN, proto, portaLocal, 0);
+    ida = viagemTransporte(m, de, origem, ipDestinoN, proto, portaLocal, 0, { origem: portaLocal, destino: portaDestino, flags: 'SYN' });
     if (!ida.perdido) break;
   }
-  if (!ida || !ida.entregue) return { ...base, falha: falhaViagem(ida!) };
+  const seg = (v: Viagem | null) => (v ? { bloqueadoPor: v.bloqueadoPor, alertas: v.alertas, interceptadoPor: v.interceptadoPor, nos: v.nos, eventosSeguranca: v.eventos.filter((x) => x.includes('VPN') || x.includes('ARP envenenado') || x.includes('homem no meio') || x.includes('firewall') || x.includes('antifalsificação')) } : {});
+  if (!ida || !ida.entregue) return { ...base, ...seg(ida), falha: falhaViagem(ida!) };
   const servidor = m.equipamentos.get(ida.onde)!;
   const ipVisto = ipTexto(ida.pacote.origem);
   const portaVista = ida.pacote.icmp.id;
   let volta: Viagem | null = null;
   for (let k = 0; k < 5; k++) {
-    volta = viagemTransporte(m, servidor, ipDestinoN, ida.pacote.origem, proto, portaVista, 0);
+    volta = viagemTransporte(m, servidor, ipDestinoN, ida.pacote.origem, proto, portaVista, 0, { origem: portaDestino, destino: portaVista, flags: 'SYN+ACK' });
     if (!volta.perdido) break;
   }
-  if (!volta || !volta.entregue || volta.onde !== de.nome) return { ...base, servidor, ipVisto, portaVista, falha: `o segmento chegou em ${servidor.nome}, mas a resposta não voltou: ${volta ? falhaViagem(volta) : 'sem rota'}` };
+  if (!volta || !volta.entregue || volta.onde !== de.nome) {
+    const s = seg(volta);
+    return { ...base, ...s, alertas: [...(ida.alertas ?? []), ...(s.alertas ?? [])], servidor, ipVisto, portaVista, falha: `o segmento chegou em ${servidor.nome}, mas a resposta não voltou: ${volta ? falhaViagem(volta) : 'sem rota'}` };
+  }
   const sentido = (v: Viagem) => (v.trechos ?? []).reduce((t, x) => t + x.atrasoS, 0) + v.roteadores.length * 5e-5;
   const trechos = ida.trechos ?? [];
   const pior = trechos.reduce((a, b) => (b.mbps < a.mbps ? b : a), trechos[0] ?? { de: de.nome, porta: de.portas[0]?.nome ?? '', mbps: 1000, atrasoS: 0, ber: 0 });
@@ -247,6 +261,11 @@ export function caminhoTransporte(m: Mundo, origemNome: string, ipDestinoN: numb
     perda: perda < 1e-6 ? 0 : perda,
     nat: [...ida.eventos, ...volta.eventos].filter((x) => x.includes('NAT')),
     roteadores: ida.roteadores.map((r) => r.nome),
+    nos: [...new Set([...(ida.nos ?? []), ...(volta.nos ?? [])])],
+    nosTunel: [...new Set([...(ida.nosTunel ?? []), ...(volta.nosTunel ?? [])])],
+    interceptadoPor: [...new Set([...(ida.interceptadoPor ?? []), ...(volta.interceptadoPor ?? [])])],
+    alertas: [...(ida.alertas ?? []), ...(volta.alertas ?? [])],
+    eventosSeguranca: [...(seg(ida).eventosSeguranca ?? []), ...(seg(volta).eventosSeguranca ?? [])],
   };
 }
 
@@ -272,6 +291,17 @@ export interface Conexao {
   rtt: number;
   fdCliente: number;
   fdServidor: number;
+}
+
+/** Estado de um servidor sob inundação de SYN (ato 7): a fila de meio abertas cheia derruba quem chega de verdade. */
+export interface InundacaoSyn {
+  ativa: boolean;
+  /** SYN por segundo que chegam. */
+  taxa: number;
+  meiasAbertas: number;
+  backlog: number;
+  origem: string;
+  falsificada: boolean;
 }
 
 export interface ResultadoConectar {
@@ -305,6 +335,15 @@ export function conectar(m: Mundo, e: Equipamento, ipN: number, porta: number): 
   m.flags.soquetes = { ...estadoSoquetes(m), demux: { equip: srv.nome, como: d.como, proto: 'tcp', porta, origem: `${c.ipVisto}:${c.portaVista}` } };
   for (const n of c.nat) linhas.push(n);
   linhas.push(`${srv.nome} demultiplexa: ${d.texto}`);
+  const inund = srv.s.inundacaoSyn as InundacaoSyn | undefined;
+  if (inund?.ativa && d.como === 'escuta') {
+    if (srv.s.synCookies) linhas.push(`${srv.nome} está sob inundação de SYN, mas responde com SYN cookie: o número de sequência inicial leva o estado da conexão, e nada fica guardado na fila até o ACK voltar.`);
+    else if (inund.meiasAbertas >= inund.backlog) {
+      linhas.push(`${srv.nome} recebeu o SYN, mas a fila de conexões meio abertas está cheia (${inund.meiasAbertas} de ${inund.backlog}, todas de SYN que nunca vão completar). O SYN é descartado em silêncio.`, 'O cliente reenvia depois de 1 s, 2 s, 4 s... e desiste: negação de serviço sem derrubar nada, só ocupando a fila.');
+      registro('sem resposta', { falha: 'fila de SYN cheia' });
+      return { resultado: 'sem resposta', linhas, caminho: c };
+    }
+  }
   const cfg = configTcp(e);
   const iC = isn(m);
   const iS = isn(m);

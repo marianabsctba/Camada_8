@@ -13,6 +13,8 @@ import { abreviarIpv6, agregar, dividir, ehDocumentacao, ehEnlaceLocal, ehPrivad
 import { comandoGrupo, comandosRoteamento } from './cliRotas';
 import { comandosQos, temQos } from './cliQos';
 import { AJUDA_TRANSPORTE, comandosTransporte, temTransporte } from './cliTransporte';
+import { AJUDA_APLICACAO, comandosAplicacao, temAplicacao } from './cliAplicacao';
+import { AJUDA_SEGURANCA, comandosSeguranca, temSeguranca } from './cliSeguranca';
 import { NOMES_ECN } from './qos';
 import { recalcularProtocolos, temProtocolos } from './protocolos';
 import { configurarDhcp, configurarNat, interfacesL3, ipv6De, MTU_PADRAO, nat, pedirDhcp, ping6, rotasDe, temCamadaRede, textoTempo, traceroute, type OpcoesPing, type Rota, type ServidorDhcp } from './roteamento';
@@ -1505,7 +1507,9 @@ export class Terminal {
       const rede = c.rede && temCamadaRede(this.mundo) ? ['camada de rede:', ...c.rede.map((a) => '  ' + a)] : [];
       const qos = AJUDA_QOS[e.tipo] && temQos(this.mundo) ? ['congestionamento, QoS e SDN:', ...AJUDA_QOS[e.tipo]!.map((a) => '  ' + a)] : [];
       const transp = e.tipo === 'pc' && temTransporte(this.mundo) ? ['camada de transporte:', ...AJUDA_TRANSPORTE.map((a) => '  ' + a)] : [];
-      return [`Console de ${e.nome} (${e.modelo}):`, ...c.ajuda.map((a) => '  ' + a), ...rede.map((a) => '  ' + a), ...qos.map((a) => '  ' + a), ...transp.map((a) => '  ' + a), '  sair'];
+      const apl = temAplicacao(this.mundo) && (e.tipo === 'pc' || interfacesL3(e).length) ? ['camada de aplicação:', ...(e.tipo === 'pc' ? AJUDA_APLICACAO : AJUDA_APLICACAO.slice(0, 3)).map((a) => '  ' + a)] : [];
+      const seg = AJUDA_SEGURANCA[e.tipo] && temSeguranca(this.mundo) ? ['segurança de rede:', ...AJUDA_SEGURANCA[e.tipo]!.map((a) => '  ' + a)] : [];
+      return [`Console de ${e.nome} (${e.modelo}):`, ...c.ajuda.map((a) => '  ' + a), ...rede.map((a) => '  ' + a), ...qos.map((a) => '  ' + a), ...transp.map((a) => '  ' + a), ...apl.map((a) => '  ' + a), ...seg.map((a) => '  ' + a), '  sair'];
     }
     const grupos: [Comando['grupo'], string][] = [
       ['geral', 'GERAIS'],
@@ -1549,6 +1553,8 @@ export class Terminal {
       const c = CONSOLES[e.tipo];
       const saida = (c?.fn ?? CONSOLE_GENERICO)(this, e, cmd, args);
       if (saida) return saida;
+      const extra = comandosAplicacao(this.mundo, e, cmd, args) ?? comandosSeguranca(this.mundo, e, cmd, args);
+      if (extra) return extra;
       if (CAMPO[cmd] && ['objetivo', 'manual', 'chamado', 'dica', 'perguntas', 'responder'].includes(cmd)) return CAMPO[cmd]!.rodar(this, args);
       return [`${e.nome}: comando "${cmdBruto}" desconhecido. "?" lista o que eu sei.`];
     }

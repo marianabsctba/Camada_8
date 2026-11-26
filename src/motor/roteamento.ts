@@ -38,6 +38,7 @@ import {
 import { ipTexto, lerCidr, lerIp, type Cidr } from './util';
 import { decidir, fluxosDe, temFluxos, prefixoQueContem, instalarRegra, type DecisaoFluxo } from './sdn';
 import { byteServico, nomeDscp } from './qos';
+import { avaliarFirewall, casaPrefixoTxt, firewallDe, idsDe, inspecionarPacote, SOBRA_ESP, tuneisDe, type InfoPacote, type TunelVpn } from './filtro';
 
 export interface OpcoesPing {
   /** Bytes de dados do ICMP (o ping comum manda 56). */
@@ -247,6 +248,7 @@ function natIda(r: Equipamento, p: Pacote): string | null {
   }
   p.origem = ext.cidr.endereco;
   p.icmp.id = t.portaExterna;
+  if (p.l4) p.l4.origem = t.portaExterna;
   return `${r.nome} (NAT): origem ${ipInt}:${t.portaInterna} vira ${ipExt}:${t.portaExterna}`;
 }
 
@@ -258,6 +260,7 @@ function natVolta(r: Equipamento, p: Pacote): string | null {
   if (!t) return null;
   p.destino = lerIp(t.ipInterno)!;
   p.icmp.id = t.portaInterna;
+  if (p.l4) p.l4.destino = t.portaInterna;
   return `${r.nome} (NAT): destino ${t.ipExterno}:${t.portaExterna} volta a ser ${t.ipInterno}:${t.portaInterna}`;
 }
 
@@ -278,6 +281,10 @@ export interface Pacote {
   erro?: boolean;
   /** Byte de serviço diferenciado (DSCP nos 6 bits de cima, ECN nos 2 de baixo). Ausente: 0, nunca mexido. */
   tos?: number;
+  /** Portas e flags TCP de verdade (a camada de transporte preenche); o firewall e o IDS olham daqui. */
+  l4?: { origem: number; destino: number; flags?: string };
+  /** Dentro de um túnel IPsec: o cabeçalho original, guardado debaixo do ESP. */
+  tunel?: { origem: number; destino: number; protocolo: number; ttl: number; nome: string; de: string };
 }
 
 export interface Viagem {
@@ -297,10 +304,69 @@ export interface Viagem {
   icmpErro?: { de: number; nome: string; tipo: number; codigo: number; mtu?: number; viagem: Viagem };
   /** Cada trecho de enlace atravessado (de quem sai, por qual porta): a camada de transporte acha o gargalo por aqui. */
   trechos?: { de: string; porta: string; mbps: number; atrasoS: number; ber: number }[];
+  /** Todo equipamento por onde o quadro passou (hubs e switches incluídos): quem pode ter ouvido. */
+  nos?: string[];
+  /** Os que viram o pacote só por fora, cifrado dentro do túnel IPsec. */
+  nosTunel?: string[];
+  /** Quem recebeu o quadro por causa de um cache ARP envenenado. */
+  interceptadoPor?: string[];
+  /** Roteador cujo firewall, IPS ou filtro antifalsificação descartou o pacote. */
+  bloqueadoPor?: string;
+  /** Alertas de IDS que o pacote disparou no caminho. */
+  alertas?: string[];
 }
 
 function clonar(p: Pacote): Pacote {
-  return { ...p, fragmentos: p.fragmentos.map((f) => ({ ...f })), icmp: { ...p.icmp } };
+  return { ...p, fragmentos: p.fragmentos.map((f) => ({ ...f })), icmp: { ...p.icmp }, l4: p.l4 ? { ...p.l4 } : undefined, tunel: p.tunel ? { ...p.tunel } : undefined };
+}
+
+/* ---------- Segurança no caminho (só age com firewall, IDS, filtro antifalsificação, VPN ou ARP falso configurados) ---------- */
+
+function infoDe(p: Pacote): InfoPacote {
+  return { origem: p.origem, destino: p.destino, protocolo: p.protocolo, portaOrigem: p.l4?.origem, portaDestino: p.l4?.destino, flags: p.l4?.flags, icmpTipo: p.protocolo === 1 ? p.icmp.tipo : undefined, icmpId: p.icmp.id, erro: p.erro };
+}
+
+/** Firewall, filtro antifalsificação (BCP 38) e IDS/IPS do roteador. Devolve o motivo do descarte, ou null. */
+function filtrar(e: Equipamento, p: Pacote, entrada: string | undefined, v: Viagem): string | null {
+  if (e.s.antiFalsificacao && entrada && !p.tunel) {
+    const volta = escolherRota(e, p.origem);
+    if (!volta || volta.porta !== entrada) {
+      v.eventos.push(`${e.nome} (antifalsificação): origem ${ipTexto(p.origem)} não poderia entrar pela ${entrada}`);
+      return `${e.nome} descartou: a origem ${ipTexto(p.origem)} chegou pela ${entrada}, mas a rota de volta para ela sai por ${volta?.porta ?? 'lugar nenhum'}. Endereço falsificado (filtro de entrada, BCP 38).`;
+    }
+  }
+  const info = infoDe(p);
+  const ids = idsDe(e);
+  if (ids) {
+    const d = inspecionarPacote(ids, info);
+    if (d.texto) (v.alertas ??= []).push(`${e.nome}: ${d.texto}`);
+    if (d.bloquear) return `${e.nome} descartou: ${d.texto}`;
+  }
+  const fw = firewallDe(e);
+  if (fw) {
+    const d = avaliarFirewall(fw, info, entrada);
+    if (d.acao === 'negar') {
+      v.eventos.push(`${e.nome} (firewall): ${d.texto}`);
+      return `${e.nome} descartou no firewall: ${d.texto}.`;
+    }
+  }
+  return null;
+}
+
+/** Túnel deste roteador que leva o destino, com a outra ponta configurada igual (o IKE só fecha assim). */
+function tunelPara(m: Mundo, e: Equipamento, p: Pacote): { t: TunelVpn; ipLocal: number; ipPar: number } | null {
+  const tab = tuneisDe(e);
+  if (!tab) return null;
+  for (const t of Object.values(tab)) {
+    if (!casaPrefixoTxt(t.remota, p.destino) || !casaPrefixoTxt(t.local, p.origem)) continue;
+    const ipPar = lerIp(t.par);
+    const outro = ipPar === null ? undefined : donoDoIp(m, ipPar);
+    if (!outro || ipPar === null) continue;
+    const espelho = Object.values(tuneisDe(outro.e) ?? {}).find((x) => x.segredo === t.segredo && x.local === t.remota && x.remota === t.local && interfacesL3(e).some((i) => ipTexto(i.cidr.endereco) === x.par));
+    if (!espelho) continue;
+    return { t, ipLocal: lerIp(espelho.par)!, ipPar };
+  }
+  return null;
 }
 
 export function novoPacote(m: Mundo, o: { origem: number; destino: number; ttl: number; dados: number; df?: boolean; icmp: Pacote['icmp']; erro?: boolean }): Pacote {
@@ -443,10 +509,28 @@ function fluxoNoSwitch(m: Mundo, sw: Equipamento, p: Pacote, entrada: string, sa
  */
 export function viajar(m: Mundo, inicio: string, p0: Pacote): Viagem {
   const p = clonar(p0);
-  const v: Viagem = { entregue: false, onde: inicio, tempo: 0, pacote: p, roteadores: [], eventos: [], ultimoMac: '' };
+  const v: Viagem = { entregue: false, onde: inicio, tempo: 0, pacote: p, roteadores: [], eventos: [], ultimoMac: '', nos: [inicio] };
   let atual = m.equipamentos.get(inicio)!;
   let entrada: string | undefined;
   for (let passo = 0; passo < 300; passo++) {
+    // Fim do túnel IPsec: a outra ponta tira o ESP, confere e devolve o cabeçalho original.
+    if (p.tunel && p.protocolo === 50 && interfacesL3(atual).some((i) => i.cidr.endereco === p.destino)) {
+      const t = tuneisDe(atual) ? Object.values(tuneisDe(atual)!).find((x) => lerIp(x.par) === p.origem) : undefined;
+      if (!t) {
+        v.onde = atual.nome;
+        v.falha = `${atual.nome} recebeu ESP de ${ipTexto(p.origem)} sem túnel configurado para ele: descartado (não há chave para abrir).`;
+        return v;
+      }
+      t.contadores.decifrados++;
+      v.eventos.push(`${atual.nome} (VPN ${t.nome}): confere a integridade do ESP, decifra e devolve o pacote de ${ipTexto(p.tunel.origem)} para ${ipTexto(p.tunel.destino)}`);
+      p.origem = p.tunel.origem;
+      p.destino = p.tunel.destino;
+      p.protocolo = p.tunel.protocolo;
+      p.ttl = p.tunel.ttl;
+      p.tamanho -= SOBRA_ESP;
+      p.fragmentos = [{ identificacao: p.identificacao, deslocamento: 0, dados: p.tamanho - CABECALHO_IPV4, mf: false }];
+      delete p.tunel;
+    }
     if (interfacesL3(atual).some((i) => i.cidr.endereco === p.destino)) {
       const n = nat(atual);
       const traduziu = n && entrada === n.externa ? natVolta(atual, p) : null;
@@ -485,9 +569,43 @@ export function viajar(m: Mundo, inicio: string, p0: Pacote): Viagem {
       }
       return erroIcmp(m, v, atual, entrada, p, 3, 0);
     }
+    if (passo > 0 && (atual.s.firewall || atual.s.ids || atual.s.antiFalsificacao)) {
+      const motivo = filtrar(atual, p, entrada, v);
+      if (motivo) {
+        v.onde = atual.nome;
+        v.falha = motivo;
+        v.bloqueadoPor = atual.nome;
+        return v;
+      }
+    }
+    // Entrada do túnel IPsec: o pacote inteiro vira carga cifrada de um pacote novo, de uma ponta à outra.
+    if (atual.s.vpn && !p.tunel && ehRoteador(atual)) {
+      const tun = tunelPara(m, atual, p);
+      if (tun) {
+        const rotaFora = escolherRota(atual, tun.ipPar);
+        const mtuFora = rotaFora?.porta ? (acharPorta(m, { equip: atual.nome, porta: rotaFora.porta }).mtu ?? MTU_PADRAO) : MTU_PADRAO;
+        if (p.df && p.tamanho + SOBRA_ESP > mtuFora) {
+          v.eventos.push(`${atual.nome} (VPN ${tun.t.nome}): ${p.tamanho} bytes mais ${SOBRA_ESP} do ESP passam do MTU ${mtuFora}, e o DF não deixa fragmentar`);
+          return erroIcmp(m, v, atual, entrada, p, 3, 4, mtuFora - SOBRA_ESP);
+        }
+        tun.t.contadores.cifrados++;
+        tun.t.ultimo = { origem: ipTexto(p.origem), destino: ipTexto(p.destino), protocolo: p.protocolo, tamanho: p.tamanho, externo: `${ipTexto(tun.ipLocal)} > ${ipTexto(tun.ipPar)}` };
+        v.eventos.push(`${atual.nome} (VPN ${tun.t.nome}): encapsula em ESP (SPI ${tun.t.spi}) de ${ipTexto(tun.ipLocal)} para ${ipTexto(tun.ipPar)}; ${p.tamanho} bytes viram ${p.tamanho + SOBRA_ESP}, conteúdo cifrado`);
+        p.tunel = { origem: p.origem, destino: p.destino, protocolo: p.protocolo, ttl: p.ttl, nome: tun.t.nome, de: atual.nome };
+        p.origem = tun.ipLocal;
+        p.destino = tun.ipPar;
+        p.protocolo = 50;
+        p.ttl = atual.ttl;
+        p.tamanho += SOBRA_ESP;
+        p.fragmentos = [{ identificacao: p.identificacao, deslocamento: 0, dados: p.tamanho - CABECALHO_IPV4, mf: false }];
+        if (!rotaFora?.porta) return erroIcmp(m, v, atual, entrada, p, 3, 0);
+        rota = rotaFora;
+      }
+    }
+    if (!rota.porta) return erroIcmp(m, v, atual, entrada, p, 3, 0);
     const prox = rota.via ?? p.destino;
     const n = nat(atual);
-    if (n && passo > 0 && entrada && n.internas.includes(entrada) && rota.porta === n.externa) {
+    if (n && passo > 0 && entrada && n.internas.includes(entrada) && rota.porta === n.externa && !p.tunel) {
       const t = natIda(atual, p);
       if (t) v.eventos.push(t);
     }
@@ -502,7 +620,22 @@ export function viajar(m: Mundo, inicio: string, p0: Pacote): Viagem {
     }
     // ARP: o pedido vai em broadcast e a resposta volta direto. Só até o próximo salto, nunca até o destino final.
     const arp = (atual.s.arp ??= {}) as Record<number, string>;
-    if (arp[prox] !== viz.e.mac) {
+    // Cache ARP envenenado: o quadro vai para o MAC de quem mentiu, que lê e (se quiser) repassa ao dono verdadeiro.
+    const mentiroso = (atual.s.arpFalso as Record<number, string> | undefined)?.[prox];
+    const atk = mentiroso && mentiroso !== viz.e.nome ? m.equipamentos.get(mentiroso) : undefined;
+    const ateAtk = atk ? caminho(m, atual.nome, atk.nome, { portaOrigem: rota.porta }) : null;
+    if (atk && ateAtk) {
+      arp[prox] = atk.mac;
+      v.eventos.push(`${atual.nome} manda o quadro para ${ipTexto(prox)} ao MAC ${atk.mac} (cache ARP envenenado): quem recebe é ${atk.nome}`);
+      (v.interceptadoPor ??= []).push(atk.nome);
+      for (const s of ateAtk) v.nos!.push(s.para);
+      if (!atk.s.repassar) {
+        v.onde = atk.nome;
+        v.falha = `O quadro foi para ${atk.nome}, que se passou por ${ipTexto(prox)} e não repassou nada.`;
+        return v;
+      }
+      v.eventos.push(`${atk.nome} copia o pacote e repassa ao dono verdadeiro de ${ipTexto(prox)}, ${viz.e.nome}: homem no meio`);
+    } else if (arp[prox] !== viz.e.mac) {
       aprenderNoCaminho(m, viz.saltos, atual.mac, BROADCAST);
       aprenderNoCaminho(m, [...viz.saltos].reverse().map((s) => ({ ...s, de: s.para, para: s.de })), viz.e.mac, atual.mac);
       arp[prox] = viz.e.mac;
@@ -544,6 +677,8 @@ export function viajar(m: Mundo, inicio: string, p0: Pacote): Viagem {
       }
       portaRx.contadores.rx++;
       aprenderNoSalto(m, s, atual.mac, viz.e.mac);
+      v.nos!.push(s.para);
+      if (p.tunel) (v.nosTunel ??= []).push(s.para);
     }
     if (viz.saltos.length) {
       (v.trechos ??= []).push({

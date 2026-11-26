@@ -128,39 +128,39 @@ const ATO4: Linha[] = [
 ];
 
 const ATO5: Linha[] = [
-  ['6.1', 'Soquetes', ['servidores']],
-  ['6.2.1 a 6.2.3', 'Aperto de mão', ['servidores-2']],
-  ['6.2.4 a 6.2.6', 'Fluxo e falhas', ['servidores-3']],
-  ['6.3', 'Dividir a banda com justiça', ['servidores-4']],
-  ['6.4', 'UDP e tempo real', ['radio-web']],
-  ['6.5.1 a 6.5.6', 'TCP por dentro', ['hospital-video']],
-  ['6.5.7 e 6.5.8', 'Estados e janela do TCP', ['hospital-video-2']],
-  ['6.5.9', 'Timers do TCP', ['fazenda-video']],
-  ['6.5.10 e 6.5.11', 'Partida lenta e CUBIC', ['servidores-5']],
-  ['6.6', 'QUIC e BBR', ['servidores-6']],
-  ['6.7', 'Medir de verdade', ['servidores-7']],
+  ['6.1', 'Soquetes', ['servidores'], 101],
+  ['6.2.1 a 6.2.3', 'Aperto de mão', ['servidores-2'], 102],
+  ['6.2.4 a 6.2.6', 'Fluxo e falhas', ['servidores-3'], 103],
+  ['6.3', 'Dividir a banda com justiça', ['servidores-4'], 104],
+  ['6.4', 'UDP e tempo real', ['radio-web'], 105],
+  ['6.5.1 a 6.5.6', 'TCP por dentro', ['hospital-video'], 106],
+  ['6.5.7 e 6.5.8', 'Estados e janela do TCP', ['hospital-video-2'], 107],
+  ['6.5.9', 'Timers do TCP', ['fazenda-video'], 108],
+  ['6.5.10 e 6.5.11', 'Partida lenta e CUBIC', ['servidores-5'], 109],
+  ['6.6', 'QUIC e BBR', ['servidores-6'], 110],
+  ['6.7', 'Medir de verdade', ['servidores-7'], 111],
 ];
 
 const ATO6: Linha[] = [
-  ['7.1.1 a 7.1.4', 'Nomes', ['dns']],
-  ['7.1.5 a 7.1.8', 'Resolver', ['dns-2']],
-  ['7.2', 'Correio', ['correio']],
-  ['7.3.1 a 7.3.3', 'A teia', ['site-prefeitura']],
-  ['7.3.4 e 7.3.5', 'HTTP e HTTPS', ['site-prefeitura-2']],
-  ['7.4', 'Ao vivo', ['estadio']],
-  ['7.5.1 a 7.5.3', 'Perto de quem assiste', ['estadio-2']],
-  ['7.5.4 e 7.5.5', 'De par em par', ['estadio-3']],
+  ['7.1.1 a 7.1.4', 'Nomes', ['dns'], 112],
+  ['7.1.5 a 7.1.8', 'Resolver', ['dns-2'], 113],
+  ['7.2', 'Correio', ['correio'], 114],
+  ['7.3.1 a 7.3.3', 'A teia', ['site-prefeitura'], 115],
+  ['7.3.4 e 7.3.5', 'HTTP e HTTPS', ['site-prefeitura-2'], 116],
+  ['7.4', 'Ao vivo', ['estadio'], 117],
+  ['7.5.1 a 7.5.3', 'Perto de quem assiste', ['estadio-2'], 118],
+  ['7.5.4 e 7.5.5', 'De par em par', ['estadio-3'], 119],
 ];
 
 const ATO7: Linha[] = [
-  ['8.1 e 8.2', 'Anatomia de um ataque', ['soc']],
-  ['8.3', 'Firewall', ['soc-2']],
-  ['8.4 e 8.5', 'Segredos', ['soc-3']],
-  ['8.6 e 8.7', 'Chave pública e assinatura', ['soc-4']],
-  ['8.8 e 8.9', 'Certificados e autenticação', ['soc-5']],
-  ['8.10', 'VPN e Wi-Fi seguro', ['soc-6']],
-  ['8.11 e 8.12', 'Correio e web seguros', ['soc-7']],
-  ['8.13', 'O ponto de troca', ['ix']],
+  ['8.1 e 8.2', 'Anatomia de um ataque', ['soc'], 120],
+  ['8.3', 'Firewall', ['soc-2'], 121],
+  ['8.4 e 8.5', 'Segredos', ['soc-3'], 122],
+  ['8.6 e 8.7', 'Chave pública e assinatura', ['soc-4'], 123],
+  ['8.8 e 8.9', 'Certificados e autenticação', ['soc-5'], 124],
+  ['8.10', 'VPN e Wi-Fi seguro', ['soc-6'], 125],
+  ['8.11 e 8.12', 'Correio e web seguros', ['soc-7'], 126],
+  ['8.13', 'O ponto de troca', ['ix'], 127],
 ];
 
 /**

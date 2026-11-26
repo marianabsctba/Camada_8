@@ -11,6 +11,8 @@ import { enlaceLocal } from './ip';
 import { interfacesL3, temCamadaRede } from './roteamento';
 import { temQos } from './cliQos';
 import { acoesTransporte, temTransporte } from './cliTransporte';
+import { acoesAplicacao, temAplicacao } from './cliAplicacao';
+import { acoesSeguranca, temSeguranca } from './cliSeguranca';
 
 export interface Opcao {
   valor: string;
@@ -410,6 +412,10 @@ function acoesConsole(m: Mundo, e: Equipamento): Acao[] {
 
 export function acoesEquip(m: Mundo, e: Equipamento): Acao[] {
   const a = acoesConsole(m, e);
+  // Camada de aplicação e segurança (atos 6 e 7): só aparecem quando o mundo usa (flags ou algo configurado).
+  const livre = e.tipo !== 'roteador' || (e.s.estado === 'ligado' && (!e.s.senhaRunning || e.s.logado));
+  if (livre && temAplicacao(m)) a.push(...acoesAplicacao(m, e));
+  if (livre && temSeguranca(m)) a.push(...acoesSeguranca(m, e));
   if (e.antena) {
     a.push({
       id: 'antena',
